@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from ratchet.improve.admit import report_digest
+from ratchet.improve.evaluate import EvalReport
 from ratchet.store import LineageNode
 from ratchet.types import Harness
 
@@ -49,21 +50,10 @@ METRIC_LABEL = "descendant admission yield"
 Split = Literal["train", "heldout"]
 Status = Literal["seed", "admitted", "rejected", "unjudged", "unknown"]
 
-# The keys `EvalReport.to_payload()` writes. The loop adds context keys (generation, role, harness, candidate)
-# and stores add their own; only these keys enter the digest a decision names.
-EVAL_PAYLOAD_KEYS = (
-    "type",
-    "harness_version",
-    "train",
-    "heldout",
-    "errors",
-    "fresh_calls",
-    "cached_calls",
-    "modes",
-    "cost",
-    "wall_s",
-    "results",
-)
+# The keys `EvalReport.to_payload()` writes, taken from it so the two cannot drift apart. The loop adds
+# context keys (generation, role, harness, candidate) and stores add their own; only these keys enter the
+# digest a decision names.
+EVAL_PAYLOAD_KEYS = tuple(EvalReport("", [], 0.0).to_payload())
 _NAMED_REPORTS = ("parent_run_1", "parent_run_2", "candidate_run", "candidate_confirm_run")
 
 
