@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 
 import pytest
-from tool_sandbox.common.execution_context import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.execution_context import (
     ExecutionContext,
     get_current_context,
 )

@@ -13,7 +13,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from tool_sandbox.common.execution_context import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.execution_context import (
     ExecutionContext,
     get_current_context,
     set_current_context,

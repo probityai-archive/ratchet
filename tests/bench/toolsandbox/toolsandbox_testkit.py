@@ -14,6 +14,8 @@ from ratchet.bench.toolsandbox.cases import scenarios
 from ratchet.bench.toolsandbox.replay import END, ReplayUser
 from ratchet.bench.toolsandbox.world import ToolSandboxWorld, UserFactory
 
+MISSING_KEY = "PermissionError: Please provide 'RAPID_API_KEY' in environment variable."
+
 
 def user_factory(replies: Sequence[str] = (END,)) -> UserFactory:
     return lambda: ReplayUser(replies)

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
-from tool_sandbox.common.evaluation import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.evaluation import (
     Milestone,
     SnapshotConstraint,
     snapshot_similarity,
 )
-from tool_sandbox.common.execution_context import DatabaseNamespace  # type: ignore[import-untyped]
+from tool_sandbox.common.execution_context import DatabaseNamespace
 from toolsandbox_testkit import make_world
 
 from ratchet.bench.toolsandbox.cases import scenarios

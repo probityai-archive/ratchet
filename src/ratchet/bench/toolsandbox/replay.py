@@ -20,9 +20,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from tool_sandbox.common.execution_context import RoleType  # type: ignore[import-untyped]  # no py.typed
-from tool_sandbox.common.message_conversion import Message  # type: ignore[import-untyped]  # no py.typed
-from tool_sandbox.roles.base_role import BaseRole  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.execution_context import RoleType
+from tool_sandbox.common.message_conversion import Message
+from tool_sandbox.roles.base_role import BaseRole
 
 from ratchet.bench.toolsandbox.cases import scenarios
 from ratchet.bench.toolsandbox.grading import reasons_for
@@ -34,7 +34,7 @@ END = ""  # a reply of "" ends the conversation
 CASE_PREFIX = "toolsandbox-"
 
 
-class ReplayUser(BaseRole):  # type: ignore[misc]  # base class is untyped
+class ReplayUser(BaseRole):
     """The benchmark's user role answering from a list. A reply of `END` ends the conversation with the
     user's own `end_conversation` tool, and so does an exhausted list, so a replay always terminates."""
 

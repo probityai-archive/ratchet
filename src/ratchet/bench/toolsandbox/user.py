@@ -8,8 +8,9 @@ reply does not stop the other worlds in the pool.
 
 Two things a non-OpenAI server does differently are absorbed here. Tool-call ids that are not Python names
 (vLLM's `chatcmpl-tool-...`) are rewritten, because the benchmark pastes the id into the code it executes.
-A reply with neither text nor a tool call is retried like a dropped connection, because the stock class would
-stop on an assertion.
+A reply with neither text nor a tool call, or one that calls a tool the user does not have, is retried like a
+dropped connection, because the stock class would stop on an assertion or a KeyError and lose the scenario to
+the simulator's slip.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from typing import Any
 import httpx
 import openai
 from openai import OpenAI
-from tool_sandbox.roles.openai_api_user import OpenAIAPIUser  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.roles.openai_api_user import OpenAIAPIUser
 
 from ratchet.bench.toolsandbox.gate import GATE
 
@@ -40,7 +41,11 @@ class EmptyReply(Exception):
     """The endpoint answered with no text and no tool call."""
 
 
-RETRYABLE: tuple[type[BaseException], ...] = (*TRANSIENT, EmptyReply)
+class UnknownTool(Exception):
+    """The endpoint's reply calls a tool the simulated user does not have."""
+
+
+RETRYABLE: tuple[type[BaseException], ...] = (*TRANSIENT, EmptyReply, UnknownTool)
 
 
 def python_name(raw: str) -> str:
@@ -73,7 +78,14 @@ def with_retries(
     raise AssertionError("unreachable")  # pragma: no cover - the loop returns or raises
 
 
-class EndpointUser(OpenAIAPIUser):  # type: ignore[misc]  # base class is untyped
+def _tool_names(openai_tools: Any) -> set[str] | None:
+    """Names of the tools offered in a request, or None when the request offered none."""
+    if not isinstance(openai_tools, list):
+        return None
+    return {str(t["function"]["name"]) for t in openai_tools}
+
+
+class EndpointUser(OpenAIAPIUser):
     """The benchmark's simulated user, answering from `model` at `base_url`."""
 
     def __init__(
@@ -106,7 +118,10 @@ class EndpointUser(OpenAIAPIUser):  # type: ignore[misc]  # base class is untype
                 )
             message = response.choices[0].message
             if message.tool_calls:
+                offered = _tool_names(openai_tools)
                 for call in message.tool_calls:
+                    if offered is not None and call.function.name not in offered:
+                        raise UnknownTool(f"the user simulator's model called {call.function.name!r}")
                     call.id = python_name(call.id)
             elif not message.content:
                 raise EmptyReply("the user simulator's model answered with neither text nor a tool call")

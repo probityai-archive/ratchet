@@ -20,13 +20,14 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import Any, cast
 
-from tool_sandbox.common.execution_context import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.execution_context import (
+    TOOL_AUGMENTATION_TYPE,
     DatabaseNamespace,
     ExecutionContext,
     RoleType,
     ScenarioCategories,
 )
-from tool_sandbox.roles.base_role import BaseRole  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.roles.base_role import BaseRole
 
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ChatModel
@@ -64,11 +65,13 @@ def agent_prompt() -> str:
 def agent_tool_names() -> list[str]:
     """Every tool name an agent can be shown in any scenario: the benchmark's names and its scrambled ones."""
 
-    class _Agent(BaseRole):  # type: ignore[misc]  # base class is untyped
+    class _Agent(BaseRole):
         role_type = RoleType.AGENT
 
     names: set[str] = set()
-    for augmentation in ([], [ScenarioCategories.TOOL_NAME_SCRAMBLED]):
+    plain: list[TOOL_AUGMENTATION_TYPE] = []
+    scrambled: list[TOOL_AUGMENTATION_TYPE] = [ScenarioCategories.TOOL_NAME_SCRAMBLED]
+    for augmentation in (plain, scrambled):
         with GATE.held(ExecutionContext(tool_augmentation_list=augmentation)):
             names |= set(_Agent.get_available_tools())
     return sorted(names)

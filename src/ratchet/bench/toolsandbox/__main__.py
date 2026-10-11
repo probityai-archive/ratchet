@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import random
+import subprocess
 import sys
 import threading
 import time
@@ -70,6 +71,17 @@ def load_harness(spec: str, root: Path) -> Harness:
             if raw["version"] == spec:
                 return harness_from(raw)
     raise SystemExit(f"no harness {spec!r} recorded under {root}")
+
+
+def ratchet_commit() -> str | None:
+    """The commit of the checkout this run came from (a box's is a snapshot commit), if git answers."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() or None if out.returncode == 0 else None
 
 
 def parse_shard(text: str) -> tuple[int, int]:
@@ -175,6 +187,7 @@ def cmd_trial(args: argparse.Namespace) -> int:
         "user_endpoint": args.user_base_url or base_url,
         "temperature": args.temperature,
         "tool_sandbox_commit": tool_sandbox_commit(),
+        "ratchet_commit": ratchet_commit(),
         "harness": harness.version,
         "split": args.split,
         "trial": args.trial,
@@ -241,6 +254,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "improver_model": args.improver_model,
         "temperature": args.temperature,
         "tool_sandbox_commit": tool_sandbox_commit(),
+        "ratchet_commit": ratchet_commit(),
         "workers": args.workers,
         "cases": len(cases),
         "split_record": record,

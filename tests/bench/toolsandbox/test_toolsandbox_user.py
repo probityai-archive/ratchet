@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import openai
 import pytest
-from tool_sandbox.common.execution_context import ExecutionContext  # type: ignore[import-untyped]
+from tool_sandbox.common.execution_context import ExecutionContext
 from toolsandbox_testkit import chat_completion, mock_client
 
 from ratchet.bench.toolsandbox.gate import GATE
@@ -17,6 +17,8 @@ from ratchet.bench.toolsandbox.user import (
     python_name,
     with_retries,
 )
+
+END_TOOL = {"type": "function", "function": {"name": "end_conversation", "parameters": {}}}
 
 
 def _json(body: dict[str, Any], status: int = 200) -> httpx.Response:
@@ -134,7 +136,7 @@ def test_a_tool_call_id_that_is_not_a_python_name_is_rewritten() -> None:
         return _json(chat_completion(None, [("chatcmpl-tool-9f", "end_conversation", {})]))
 
     with GATE.held(ExecutionContext()):
-        response = _user(handler).model_inference([], [])
+        response = _user(handler).model_inference([], [END_TOOL])
     call = response.choices[0].message.tool_calls[0]
     assert call.id == "chatcmpl_tool_9f"
     assert call.function.name == "end_conversation"
@@ -184,3 +186,31 @@ def test_a_rate_limit_is_retried_and_a_bad_request_is_not() -> None:
 
     with GATE.held(ExecutionContext()), pytest.raises(openai.BadRequestError):
         _user(refused).model_inference([], openai.NOT_GIVEN)
+
+
+def test_a_reply_that_calls_a_tool_the_user_does_not_have_is_retried() -> None:
+    replies = [
+        chat_completion(None, [("c1", "get_contacts", {})]),
+        chat_completion(None, [("c2", "end_conversation", {})]),
+    ]
+    sleeps: list[float] = []
+    tools = [END_TOOL]
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return _json(replies.pop(0))
+
+    user = _user(handler)
+    user.sleep = sleeps.append
+    with GATE.held(ExecutionContext()):
+        response = user.model_inference([], tools)
+    assert response.choices[0].message.tool_calls[0].function.name == "end_conversation"
+    assert len(sleeps) == 1
+
+
+def test_without_an_offered_tool_list_any_tool_call_is_left_to_the_benchmark() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return _json(chat_completion(None, [("c1", "anything", {})]))
+
+    with GATE.held(ExecutionContext()):
+        response = _user(handler).model_inference([], openai.NOT_GIVEN)
+    assert response.choices[0].message.tool_calls[0].function.name == "anything"

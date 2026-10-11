@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from toolsandbox_testkit import MISSING_KEY
 
 from ratchet.bench.toolsandbox.cases import ToolSandboxCase, build_cases, scenarios
-
-MISSING_KEY = "PermissionError: Please provide 'RAPID_API_KEY' in environment variable."
 
 
 @pytest.fixture(scope="session")

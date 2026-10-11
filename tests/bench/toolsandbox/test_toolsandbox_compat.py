@@ -20,6 +20,6 @@ def test_the_stand_in_answers_the_subclass_test_the_benchmark_makes() -> None:
 
 
 def test_the_benchmark_imports_under_warnings_as_errors() -> None:
-    import tool_sandbox.common.tool_conversion as conversion  # type: ignore[import-untyped]
+    import tool_sandbox.common.tool_conversion as conversion
 
-    assert conversion.BaseModel is sys.modules["langchain_core.pydantic_v1"].BaseModel
+    assert vars(conversion)["BaseModel"] is sys.modules["langchain_core.pydantic_v1"].BaseModel

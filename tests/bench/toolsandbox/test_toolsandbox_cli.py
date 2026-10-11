@@ -290,3 +290,24 @@ def test_the_user_simulator_can_use_its_own_endpoint(
     config = json.loads(next(tmp_path.rglob("all-trial-1/config.json")).read_text(encoding="utf-8"))
     assert config["agent_endpoint"] == "http://endpoint.test/v1"
     assert config["user_endpoint"] == "http://users.test/v1"
+
+
+def test_the_run_records_the_commit_it_came_from(offline: None, tmp_path: Path) -> None:
+    assert cli.main(["--out", str(tmp_path), "trial", "--limit", "1", "--workers", "1"]) == 0
+    config = json.loads(next(tmp_path.rglob("all-trial-1/config.json")).read_text(encoding="utf-8"))
+    assert config["ratchet_commit"] == cli.ratchet_commit()
+    assert config["ratchet_commit"] and len(config["ratchet_commit"]) == 40
+
+
+def test_the_commit_is_none_when_git_does_not_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    def fails(*_a: Any, **_k: Any) -> Any:
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(subprocess, "run", fails)
+    assert cli.ratchet_commit() is None
+    monkeypatch.setattr(
+        subprocess, "run", lambda *_a, **_k: subprocess.CompletedProcess([], 128, stdout="", stderr="no repo")
+    )
+    assert cli.ratchet_commit() is None

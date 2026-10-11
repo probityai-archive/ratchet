@@ -5,7 +5,7 @@ import threading
 from typing import Any
 
 import pytest
-from tool_sandbox.common.execution_context import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.execution_context import (
     DatabaseNamespace,
     RoleType,
 )

@@ -5,7 +5,7 @@ import subprocess
 from typing import Any
 
 import pytest
-from conftest import MISSING_KEY
+from toolsandbox_testkit import MISSING_KEY
 
 from ratchet.bench.toolsandbox import cases as cases_module
 from ratchet.bench.toolsandbox.cases import (

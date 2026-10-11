@@ -18,12 +18,12 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from tool_sandbox.common.evaluation import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.evaluation import (
     Evaluation,
     EvaluationResult,
     guardrail_similarity,
 )
-from tool_sandbox.common.execution_context import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.execution_context import (
     DatabaseNamespace,
     ExecutionContext,
 )

@@ -31,22 +31,22 @@ from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
     Function,
 )
-from tool_sandbox.common.execution_context import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.execution_context import (
     DatabaseNamespace,
     ExecutionContext,
     RoleType,
     get_current_context,
 )
-from tool_sandbox.common.message_conversion import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.message_conversion import (
     Message,
     openai_tool_call_to_python_code,
 )
-from tool_sandbox.common.scenario import Scenario  # type: ignore[import-untyped]  # no py.typed
-from tool_sandbox.common.tool_conversion import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.scenario import Scenario
+from tool_sandbox.common.tool_conversion import (
     convert_to_openai_tools,
 )
-from tool_sandbox.roles.base_role import BaseRole  # type: ignore[import-untyped]  # no py.typed
-from tool_sandbox.roles.execution_environment import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.roles.base_role import BaseRole
+from tool_sandbox.roles.execution_environment import (
     ExecutionEnvironment,
 )
 
@@ -78,7 +78,7 @@ ENDED = "the conversation has ended"
 UserFactory = Callable[[], BaseRole]
 
 
-class _AgentRole(BaseRole):  # type: ignore[misc]  # base class is untyped
+class _AgentRole(BaseRole):
     """Stands for the agent only to ask the benchmark which tools the agent is allowed to see."""
 
     role_type = RoleType.AGENT

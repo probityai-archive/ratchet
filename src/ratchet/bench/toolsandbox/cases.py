@@ -26,17 +26,17 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
-from tool_sandbox.common.execution_context import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.execution_context import (
     ExecutionContext,
     ScenarioCategories,
 )
-from tool_sandbox.common.scenario import Scenario  # type: ignore[import-untyped]  # no py.typed
-from tool_sandbox.common.tool_discovery import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.common.scenario import Scenario
+from tool_sandbox.common.tool_discovery import (
     ToolBackend,
     get_all_tools,
 )
-from tool_sandbox.scenarios import named_scenarios  # type: ignore[import-untyped]  # no py.typed
-from tool_sandbox.tools.rapid_api_search_tools import (  # type: ignore[import-untyped]  # no py.typed
+from tool_sandbox.scenarios import named_scenarios
+from tool_sandbox.tools.rapid_api_search_tools import (
     rapid_api_get_request,
 )
 
