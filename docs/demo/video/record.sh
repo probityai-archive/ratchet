@@ -5,8 +5,8 @@
 #   docs/demo/video/record.sh --test               pipeline test on steps.test.toml, banner says TEST
 #   docs/demo/video/record.sh --steps FILE --ids FILE --format 169|45|both --out DIR
 #
-# Order: resolve placeholders (refuses if any is unresolved) -> record each format in a headless
-# terminal of the right size -> render -> check. POSIX sh.
+# Order: derive ids from Atlas (stops if a value does not exist yet) -> resolve placeholders ->
+# record each format in a headless terminal of the right size -> render -> check. POSIX sh.
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -38,8 +38,14 @@ mkdir -p "$OUT"
 export PATH="$REPO/.venv/bin:$PATH"
 cd "$REPO"
 
+# A submission take derives every id and number fresh from Atlas and the stored results first. It stops
+# here, naming each missing value, when one does not exist yet.
+if [ "$TEST" -eq 0 ] && [ "$IDS" = "$HERE/../ids.env" ]; then
+    python3 "$HERE/../derive_ids.py"
+fi
+
 IDARG=""
-[ -z "$IDS" ] || { [ -f "$IDS" ] || { echo "no ids file at $IDS (copy ids.example.env and fill it from measured results)" >&2; exit 2; }; IDARG="--ids $IDS"; }
+[ -z "$IDS" ] || { [ -f "$IDS" ] || { echo "no ids file at $IDS: run docs/demo/derive_ids.py" >&2; exit 2; }; IDARG="--ids $IDS"; }
 # shellcheck disable=SC2086
 python3 "$HERE/drive.py" "$STEPS" $IDARG --check
 

@@ -1,7 +1,7 @@
 # The 3-minute live demo. `demo.py run <id>` runs `cmd` live; if it fails or times out it shows the stored
 # output of the last good run, labelled RECORDED with its timestamp. `snap` (when present) is the command
 # stored for that fallback (no animation delay, no waiting on a model).
-# {{NAME}} values come from docs/demo/ids.env.
+# {{NAME}} values are derived by docs/demo/derive_ids.py; none is typed.
 
 [[step]]
 id = "matrix"
@@ -98,3 +98,4 @@ window = "2:50-3:00"
 title = "Resume an interrupted case without repeating its committed side effect"
 cmd = "{{RESUME_CMD}}"
 timeout = 60
+side_effect = true   # resuming finishes the run, so a bare `demo.py snapshot` does not run it

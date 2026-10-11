@@ -2,7 +2,8 @@
 
     demo.py list                    the steps, their time windows and whether a recording exists
     demo.py preflight               check environment, store, placeholders and recording freshness
-    demo.py snapshot [ID ...]       run steps now and store their output (all steps when none named)
+    demo.py snapshot [ID ...]       run steps now and store their output (all steps when none named;
+                                    a step marked side_effect runs only when named)
     demo.py run ID                  run a step live; if it fails or times out, show the stored output
     demo.py recorded ID             show the stored output only
     demo.py follow FILE             print FILE as it grows (ctrl-c or 25 s ends it)
@@ -251,7 +252,7 @@ def preflight() -> int:
     check("RATCHET_MONGODB_URI set", bool(os.environ.get("RATCHET_MONGODB_URI")))
     for var in ("RATCHET_BASE_URL", "RATCHET_API_KEY", "RATCHET_MODEL", "RATCHET_IMPROVER_URI"):
         check(f"{var} set", bool(os.environ.get(var)))
-    check("docs/demo/ids.env exists", (HERE / "ids.env").exists())
+    check("docs/demo/ids.env exists (run docs/demo/derive_ids.py)", (HERE / "ids.env").exists())
     live = subprocess.run("ratchet show lineage", shell=True, capture_output=True, timeout=30, check=False)
     check("store answers `ratchet show lineage`", live.returncode == 0, f"rc={live.returncode}")
     now = time.time()
@@ -260,11 +261,15 @@ def preflight() -> int:
         rec = load_recording(s["id"])
         age = (now - rec[1]["captured_at"]) / 3600 if rec else None
         check(f"step {s['id']}: placeholders", not missing, ",".join(missing))
-        check(
-            f"step {s['id']}: fresh recording",
-            age is not None and age < FRESH_HOURS,
-            "none" if age is None else f"{age:.1f} h old",
-        )
+        fresh = age is not None and age < FRESH_HOURS
+        detail = "none" if age is None else f"{age:.1f} h old"
+        if s.get("side_effect") and not fresh:
+            print(
+                f"WARN  step {s['id']}: no fresh recording ({detail}); "
+                "it has a side effect, so a bare snapshot skips it"
+            )
+        else:
+            check(f"step {s['id']}: fresh recording", fresh, detail)
     print(f"\n{bad} failing check(s)")
     return 1 if bad else 0
 
@@ -281,7 +286,7 @@ def main(argv: list[str]) -> int:
         return preflight()
     if cmd == "snapshot":
         ids = load_ids()
-        chosen = [find(i) for i in rest] if rest else steps()
+        chosen = [find(i) for i in rest] if rest else [s for s in steps() if not s.get("side_effect")]
         results = [snapshot(s, ids) for s in chosen]
         return 0 if all(results) else 1
     if cmd in ("run", "recorded") and rest:

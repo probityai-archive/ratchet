@@ -2,7 +2,7 @@
 # Time plan: 0-8 failure, 8-23 replay matrix, 23-38 admission and authority,
 # 38-48 verification and lineage, 48-56 benchmarks and level 2, 56-60 closing line.
 # Tune `hold` after the first real take; check.py refuses anything over 60 s.
-# {{NAME}} values come from docs/demo/ids.env and must be copied from stored reports.
+# {{NAME}} values are derived by docs/demo/derive_ids.py from Atlas and the stored results; none is typed.
 
 [[step]]
 id = "failure"
@@ -19,7 +19,7 @@ cmd = "ratchet replay {{REJECTED_CAND}} {{CLEARED_CAND}}"
 cmd_45 = "ratchet replay {{REJECTED_CAND}} {{CLEARED_CAND}} --max-columns 2"
 hold = 7.0
 captions = [
-  { at = 0.0, text = "Ratchet replays each proposed guard over {{REPLAY_TRACES}} recorded traces in {{REPLAY_SECONDS}} s." },
+  { at = 0.0, text = "Ratchet replays each proposed guard over {{REPLAY_TRACES}} recorded traces, with no model call." },
   { at = 6.0, text = "One guard stops the bad retry but also blocks a legitimate refund: rejected." },
 ]
 
@@ -28,7 +28,7 @@ id = "admitted"
 cmd = "ratchet show decision {{ADMITTED_DECISION}}"
 hold = 6.0
 captions = [
-  { at = 0.0, text = "The other clears replay, then fresh held-out runs: parent {{PARENT_PASS}}, candidate {{CAND_PASS}} of {{HELDOUT_N}}." },
+  { at = 0.0, text = "The other clears replay, then fresh held-out runs: {{STABLE_RECOVERIES}} stable recoveries (needs {{STABLE_NEEDED}}), {{PROTECTED_N}} protected cases kept." },
 ]
 
 [[step]]
@@ -60,7 +60,7 @@ id = "benchmarks"
 cmd = "cat {{RESULTS_FILE}}"
 hold = 3.5
 captions = [
-  { at = 0.0, text = "Also run on AgentDojo ({{AGENTDOJO_N}} tasks) and tau-bench retail ({{TAU_N}} tasks)." },
+  { at = 0.0, text = "Also run on AgentDojo ({{AGENTDOJO_CASES}} held-out cases) and tau-bench retail ({{TAU_CASES}} held-out tasks)." },
 ]
 
 [[step]]
@@ -68,6 +68,6 @@ id = "level2"
 cmd = "cat {{LEVEL2_FILE}}"
 hold = 4.0
 captions = [
-  { at = 0.0, text = "The improver's own instructions face the same tests. Result: {{LEVEL2_RESULT}}." },
+  { at = 0.0, text = "The improver's own instructions face the same tests. Search instructions admitted {{LEVEL2_SEARCH_YIELD}}, the starting ones {{LEVEL2_SEED_YIELD}}." },
   { at = 2.5, text = "Failure -> executable change -> recorded checks -> signed admission." },
 ]

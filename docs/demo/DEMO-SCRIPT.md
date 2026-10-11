@@ -26,17 +26,19 @@ background evolution run. In the main pane:
 
 ```sh
 cd <repo> && source .venv/bin/activate
-set -a; . docs/demo/ids.env; set +a       # candidate, trace and decision ids from measured runs
+uv run python docs/demo/derive_ids.py     # every id and number below, read from Atlas and the stored results
+set -a; . docs/demo/ids.env; set +a
 alias d='python3 docs/demo/demo.py run'   # d matrix, d trace, ...
 ```
 
 | When | Command | Why |
 |---|---|---|
+| T-35 min | `uv run python docs/demo/derive_ids.py` | writes `docs/demo/ids.env`; names every value that does not exist yet and stops, so nothing is typed by hand |
 | T-30 min | `python3 docs/demo/demo.py preflight` | environment, store reachable, ids resolved, every step has a recording under 3 hours old |
-| T-25 min | `python3 docs/demo/demo.py snapshot` | stores the output of every step as the RECORDED fallback |
+| T-25 min | `python3 docs/demo/demo.py snapshot` | stores the output of every step as the RECORDED fallback; the resume step is skipped because resuming finishes the run (record it once with `demo.py snapshot resume` on a spare killed run) |
 | T-6 min | `python3 docs/demo/demo.py evolve-bg 1` | evolution run for the 0:50 beat; log in `docs/demo/out/evolve.log` |
 | T-4 min | `ratchet run --harness $CLEARED_CAND --split heldout --workers 8` in the side pane | keeps the change stream busy for the 1:20 beat; its numbers are status only, not admission evidence |
-| T-1 min | open `$RAINDROP_URL` in a browser tab; `clear` | cohort view for the 2:10 beat |
+| T-1 min | open the Raindrop cohort view for the experiment in a browser tab; `clear` | cohort view for the 2:10 beat |
 
 `demo.py list` shows each step, its window and the age of its recording. `demo.py recorded <id>` forces
 the stored output.
@@ -98,8 +100,8 @@ Commands run: `ratchet live --timeout 10 --max-events 8`, then `ratchet show dec
 | Second | Screen | Presenter claim |
 |---|---|---|
 | 1:20 | Change-stream lines landing as the side-pane evaluation writes traces | "The evaluator is running fresh cases right now, writing into Atlas." |
-| 1:30 | Decision panel: gates table with replay, heldout, no_regression, benign_twins, overfit_lint, authority, cost | "This is a finished paired evaluation, timestamped." |
-| 1:38 | The `heldout` row: parent fresh passes, candidate fresh passes, the required margin, the confirming run | Read the printed counts. The margin is the noise floor and the candidate must beat it, then repeat. |
+| 1:30 | Decision panel: gates table with replay, fresh, no_regression, benign_twins, overfit_lint, the authority gate, cost | "This is a finished paired evaluation, timestamped." |
+| 1:38 | The paired table and the `fresh` row: stable recoveries against the number needed, protected cases kept, the parent's own run-to-run disagreement D, the confirming run | Read the printed counts: the stable recoveries against the number needed, and the protected cases that passed in both candidate runs (`STABLE_RECOVERIES`, `STABLE_NEEDED`, `PROTECTED_N` in `ids.env`). The parent ran twice, so its noise is on screen. |
 | 1:46 | `benign_twins` and `no_regression` rows | "Benign twins untouched, protected cases still pass. Cost is recorded, not a gate." |
 
 The screen must show: ADMITTED, the `decided` timestamp, the receipt id, and every gate PASS.
@@ -129,7 +131,7 @@ Commands run: `ratchet show lineage`, `cat $RESULTS_FILE`
 |---|---|---|
 | 2:10 | Lineage tree from Atlas: admitted versions and rejected candidates as nodes | "Every version, every rejection, in Atlas." |
 | 2:16 | `RESULTS_FILE`: AgentDojo and tau-bench retail rows with task counts, version pins and task ids location | State the subset sizes as printed. The synthetic world is separately labelled. |
-| 2:27 | Browser tab: Raindrop cohort view of matched baseline and candidate runs | "Same runs, matched cohorts, in Raindrop." Simulated and benchmark cohorts are labelled as such. |
+| 2:27 | Browser tab: Raindrop cohort view of matched baseline and candidate runs (opened by hand; no URL is derived) | "Same runs, matched cohorts, in Raindrop." Simulated and benchmark cohorts are labelled as such. |
 
 Fallback: lineage and results are stored reads. If the browser tab fails, open
 `docs/demo/recorded/raindrop.png` (a screenshot taken at preflight) and say "stored screenshot, taken at
@@ -141,8 +143,8 @@ Command run: `cat $LEVEL2_FILE`
 
 | Second | Screen | Presenter claim |
 |---|---|---|
-| 2:35 | Frozen comparison of improver versions i0 and i1 on separately held-out proposal tasks | "The improver's own instructions go through the same kind of test." |
-| 2:42 | Valid, duplicate, rejected and empty proposal counts for each version, with the denominator | State the result exactly as printed, positive or negative. |
+| 2:35 | The level-2 comparison: improver instructions on proposal tasks they were not tuned on, same budget for each arm | "The improver's own instructions go through the same kind of test." |
+| 2:42 | Per arm: proposed, invalid, duplicates, replay-cleared, evaluated fresh, admitted, and the yield with its denominator | State the result exactly as printed, positive or negative. |
 
 Fallback: stored file read.
 
@@ -162,22 +164,24 @@ Fallback: stored output of the same resume.
 | Question | Answer, with the artifact |
 |---|---|
 | Does replay prove the patch works? | No. It proves the guard's behaviour on recorded inputs: it fires on the failures and on no recorded success. Fresh evaluation tests the behaviour. Neither is a universal proof, and the decision says which evidence was checked. |
-| Why trust the held-out numbers? | Parent run twice fresh, so the noise floor is measured. The candidate has to beat the better parent run by the printed margin and then repeat. Held-out cases sit in a database the improver cannot read, and a final audit cohort is untouched until the harness is frozen. |
+| Why trust the held-out numbers? | The parent runs twice fresh, so its own disagreement is measured and printed. The candidate must recover cases the parent fails both times, keep every case the parent ever passed, and repeat that on a second run. Held-out cases sit in a database the improver cannot read, and a final audit cohort is untouched until the harness is frozen. |
 | What does the signature prove? | That this decision, with these report digests and this corpus snapshot, was signed by the pinned key. It does not prove the evaluator was honest. |
 | What was built today? | The repository's README lists new work and reused dependencies separately. |
 | Does it work outside the simulated company? | The AgentDojo and tau-bench retail runs on screen, with subset sizes, and a Claude Code `PreToolUse` export of admitted guards. |
 
-## Interfaces to confirm as the lanes land
+## What the script depends on
 
-These are the commands this script assumes. Each one is checked by `demo.py preflight` once its value is
-in `docs/demo/ids.env`.
+`docs/demo/derive_ids.py` reads these. If one does not exist yet, it names it and stops.
 
-| Assumed | Owner | State |
+| Needed | Source | Failing message names |
 |---|---|---|
-| `ratchet replay A B` accepts candidate versions or ids, and `--delay` | CLI | in `src/ratchet/cli.py` |
-| `ratchet show trace RUN/CASE`, `show decision ID`, `show lineage`, `verify ID`, `live` | CLI | in `src/ratchet/cli.py` |
-| `docs/demo/denied_read.py` needs `RATCHET_IMPROVER_URI` (the improver user's connection string) | STORE | written here, runs once the improver user exists on the sandbox |
-| `docs/results/summary.txt` with benchmark rows (task counts, pins) | results | to be written from measured runs |
-| `docs/results/level2.txt` with the i0 versus i1 comparison | level 2 | to be written from the frozen run |
-| A resume command for `RESUME_CMD` (the CLI has no `resume` subcommand yet) | CLI / STORE | open: `Store.resume` exists, nothing calls it from the command line |
-| A way to hand `python -m ratchet.verify` the receipt as a file | CLI | open: `ratchet show decision` prints the receipt id, it does not write the envelope |
+| An admitted decision with a `fresh` gate and a receipt that `ratchet verify` accepts | Atlas `decisions` | `ADMITTED_DECISION` and why each admitted one was refused |
+| A replay-rejected guard candidate beside an admitted one, same parent | Atlas `decisions`, `harness_versions` | `CLEARED_CAND`, `REJECTED_CAND`, `REPLAY_TRACES`, `BAD_TRACE` |
+| A rejected decision that failed an authority gate | Atlas `decisions` | `AUTHORITY_DECISION` |
+| A checkpoint still `running` (kill a run mid-case) | Atlas `checkpoints` | `RESUME_RUN`, `RESUME_CMD` |
+| Held-out case counts and result tables | `docs/results/agentdojo.md`, `docs/results/tau-retail.md` | `AGENTDOJO_CASES`, `TAU_CASES` |
+| A level-2 result with a recorded claim | `docs/results/level2.json` or `private/improve/l2.json` (or `--level2`) | `LEVEL2_FILE`, the yields |
+| `RATCHET_IMPROVER_URI` for `denied_read.py` | environment | checked by `demo.py preflight` |
+
+`ratchet show decision ID --envelope-out FILE` writes a receipt for the standalone verifier in
+[docs/VERIFY.md](../VERIFY.md).

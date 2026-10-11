@@ -29,8 +29,8 @@ It records, renders and checks both cuts, and refuses to finish if any gate fail
   unedited` (the time is the recording's own start time). Evaluations and decisions on screen were
   written to Atlas earlier; their own timestamps appear in the output.
 - Captions are text on the padding around the terminal. Numbers in captions are `{{PLACEHOLDERS}}`
-  filled from `docs/demo/ids.env`, and each one is copied from the stored report it names. A missing
-  value stops the recording before it starts.
+  derived by `docs/demo/derive_ids.py` from Atlas and the stored results, with the source of each written
+  beside it in `ids.env`. A missing value stops the recording before it starts.
 - A step that exits with an unexpected code, or times out, fails the check. Nothing is retried quietly.
 - No speed-up, cut or splice. If a take is too long, shorten a `hold` and record again.
 
@@ -73,8 +73,8 @@ average 18 to 31: a 4-second script became 0.84 s). A caption timed to a step ne
 
 ## Before 3:45 PM
 
-1. `cp docs/demo/ids.example.env docs/demo/ids.env` and fill each value from the stored report that
-   produced it.
+1. `uv run python docs/demo/derive_ids.py` writes `docs/demo/ids.env` from Atlas and the stored results,
+   or names each value that does not exist yet and stops. `record.sh` runs it first for a submission take.
 2. `docs/demo/video/record.sh --test` (about 1 minute). It runs the same pipeline on placeholder commands
    and synthetic screens and stamps `PIPELINE TEST, NOT A SUBMISSION CAPTURE` on the banner. If the
    banner on a file does not say that, the file is a submission take.
