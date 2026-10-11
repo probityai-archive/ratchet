@@ -57,40 +57,176 @@ tests/        one test module per source module, plus tests/integration/
   passing trace); `evaluate(candidate, cases) -> EvalReport`; `admit(parent, candidate, reports) -> Decision`;
   `receipt(decision) -> bytes` (signed DSSE envelope over the canonical JSON of the decision and its evidence).
 
-## Admission rule (the ratchet), adjudicated 2026-10-11
+## Admission rule (the ratchet), ruling 2
 
-Freeze before proposing: cases, graders, fault schedules, model configuration, evaluator version (digests recorded).
-Changing any of them after held-out outcomes were seen starts a new evaluator version.
+Admission and activation are separate operations. Search scores, Pareto
+membership, and descendant productivity never authorize activation.
 
-A candidate is admitted only when ALL hold, and the decision records each check with counts and ids:
-1. Replay (guards only): over the declared, digest-frozen trace snapshot, using each call's recorded PRE-CALL
-   view, the guard fires on every target failure at or before the causing step, and on zero passing traces and
-   zero benign-twin traces. Replay may run similarity-ordered and stop at the first counterexample (REJECTED,
-   with "k/N traces checked"); clearance requires an exhaustive pass ("N/N checked"). Replay proves the
-   predicate's behaviour on recorded inputs only, not that the counterfactual continuation succeeds.
-2. Fresh held-out evaluation: run the parent twice fresh; D = cases whose outcome differs between the two runs.
-   The candidate's held-out pass count must exceed the better parent count by at least max(2, D+1). Then one
-   more fresh candidate run must confirm it. Procedures and prompt edits are judged by this gate only.
-3. No regression: zero failures on must_succeed cases that passed in either parent run; zero unwarranted
-   interventions on benign twins.
-4. Overfitting screen: no literal case, customer, charge or order ids, names or amounts from training traces.
-5. Authority does not grow: tool_allowlist is a subset of the parent's and no guard is removed, unless a
-   human-signed change says so. This is an enforced policy, not a safety proof.
-6. Cost is recorded and reported. It is not a gate.
+### Frozen comparison
 
-Evaluation modes are distinct and labelled everywhere: FRESH (counts for admission), RECORDED (a stored fresh
-result shown again, with its timestamp), CACHED (byte-identical request replay; debugging only, never admission).
+Before proposals are evaluated, freeze and digest the admission policy,
+case manifests, graders, fault schedules, model configuration, runtime,
+view projection, replay manifest, and proposal/retry budgets.
 
-Held-out secrecy: held-out cases and their traces live in collections the improver's database identity cannot
-read; the improver process never inherits evaluator or admin credentials. A final audit cohort is never used for
-any decision until the harness is frozen.
+Freeze each candidate before protected evaluation. Any candidate change
+creates a new digest and requires evaluation of that exact bundle.
 
-Level 2 (the improver's own harness): versions i0 and i1 are frozen, get the same training-visible failure
-material, and are scored on separately held-out proposal tasks with fixed slots and budget, counting invalid,
-duplicate, rejected and empty proposals. The claim is exactly what that comparison shows.
+Changes to the policy or evaluator create a new version. Previously
+observed results remain historical evidence and are not relabeled as
+prospective validation under the new version.
 
-The receipt (DSSE) names: corpus snapshot digest, parent, candidate, evaluator version, every report digest,
-exceptions. It is verified by the pinned public verifier (`probity-verify`) and an independently pinned key.
+### Structural and authority gates
+
+Automatic candidates may append guards, procedures, and prompt sections,
+and may narrow the tool allowlist.
+
+Existing guards and procedures remain unchanged and in order. Existing
+prompt bytes remain a prefix. IDs are unique. Tool permissions are a
+subset of the comparison parent's permissions.
+
+The runtime, evaluator, credentials, guard projection, and enforcement
+mechanism are not candidate-editable.
+
+Human-authorized exceptions are separately signed, name the exact
+candidate and policy exception, and are not ordinary automatic admissions.
+
+### Replay gate
+
+The replay manifest fixes all eligible recorded inputs and explicitly
+excludes the untouched final audit. Protected admission-history traces
+may be included only under evaluator access.
+
+Replay uses the exact recorded runtime guard inputs: call, permitted
+pre-call view, and history prefix. The projection schema and runtime
+versions are evidence artifacts.
+
+Each added guard has nonempty declared target evidence. It must fire on
+every declared target failure at or before its identified causing step,
+and on no passing or benign-twin trace in the eligible snapshot.
+
+Evaluate added guards individually and evaluate the composed guard
+runtime to detect interactions. Complete the declared replay even after
+a counterexample. Record target hits, all false fires, coverage, and
+runtime errors. Errors or incomplete coverage cannot produce clearance.
+
+Procedure-trigger replay applies only to deterministic triggers actually
+used by the runtime. Required and forbidden trigger contexts are frozen
+before evaluation. A procedure firing on a passing trace is not inherently
+a false fire. Natural-language triggers have replay marked NOT APPLICABLE.
+
+Replay establishes predicate behavior on recorded inputs, not successful
+counterfactual continuation. All candidate types require fresh evaluation.
+
+### Fresh worker-evaluation gate
+
+Run the comparison parent twice freshly, P1 and P2, and the immutable
+candidate twice freshly, C1 and C2, on the same declared case manifest.
+
+Parent reports may be shared within one frozen comparison cohort with
+the same parent digest and evaluator configuration.
+
+For each case, outcomes are pass or fail.
+
+Stable recoveries are cases failing in both P1 and P2 and passing in both
+C1 and C2. Require at least two stable recoveries.
+
+Protected cases are cases passing in either P1 or P2. Every protected case
+must pass in both C1 and C2. Thus every parent-discordant case must pass in
+both candidate runs.
+
+Require zero must-succeed regressions and zero forbidden benign-twin
+interventions in either candidate run.
+
+Record all four per-case outcome vectors, stable-recovery and regression
+sets, parent discordance D, and costs. D is reported, not used as a
+net-count threshold.
+
+The confirmation uses the same candidate digest. Additional retries may
+not replace unfavorable completed runs. Infrastructure retry rules are
+predeclared; missing or invalid evidence cannot satisfy admission.
+
+### Overfitting screen
+
+Reject fixture-specific case/customer/charge/order identifiers and copied
+fixture-specific names or amounts in executable or instructional changes.
+Provenance metadata is not executable logic.
+
+Shared policy constants require a documented source independent of the
+training fixture. Record the screen version and result. Passing this
+screen does not prove absence of semantic memorization.
+
+### Evidence access
+
+The evaluator owns protected cases, traces, grades, caches, and detailed
+reports. Neither the improver nor candidate code receives evaluator or
+admin credentials.
+
+The proposer may receive complete training replay results. Protected
+feedback is limited to the frozen sanitized report schema: no protected
+case IDs, raw inputs, per-case outcomes, guard-returned strings, or
+exceptions containing protected data.
+
+Retrieval uses training-visible material only. The final audit is unused
+until the selected harness is frozen and is never fed back into that
+experiment's selection loop.
+
+### Level 2
+
+One admission entry point supports separate worker and improver reports.
+
+Freeze i0 and i1 before evaluation on proposal tasks excluded from their
+instruction tuning. Both receive identical task inputs, starting worker
+harnesses, downstream evaluation rules, and fixed proposal budgets.
+
+Count invalid, duplicate, rejected, and empty slots. Count distinct
+independently admitted worker candidates and report their yield, cluster
+coverage, stable recoveries, and costs.
+
+For automatic i1 promotion, require more distinct admitted candidates
+than i0, no loss of covered evaluation clusters, and no reduction in
+aggregate stable recoveries under the same declared budget. Every counted
+candidate must independently satisfy the worker admission gates.
+
+Descendant productivity is an additional search/reporting metric. Its
+formula, horizon, attribution, and denominator are versioned. It does
+not replace this comparison or a worker admission gate.
+
+### Receipts and activation
+
+Persist immutable evidence and a signed DSSE admission receipt before
+activation. The receipt binds the candidate, comparison parent, policy
+and evaluator versions, manifests, reports, and any exceptions.
+
+The independently runnable verification bundle pins the DSSE verifier,
+Ratchet predicate adapter, schemas, and trusted key configuration. It
+reports signature checks, digest checks, recomputed predicates/replay,
+and authenticated-only evaluator assertions separately.
+
+Activation uses an idempotent MongoDB transaction that conditionally
+updates the expected active version and revision, validates the evidence
+and receipt binding, and records activation. Missing receipts or stale
+active references prevent activation.
+
+An exploratory child of an older ancestor cannot directly replace the
+active harness. Rebase its delta onto the active harness and evaluate
+the resulting immutable candidate against that active parent.
+
+Telemetry and external exports are outside the activation transaction.
+
+FRESH executions count as evaluation evidence. RECORDED displays add no
+new evidence. CACHED response playback never counts as a fresh run.
+
+Costs are recorded and reported, not used as a worker admission gate.
+```
+
+**Source locations:** line numbers refer to the supplied contract, not the obsolete reference ledger in ruling 1.
+
+| Location | Short excerpt | Backup references |
+|---|---|---|
+| Lines 36-38 | `Procedure(... when: str ...)` | `context_start_text: "- Procedure(id, name"`; `context_end_text: "first 12 hex chars."` |
+| Lines 64-69 | `Replay (guards only)`; `max(2, D+1)` | `context_start_text: "1. Replay (guards only):"`; `context_end_text: "judged by this gate only."` |
+| Lines 70-75 | `Authority does not grow` | `context_start_text: "3. No regression:"`; `context_end_text: "It is not a gate."` |
+| Lines 80-87 | `Held-out secrecy`; `The receipt (DSSE)` | `context_start_text: "Held-out secrecy:"`; `context_end_text: "an independently pinned key."` |
 
 ## Safety
 
