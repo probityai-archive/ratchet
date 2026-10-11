@@ -11,6 +11,8 @@ dependencies = [
     "cryptography>=44",
     "rich>=15.0.0",
     "raindrop-ai==0.0.75",
+    "probity-verify",
+    "agent-evidence-vectors==0.17.7",
 ]
 
 [project.scripts]
