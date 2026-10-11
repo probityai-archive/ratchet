@@ -121,7 +121,7 @@ def test_seed_loading(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_independent_dsse_implementation_verifies_our_envelope() -> None:
-    """securesystemslib's DSSE code, written independently, accepts our envelope and our PAE."""
+    """An independently written DSSE implementation (a pinned dev dependency) accepts our envelope."""
     signer = Signer.generate()
     env = Envelope.from_dict(json.loads(receipt(DECISION, signer)))
     key = SSlibKey.from_crypto(signer.public_key, keyid=signer.keyid)

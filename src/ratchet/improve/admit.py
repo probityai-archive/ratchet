@@ -5,13 +5,13 @@ records the counts, case ids and run ids it rests on, so the receipt carries the
 1. replay: every added guard, alone and composed with every other guard of the candidate, is CLEARED by an
    exhaustive replay over recorded pre-call views. Errors or partial coverage mean INCOMPLETE, never
    clearance. Procedures with natural-language triggers are NOT APPLICABLE to replay.
-2. fresh: the parent ran twice fresh (P1, P2) and the immutable candidate twice fresh (C1, C2) on the same
+2. heldout: the parent ran twice fresh (P1, P2) and the immutable candidate twice fresh (C1, C2) on the same
    held-out manifest. At least two stable recoveries (fail in P1 and P2, pass in C1 and C2), and every
    protected case (pass in P1 or P2) passes in both C1 and C2. Parent discordance D is reported, not used.
 3. no_regression: no must-succeed case that passed in either parent run fails in either candidate run.
-4. benign_twins: zero harness interventions on held-out benign twins in either candidate run.
+4. benign_twins: zero harness interventions on benign twins, in every split, in either candidate run.
 5. overfit_lint: no fixture-specific id, name or amount copied from training traces.
-6. structure: additive deltas only. Parent guards and procedures unchanged and in order, the parent prompt a
+6. authority: additive deltas only. Parent guards and procedures unchanged and in order, the parent prompt a
    byte prefix, ids unique, tools a subset; anything else needs a separately signed human exception.
 7. cost: recorded and reported, never a gate.
 
@@ -32,8 +32,9 @@ from ratchet.improve.overfit import Literals, lint
 from ratchet.improve.receipt import HUMAN_APPROVAL_TYPE, ReceiptError, verify
 from ratchet.improve.replay import ReplayReport
 from ratchet.types import Harness, canonical_json, sha256_hex
+from ratchet.verify.adapter import DEFAULT_GATES, PREDICATE_URI
 
-GATES = ("replay", "fresh", "no_regression", "benign_twins", "overfit_lint", "structure")
+GATES = DEFAULT_GATES
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ class Decision:
     def to_payload(self) -> dict[str, Any]:
         return {
             "type": "decision",
+            "predicateType": PREDICATE_URI,
             "parent": self.parent,
             "candidate": self.candidate,
             "candidate_digest": self.candidate_digest,
@@ -167,7 +169,7 @@ def check_fresh(
     passed = initial_ok and confirm_eval is not None and len(stable) >= 2 and not broken
     label = {True: "pass", False: "fail", None: "invalid"}
     return Check(
-        "fresh",
+        "heldout",
         passed,
         {
             "manifest": len(manifest),
@@ -210,13 +212,17 @@ def check_no_regression(parent_runs: Sequence[EvalReport], cand_runs: Sequence[E
 
 
 def check_benign_twins(cand_runs: Sequence[EvalReport]) -> Check:
-    twins = [r for e in cand_runs for r in _heldout(e).values() if r.kind == "benign_twin"]
+    """Zero harness interventions on benign twins in every split either candidate run covered."""
+    twins = [r for e in cand_runs for r in e.results if r.kind == "benign_twin"]
     hit = [r for r in twins if r.interventions > 0]
     return Check(
         "benign_twins",
         not hit,
         {
-            "heldout_benign_twin_runs": len(twins),
+            "benign_twin_runs": len(twins),
+            "by_split": {
+                sp: sum(1 for r in twins if r.split == sp) for sp in sorted({r.split for r in twins})
+            },
             "intervened": sorted({r.case_id for r in hit}),
             "intervened_runs": sorted(r.run_id for r in hit if r.run_id),
             "interventions": sum(r.interventions for r in twins),
@@ -304,7 +310,7 @@ def check_structure(
     ok = not violations
     if violations and "digest_invalid" not in violations:
         ok, evidence["exception"] = _approval(approval, trusted_humans or {}, candidate)
-    return Check("structure", ok, evidence)
+    return Check("authority", ok, evidence)
 
 
 def _cost_of(e: EvalReport) -> dict[str, Any]:
@@ -396,6 +402,6 @@ def admit(
 
 def awaiting_confirmation(d: Decision) -> bool:
     """Every gate holds on C1, and only the confirming run C2 is missing."""
-    f = d.check("fresh").evidence
-    others = all(c.passed for c in d.checks if c.name in GATES and c.name != "fresh")
+    f = d.check("heldout").evidence
+    others = all(c.passed for c in d.checks if c.name in GATES and c.name != "heldout")
     return others and bool(f["initial_ok"]) and bool(f["confirm_pending"])

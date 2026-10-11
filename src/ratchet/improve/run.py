@@ -18,11 +18,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from pymongo import MongoClient
+
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ModelClient, ModelConfig
 from ratchet.agent.seed import seed_harness
 from ratchet.agent.worker import run_case
 from ratchet.cases import all_cases
+from ratchet.improve.activate import MongoActivator
 from ratchet.improve.loop import EvolveResult, Lab, evolve
 from ratchet.improve.receipt import Signer, public_key_bytes
 from ratchet.improve.sandbox import SandboxRunner
@@ -47,6 +50,10 @@ def _args(argv: Sequence[str] | None) -> argparse.Namespace:
     p.add_argument("--family", action="append", default=[], help="limit to these case families")
     p.add_argument("--out", type=Path, required=True)
     return p.parse_args(argv)
+
+
+def _mongo(uri: str) -> MongoClient[dict[str, Any]]:
+    return MongoClient(uri, tz_aware=True)
 
 
 def summary(result: EvolveResult, signer: Signer, wall_s: float, config: dict[str, Any]) -> dict[str, Any]:
@@ -95,6 +102,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ModelClient(agent_cfg) as model,
         ModelClient(improver_cfg) as improver,
         GuardRuntime() as runtime,
+        _mongo(a.uri) as client,
     ):
         store.setup(wait_search=False)
         lab = Lab(
@@ -103,6 +111,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             simulator=WorldSimulator(cases),
             runner=SandboxRunner(runtime),
             signer=signer,
+            activator=MongoActivator(client, a.db),
             improver=improver,
             workers=a.workers,
             max_clusters=a.max_clusters,

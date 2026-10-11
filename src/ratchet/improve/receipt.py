@@ -1,6 +1,6 @@
 """Signed receipts: a DSSE envelope over the canonical JSON of a decision, signed with Ed25519.
 
-The envelope follows the DSSE v1 protocol (https://github.com/secure-systems-lab/dsse): the signature covers
+The envelope follows the DSSE v1 envelope format: the signature covers
 PAE(payloadType, payload), never the raw payload, so a payload cannot be replayed under another type.
 """
 

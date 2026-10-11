@@ -26,6 +26,9 @@ class _Ctx:
     def __exit__(self, *exc: object) -> None:
         return None
 
+    def __getitem__(self, name: str) -> Any:
+        return name
+
     def setup(self, wait_search: bool = True) -> None:
         self.ready = wait_search
 
@@ -46,7 +49,7 @@ def test_main_wires_the_lanes_and_writes_a_summary(monkeypatch: pytest.MonkeyPat
         seen.update(generations=generations, cases=len(lab.cases), config=lab.model_config)
         return EvolveResult(HARNESS, SEED, [GenerationRecord(1, seed.version, note="n")])
 
-    for name in ("Store", "ModelClient", "GuardRuntime"):
+    for name in ("Store", "ModelClient", "GuardRuntime", "MongoClient"):
         monkeypatch.setattr(run, name, _Ctx)
     monkeypatch.setattr(run, "evolve", fake_evolve)
     monkeypatch.setenv("RATCHET_API_KEY", "secret-value")

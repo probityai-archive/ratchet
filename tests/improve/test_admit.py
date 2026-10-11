@@ -62,7 +62,7 @@ def _admit(cand: Harness, pe: EvalReport | None = None, ce: EvalReport | None = 
         PARENT, cand, parent_runs=(pe, rerun), cand_eval=ce, confirm_eval=confirm,
         replays=_replays(cand, pe) if replays is None else replays, composed=kw.pop("composed", None),
         literals=training_literals(pe.train_traces()), visible_case_ids=["timeout-1", "timeout-2", "plain-3"],
-        evaluator={"version": "ev1"}, **kw,
+        evaluator=kw.pop("evaluator", {"version": "ev1"}), **kw,
     )  # fmt: skip
 
 
@@ -72,7 +72,7 @@ def test_a_precise_guard_is_admitted_with_evidence_and_a_verifiable_receipt() ->
     composed = _composed(cand, pe)
     d = _admit(cand, pe=pe, composed=composed, context={"generation": 1})
     assert d.admitted, d.to_payload()
-    f = d.check("fresh").evidence
+    f = d.check("heldout").evidence
     assert f["stable_recoveries"] == ["timeout-4", "timeout-5"] and f["protected"] == ["plain-6"]
     assert f["protected_broken"] == [] and f["parent_discordance"] == 0 and f["invalid_evidence"] == []
     assert f["outcomes"]["timeout-4"] == ["fail", "fail", "pass", "pass"] and set(f["runs"]) == {
@@ -84,7 +84,7 @@ def test_a_precise_guard_is_admitted_with_evidence_and_a_verifiable_receipt() ->
     r = d.check("replay").evidence
     assert r["reports"][0]["verdict"] == "CLEARED" and r["reports"][0]["coverage"] == "4/4 traces checked"
     assert r["composed"]["verdict"] == "CLEARED"
-    assert d.check("benign_twins").passed and d.check("overfit_lint").passed and d.check("structure").passed
+    assert d.check("benign_twins").passed and d.check("overfit_lint").passed and d.check("authority").passed
     assert d.check("cost").evidence["gate"] is False
     assert (
         d.rates["candidate"]["recovery_rate"] == 1.0
@@ -114,7 +114,7 @@ def test_unconfirmed_candidate_waits_for_its_confirming_run() -> None:
     assert not d.admitted and awaiting_confirmation(d)
     flop = replace(evaluate(PARENT, HELDOUT, FakeRunCase(), None), harness_version=cand.version)
     d2 = _admit(cand, pe=pe, composed=_composed(cand, pe), confirm=flop)
-    assert not d2.admitted and d2.check("fresh").evidence["stable_recoveries"] == []
+    assert not d2.admitted and d2.check("heldout").evidence["stable_recoveries"] == []
     assert not awaiting_confirmation(d2)
 
 
@@ -125,7 +125,7 @@ def test_overbroad_guard_fails_replay_regression_and_benign_twins() -> None:
     rep = d.check("replay").evidence["reports"][0]
     assert rep["false_fires"] and rep["benign_twin_fires"] >= 1
     assert d.check("no_regression").evidence["regressed"] == ["plain-3", "plain-6"]
-    assert d.check("benign_twins").evidence["intervened"] == ["plain-6"]
+    assert d.check("benign_twins").evidence["intervened"] == ["plain-3", "plain-6"]
     assert d.rates["candidate"]["false_intervention_rate"] == 1.0
 
 
@@ -182,14 +182,14 @@ def test_missing_replay_and_flat_heldout_reject() -> None:
     )
     assert not d.admitted
     assert d.check("replay").evidence["reports"][0]["verdict"] == "MISSING"
-    assert not d.check("fresh").passed and d.check("fresh").evidence["same_manifest"]
+    assert not d.check("heldout").passed and d.check("heldout").evidence["same_manifest"]
 
 
 def test_different_case_sets_cannot_be_compared() -> None:
     cand = PARENT.child(system_prompt="q", created_by="improver")
     pe = evaluate(PARENT, fake_cases()[:3], FakeRunCase(), None)
     d = _admit(cand, pe=pe, replays={})
-    assert not d.check("fresh").evidence["same_manifest"]
+    assert not d.check("heldout").evidence["same_manifest"]
 
 
 def test_candidate_must_be_a_child() -> None:
@@ -251,3 +251,19 @@ def test_tampered_candidate_fails_authority() -> None:
     cand = PARENT.child(system_prompt="q", created_by="improver")
     forged = replace(cand, tool_allowlist=["payments_get_charge"])  # digest no longer matches content
     assert not check_structure(PARENT, forged).passed
+
+
+def test_a_signed_decision_verifies_end_to_end_with_the_receipt_verifier() -> None:
+    from ratchet.verify import verify_decision
+
+    cand = PARENT.child(guards=[OLD, Guard("g-new", "d", NO_DUP_GUARD)], created_by="improver")
+    pe = evaluate(PARENT, fake_cases(), FakeRunCase(), None)
+    evaluator = {"version": "ev1", "components": {"suite_file": "7d4c38e0" * 8}}
+    d = _admit(cand, pe=pe, composed=_composed(cand, pe), evaluator=evaluator)
+    assert d.admitted and d.to_payload()["predicateType"].endswith("agent-change-admission-v1.md")
+    assert all(isinstance(x, str) for x in d.exceptions)
+    signer = Signer.generate()
+    good = verify_decision(receipt(d, signer), signer.public_key)
+    assert good.ok and good.admitted is True and good.candidate == cand.version, good
+    other = Signer.generate()
+    assert not verify_decision(receipt(d, signer), other.public_key).ok

@@ -5,6 +5,7 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
+from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.loop import Lab, compose, evolve
 from ratchet.improve.receipt import Signer, verify
 from ratchet.types import Harness, Trace
@@ -72,6 +73,7 @@ class MemStore:
         self.traces: dict[str, Trace] = {}
         self.evals: list[dict[str, Any]] = []
         self.decisions: list[dict[str, Any]] = []
+        self.by_id: dict[str, dict[str, Any]] = {}
 
     def put_harness(self, harness: Harness) -> bool:
         new = harness.version not in self.harnesses
@@ -86,21 +88,38 @@ class MemStore:
         self.evals.append(dict(report))
         return eval_id or str(len(self.evals))
 
+    def decision(self, decision_id: str) -> dict[str, Any] | None:
+        return self.by_id.get(decision_id)
+
     def put_decision(self, decision: Any, *, decision_id: str | None = None) -> str:
         self.decisions.append(dict(decision))
+        self.by_id[decision_id or str(len(self.decisions))] = dict(decision)
         return decision_id or str(len(self.decisions))
 
 
-def _lab(chat: RoutingChat, signer: Signer, **kw: Any) -> Lab:
+def _lab(store: MemStore, chat: RoutingChat, signer: Signer, **kw: Any) -> Lab:
     kw = {"max_clusters": 1, **kw}
-    return Lab(cases=CASES, run_case=FakeRunCase(), simulator=FakeSimulator(), runner=LocalRunner(),
-               signer=signer, improver=chat, workers=4, max_evals=4, suite_digest="suite", **kw)  # fmt: skip
+    return Lab(
+        cases=CASES,
+        run_case=FakeRunCase(),
+        simulator=FakeSimulator(),
+        runner=LocalRunner(),
+        signer=signer,
+        activator=MemoryActivator(store.decision),
+        improver=chat,
+        workers=4,
+        max_evals=4,
+        suite_digest="suite",
+        **kw,
+    )
 
 
 def test_two_generations_ratchet_both_levels() -> None:
     chat, store, signer = RoutingChat(), MemStore(), Signer.generate()
     logs: list[str] = []
-    result = evolve(store, model=None, generations=3, lab=_lab(chat, signer, log=logs.append), seed=SEED)
+    result = evolve(
+        store, model=None, generations=3, lab=_lab(store, chat, signer, log=logs.append), seed=SEED
+    )
     g1, g2, g3 = result.generations
 
     # Generation 1, level 1: the broad guard fails replay, is repaired into the precise one, and is admitted.
@@ -126,6 +145,9 @@ def test_two_generations_ratchet_both_levels() -> None:
     assert g2.promoted == result.harness.version and result.harness.procedures and result.harness.guards
 
     assert g3.note.startswith("no training failures")
+    # Each promotion was activated by compare-and-swap after its receipt was stored.
+    assert g1.level1["activation"]["revision"] == 2 and g2.level1["activation"]["revision"] == 3
+    assert g2.level1["activation"]["previous"] == g1.promoted
 
     # Every decision carries a receipt that verifies, admitted and rejected alike, and names what the
     # improver could see and the frozen suite.
@@ -152,7 +174,8 @@ def test_two_generations_ratchet_both_levels() -> None:
 
 def test_the_improver_never_sees_heldout_cases() -> None:
     chat = RoutingChat()
-    evolve(MemStore(), model=None, generations=2, lab=_lab(chat, Signer.generate()), seed=SEED)
+    store = MemStore()
+    evolve(store, model=None, generations=2, lab=_lab(store, chat, Signer.generate()), seed=SEED)
     text = chat.prompts()
     assert "timeout-1" in text or "omit-7" in text  # training material is shown
     for case_id in HELDOUT_IDS:
@@ -167,8 +190,8 @@ def test_meta_failure_is_tolerated() -> None:
                 return FakeTurn("no json here")
             return super().complete(messages, tools)
 
-    lab = _lab(NoMeta(), Signer.generate())
-    result = evolve(MemStore(), None, 1, lab=lab, seed=SEED)
+    store = MemStore()
+    result = evolve(store, None, 1, lab=_lab(store, NoMeta(), Signer.generate()), seed=SEED)
     assert result.generations[0].level2["next_challenger"] is None
     assert result.generations[0].level1["parent_score"]["train_total"] == 4
 
@@ -191,7 +214,7 @@ def test_fixes_for_two_clusters_are_composed_when_the_composite_does_better() ->
             return super().complete(messages, tools)
 
     store = MemStore()
-    result = evolve(store, None, 1, lab=_lab(Both(), Signer.generate(), max_clusters=4), seed=SEED)
+    result = evolve(store, None, 1, lab=_lab(store, Both(), Signer.generate(), max_clusters=4), seed=SEED)
     g1 = result.generations[0]
     assert (
         g1.level1["child_score"]["heldout_passed"] == 5
@@ -212,10 +235,11 @@ def test_audit_cases_are_never_run() -> None:
             return super().__call__(harness, case, model, store, run_id=run_id)
 
     run = Recording()
-    lab = _lab(RoutingChat(), Signer.generate())
+    store = MemStore()
+    lab = _lab(store, RoutingChat(), Signer.generate())
     lab.cases = [*CASES, FakeCase("timeout-99", "audit")]
     lab.run_case = run
-    evolve(MemStore(), None, 1, lab=lab, seed=SEED)
+    evolve(store, None, 1, lab=lab, seed=SEED)
     assert run.seen and "timeout-99" not in run.seen
 
 
@@ -249,7 +273,7 @@ def test_a_guard_that_leaks_protected_inputs_through_its_reason_never_reaches_th
             return super().complete(messages, tools)
 
     chat, store = Leaky(), MemStore()
-    result = evolve(store, None, 2, lab=_lab(chat, Signer.generate()), seed=SEED)
+    result = evolve(store, None, 2, lab=_lab(store, chat, Signer.generate()), seed=SEED)
     leaked_row = next(c for c in result.generations[0].candidates if c["kind"] == "guard")
     assert leaked_row["replay"]["verdict"] == "CLEARED"  # it hides on training traces
     decision = next(d for d in store.decisions if d["context"].get("kind") == "guard")

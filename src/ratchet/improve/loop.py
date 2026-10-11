@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from ratchet.improve.activate import ActivationError, Activator
 from ratchet.improve.admit import Decision, admit, awaiting_confirmation
 from ratchet.improve.diagnose import FailureCluster, diagnose
 from ratchet.improve.evaluate import CaseLike, EvalReport, RunCase, evaluate_many
@@ -67,6 +68,7 @@ class Lab:
     simulator: Simulator
     runner: GuardRunner
     signer: Signer
+    activator: Activator
     improver: Chat | None = None
     workers: int = 8
     repeats: int = 1
@@ -188,6 +190,7 @@ class _Gen:
     rec: GenerationRecord
     meter: Meter
     task_stats: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
+    receipts: dict[str, tuple[str, str]] = field(default_factory=dict)  # candidate -> (decision id, digest)
 
     @property
     def parent_eval(self) -> EvalReport:
@@ -359,10 +362,12 @@ def _decide(
         _persist_eval(store, confirm, {"generation": g.gen, "role": "confirm", "harness": harness.version})
         d = admit(g.parent, harness, confirm_eval=confirm, **kw)
     env = receipt(d, lab.signer)
+    decision_id = f"{d.parent}->{d.candidate}"
     store.put_decision(
         {**d.to_payload(), "envelope": base64.b64encode(env).decode("ascii"), "keyid": lab.signer.keyid},
-        decision_id=f"{d.parent}->{d.candidate}",
+        decision_id=decision_id,
     )
+    g.receipts[d.candidate] = (decision_id, sha256_hex(env))
     g.rec.decisions.append(f"{d.parent}->{d.candidate}")
     return d, confirm
 
@@ -481,6 +486,9 @@ def evolve(
     evaluator = evaluator_identity(lab.cases, lab.model_config, lab.suite_digest)
     store.put_eval({"type": "evaluator", **evaluator}, eval_id=f"evaluator-{evaluator['version']}")
     store.put_harness(parent)
+    active, revision = lab.activator.bootstrap(parent.version)
+    if active != parent.version:
+        raise ActivationError(f"the active harness is {active}, not the seed {parent.version}; rebase first")
     _record_instructions(store, champion, seen[champion.version], 0)
     records: list[GenerationRecord] = []
     for gen in range(1, generations + 1):
@@ -539,8 +547,26 @@ def evolve(
         admitted = [t for t in tried if t.status == "admitted"]
         promoted = _promote(store, lab, model, g, admitted, referee, {c.id: c for c in clusters})
         if promoted is not None:
-            parent, child_eval, decision = promoted
-            store.put_harness(parent)
+            child, child_eval, decision = promoted
+            store.put_harness(child)
+            decision_id, digest = g.receipts[child.version]
+            act = lab.activator.activate(
+                candidate=child.version,
+                expected=parent.version,
+                expected_revision=revision,
+                decision_id=decision_id,
+                receipt_digest=digest,
+                idempotency_key=f"activate:{decision_id}",
+            )
+            parent, revision = child, act.revision
+            rec.level1 |= {
+                "activation": {
+                    "revision": act.revision,
+                    "previous": act.previous,
+                    "decision_id": decision_id,
+                    "receipt_digest": digest,
+                }
+            }
             rec.level1 |= {
                 "promoted": parent.version,
                 "child_score": _score(child_eval),
@@ -716,7 +742,7 @@ def _level2(
             s.rejected += t.status.startswith(("rejected", "screened", "replay_failed"))
             if t.status == "admitted" and t.decision is not None:
                 s.admitted += 1
-                s.stable_recoveries += len(t.decision.check("fresh").evidence["stable_recoveries"])
+                s.stable_recoveries += len(t.decision.check("heldout").evidence["stable_recoveries"])
         scored[arm] = s
     level2: dict[str, Any] = {
         "champion": champion.version,
