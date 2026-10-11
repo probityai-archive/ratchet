@@ -14,6 +14,7 @@ def test_store_round_trips_traces_and_dedupes_harnesses(tmp_path: Path) -> None:
     assert store.read("traces") == [] and store.traces() == []
     h = seed_harness()
     assert store.put_harness(h) is True and store.put_harness(h) is False
+    assert store.get_harness(h.version) == h and store.get_harness("nope") is None
     trace = Trace(
         "r", "c", h.version, "m", [Event(0, "final", {"x": 1}, 1.5)], Outcome(False, ["why"], "d", Cost(1))
     )

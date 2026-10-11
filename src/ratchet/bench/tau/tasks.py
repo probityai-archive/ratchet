@@ -48,6 +48,10 @@ class TauCase:
     must_succeed: bool = True
     kind: str = "must_succeed"
 
+    @property
+    def family(self) -> str:
+        return f"tau-{self.domain}"
+
 
 def case_id(tau_split: TauSplit, index: int, domain: Domain = "retail") -> str:
     return f"tau-{domain}-{tau_split}-{index:03d}"

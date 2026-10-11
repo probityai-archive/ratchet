@@ -14,7 +14,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from ratchet.types import Cost, Event, Harness, Outcome, Trace
+from ratchet.types import Cost, Event, Guard, Harness, Outcome, Procedure, Trace
 
 
 def _default(value: Any) -> Any:
@@ -25,6 +25,22 @@ def _default(value: Any) -> Any:
     if isinstance(value, bytes):
         return value.hex()
     raise TypeError(f"not JSON serialisable: {type(value).__name__}")
+
+
+def harness_from(raw: dict[str, Any]) -> Harness:
+    h = Harness(
+        version=raw["version"],
+        parent=raw["parent"],
+        system_prompt=raw["system_prompt"],
+        procedures=[Procedure(**p) for p in raw["procedures"]],
+        guards=[Guard(**g) for g in raw["guards"]],
+        tool_allowlist=list(raw["tool_allowlist"]),
+        created_by=raw["created_by"],
+        digest=raw["digest"],
+    )
+    if not h.verify_digest():
+        raise ValueError(f"harness {h.version} does not match its digest")
+    return h
 
 
 def trace_from(raw: dict[str, Any]) -> Trace:
@@ -64,6 +80,10 @@ class JsonlStore:
             return False
         self._append("harnesses", harness)
         return True
+
+    def get_harness(self, version: str) -> Harness | None:
+        found = [h for h in self.read("harnesses") if h["version"] == version]
+        return harness_from(found[-1]) if found else None
 
     def put_trace(self, trace: Trace) -> bool:
         self._append("traces", trace)

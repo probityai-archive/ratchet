@@ -15,7 +15,7 @@ def test_split_is_seeded_and_disjoint() -> None:
     held = [x for x in a if x.split == "heldout"]
     assert len(train) == 10 and all(x.tau_split == "train" for x in train)
     assert [x.index for x in held] == [0, 1, 2, 3, 4] and all(x.tau_split == "test" for x in held)
-    assert all(x.must_succeed and x.kind == "must_succeed" for x in a)
+    assert all(x.must_succeed and x.kind == "must_succeed" and x.family == "tau-retail" for x in a)
     with pytest.raises(ValueError):
         split_cases(5, 50, n_train=51)
 

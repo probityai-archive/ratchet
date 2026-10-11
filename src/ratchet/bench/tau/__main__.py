@@ -28,7 +28,7 @@ from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ModelClient, ModelConfig
 from ratchet.bench.tau.report import collect, render, summarize
 from ratchet.bench.tau.runner import TauRunner, configure_user_endpoint, seed_harness, tau_bench_commit
-from ratchet.bench.tau.store import JsonlStore
+from ratchet.bench.tau.store import JsonlStore, harness_from
 from ratchet.bench.tau.tasks import DEFAULT_SEED, DOMAINS, Domain, TauCase, default_cases, split_record
 from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.evaluate import evaluate_many
@@ -36,23 +36,7 @@ from ratchet.improve.loop import Lab, evolve
 from ratchet.improve.receipt import Signer
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.improve.sim import RecordedViews
-from ratchet.types import Guard, Harness, Procedure, Trace
-
-
-def harness_from(raw: dict[str, Any]) -> Harness:
-    h = Harness(
-        version=raw["version"],
-        parent=raw["parent"],
-        system_prompt=raw["system_prompt"],
-        procedures=[Procedure(**p) for p in raw["procedures"]],
-        guards=[Guard(**g) for g in raw["guards"]],
-        tool_allowlist=list(raw["tool_allowlist"]),
-        created_by=raw["created_by"],
-        digest=raw["digest"],
-    )
-    if not h.verify_digest():
-        raise ValueError(f"harness {h.version} does not match its digest")
-    return h
+from ratchet.types import Harness, Trace
 
 
 def load_harness(spec: str, domain: Domain, root: Path) -> Harness:
