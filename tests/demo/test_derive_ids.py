@@ -129,11 +129,15 @@ def test_admitted_needs_a_fresh_gate_a_receipt_and_a_verifying_signature() -> No
     bad_sig = fakes.decision_doc("p", "c4", True, checks=[{"name": "fresh", "passed": True, "evidence": {}}])
     bad_sig["decided_at"] = "2026-10-11T11:00:00+00:00"
     docs = [good, no_fresh, no_receipt, bad_sig]
+    heldout = fakes.decision_doc(
+        "p", "c5", True, checks=[{"name": "heldout", "passed": True, "evidence": {}}]
+    )
+    assert derive.pick_admitted([heldout], lambda _i: None)[0] is heldout
     picked, _why = derive.pick_admitted(docs, lambda i: "INVALID" if i.endswith("c4") else None)
     assert picked is good
     none, why = derive.pick_admitted([no_fresh, no_receipt], lambda _i: None)
     assert none is None
-    assert "no `fresh` gate" in why
+    assert "no `heldout` (fresh) gate" in why
     assert "no signed receipt" in why
     assert derive.pick_admitted([], lambda _i: None)[1] == "no admitted decision is stored yet"
 

@@ -105,6 +105,11 @@ def _check(doc: Mapping[str, Any], name: str) -> Mapping[str, Any] | None:
     return next((c for c in doc.get("checks") or [] if c.get("name") == name), None)
 
 
+def _fresh(doc: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """The fresh-evaluation gate: named `heldout` by the admission code, `fresh` in older records."""
+    return _check(doc, "heldout") or _check(doc, GATE_FRESH)
+
+
 def _newest(docs: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     return sorted(docs, key=lambda d: str(d.get("decided_at", "")), reverse=True)
 
@@ -120,8 +125,8 @@ def pick_admitted(
     when it does, else the reason it does not."""
     reasons: list[str] = []
     for d in _newest([d for d in docs if d.get("admitted")]):
-        if _check(d, GATE_FRESH) is None:
-            reasons.append(f"{d.get('_id')}: no `fresh` gate recorded")
+        if _fresh(d) is None:
+            reasons.append(f"{d.get('_id')}: no `heldout` (fresh) gate recorded")
         elif not d.get("envelope"):
             reasons.append(f"{d.get('_id')}: no signed receipt")
         elif (why := verifies(str(d["_id"]))) is not None:
@@ -292,7 +297,7 @@ class Closeness:
 
 
 def closeness(doc: Mapping[str, Any]) -> Closeness | None:
-    gate = _check(doc, "heldout") or _check(doc, GATE_FRESH)
+    gate = _fresh(doc)
     ev = (gate or {}).get("evidence") or {}
     outcomes, order = ev.get("outcomes") or {}, list(ev.get("order") or [])
     if doc.get("admitted") or not outcomes or "C1" not in order:
@@ -434,8 +439,8 @@ def derive_from_store(
     else:
         out.set("DEMO_OUTCOME", OUTCOME_ADMITTED, f"decision {admitted['_id']} is admitted and verifies")
         out.set("ADMITTED_CAND", admitted["candidate"], f"candidate of decision {admitted['_id']}")
-        view = fresh_view((_check(admitted, GATE_FRESH) or {}).get("evidence") or {})
-        src = f"decision {admitted['_id']}, `fresh` gate"
+        view = fresh_view((_fresh(admitted) or {}).get("evidence") or {})
+        src = f"decision {admitted['_id']}, fresh-evaluation gate"
         out.set(
             "ADMITTED_DECISION", admitted["_id"], f"newest admitted decision with a verifying receipt ({src})"
         )
