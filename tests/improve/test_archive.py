@@ -474,7 +474,10 @@ def test_command_line_writes_the_export(tmp_path: Path, capsys: pytest.CaptureFi
     out = tmp_path / "x" / "archive.json"
     assert arc.main([str(run), "--out", str(out), "--min-descendants", "1", "--seed", "4"]) == 0
     data = json.loads(out.read_text())
-    assert data["runs"][0]["name"] == "run-1" and data["runs"][0]["selection"]["source"] in {"S", "A"}
+    assert data["runs"][0]["name"] == "/".join(run.parts[-2:]) and data["runs"][0]["selection"]["source"] in {
+        "S",
+        "A",
+    }
     assert arc.main([str(run), "--split", "train"]) == 0
     assert json.loads(capsys.readouterr().out)["runs"][0]["archive"]["split"] == "train"
     (tmp_path / "empty").mkdir()

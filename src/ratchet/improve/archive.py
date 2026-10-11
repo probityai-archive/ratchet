@@ -715,7 +715,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         with Store(args.uri, args.db) as store:
             sources.append((args.db, Archive.load(store, split=args.split)))
     else:
-        sources = [(p.name, Archive.from_run_dir(p, split=args.split)) for p in args.run_dirs]
+        sources = [("/".join(p.parts[-2:]), Archive.from_run_dir(p, split=args.split)) for p in args.run_dirs]
     out = {
         "type": "archive_export",
         "runs": [
