@@ -12,6 +12,7 @@ list disagree.
 | [Atlas feature probes on the hackathon sandbox](results/atlas-probes.md) | Each Atlas feature run against the hackathon sandbox before the product claims it, with the result for each server version. |
 | [tau-bench airline: Ratchet results](results/tau-airline.md) | The loop on tau-bench airline with its own database and reward: pass^k by harness and split. |
 | [tau-bench retail: Ratchet results](results/tau-retail.md) | The loop on tau-bench retail with its own database and reward: pass^k by harness and split, with crashed and stopped runs listed. |
+| [Terminal-Bench 2.0: Ratchet results](results/terminal-bench.md) | Run records live under `private/bench/terminal/` (never committed); every number below is read from them and printed with its denominator. |
 | [Cross-model transfer of admitted harness changes](results/transfer.md) | Guards are code. |
 
 The rule that decides whether a change counts is in [ADMISSION.md](ADMISSION.md),
