@@ -220,6 +220,14 @@ new evidence. CACHED response playback never counts as a fresh run.
 
 Costs are recorded and reported, not used as a worker admission gate.
 
+## Public text (operator ruling, 2026-10-11)
+
+No public artifact (README, docs/, code comments, docstrings, commit messages, demo, video, submission form, posts,
+pull requests) cites, credits or names any external paper, method, project or person as prior or related work.
+Research lineage stays in `private/` only. Two things are not citations and stay: the dependency manifest (pinned
+packages and their versions, required by the hackathon's new-work rule) and the name of a public benchmark next to a
+result measured on it.
+
 ## Safety
 
 - Guard source is untrusted model output. It runs in a separate process with no network, a CPU and memory
