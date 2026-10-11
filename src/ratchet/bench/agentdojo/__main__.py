@@ -110,7 +110,7 @@ NOTES = [
     "Metrics are on held-out cases only: held-out user tasks paired with held-out injection tasks "
     "(attacked) or with none (utility).",
     "Every evaluation the run made is listed, in order: the baseline, the loop's two fresh parent "
-    "runs per generation, and each promoted version's candidate, composite and confirmation runs.",
+    "runs per generation, and every candidate, composite and confirmation run, admitted or not.",
 ]
 
 
