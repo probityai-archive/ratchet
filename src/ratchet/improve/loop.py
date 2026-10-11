@@ -573,6 +573,9 @@ def evolve(
                 arms["challenger"] = (challenger, ArmScore(challenger.version, frozen["cluster_ids"]), batch)
 
         tried, rejected = _propose_all(arms, g, train, lab)
+        failures = sum(1 for _, text in rejected if "model call failed" in text)
+        if failures:
+            rec.note = f"improver model calls failed for {failures} proposal task(s)"
         reports, referee = _evaluate_and_admit(
             store,
             lab,

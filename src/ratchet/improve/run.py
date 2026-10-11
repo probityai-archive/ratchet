@@ -10,6 +10,7 @@ The agent model, the improver model, the endpoint and the store come from flags 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -22,7 +23,7 @@ import httpx
 from pymongo import MongoClient
 
 from ratchet.agent.guards import GuardRuntime
-from ratchet.agent.model import ModelClient, ModelConfig
+from ratchet.agent.model import ModelClient, ModelConfig, ModelError
 from ratchet.agent.seed import seed_harness
 from ratchet.agent.worker import run_case
 from ratchet.cases import all_cases
@@ -41,7 +42,11 @@ def _args(argv: Sequence[str] | None) -> argparse.Namespace:
     p.add_argument("--generations", type=int, default=1)
     p.add_argument("--base-url", default=env.get("RATCHET_BASE_URL", "http://localhost:8787/v1"))
     p.add_argument("--model", default=env.get("RATCHET_MODEL", "gpt-5.6-luna"))
-    p.add_argument("--improver-model", default=env.get("RATCHET_IMPROVER_MODEL", "gpt-5.6-terra"))
+    p.add_argument(
+        "--improver-model",
+        default=env.get("RATCHET_IMPROVER_MODEL", "gpt-6-sol,gpt-5.6-terra,gpt-5.5"),
+        help="comma-separated, in order of preference; a refused request falls through to the next",
+    )
     p.add_argument("--improver-base-url", default=env.get("RATCHET_IMPROVER_BASE_URL", ""))
     p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument("--seed", type=int, default=None, help="fixed sampling seed sent with every agent request")
@@ -75,6 +80,32 @@ class SeededTransport(httpx.HTTPTransport):
         return super().handle_request(request)
 
 
+class FallbackChat:
+    """The improver over a declared, ordered list of models: a model the endpoint refuses (rate limit,
+    cooldown, outage) hands the request to the next one. Which model answered is counted per model."""
+
+    def __init__(self, clients: Sequence[ModelClient]) -> None:
+        if not clients:
+            raise ValueError("at least one improver model is required")
+        self.clients = list(clients)
+        self.served: dict[str, int] = {c.name: 0 for c in self.clients}
+        self.refused: dict[str, int] = {c.name: 0 for c in self.clients}
+
+    def complete(self, messages: Sequence[dict[str, Any]], tools: Sequence[dict[str, Any]]) -> Any:
+        last: ModelError | None = None
+        for c in self.clients:
+            try:
+                turn = c.complete(messages, tools)
+            except ModelError as exc:
+                self.refused[c.name] += 1
+                last = exc
+                continue
+            self.served[c.name] += 1
+            return turn
+        assert last is not None
+        raise last
+
+
 def _mongo(uri: str) -> MongoClient[dict[str, Any]]:
     return MongoClient(uri, tz_aware=True)
 
@@ -102,9 +133,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     agent_cfg = ModelConfig(base_url=a.base_url, model=a.model, api_key=key, temperature=a.temperature)
     improver_url = a.improver_base_url or a.base_url
     improver_key = os.environ.get("RATCHET_IMPROVER_API_KEY", key)
-    improver_cfg = ModelConfig(
-        base_url=improver_url, model=a.improver_model, api_key=improver_key, temperature=a.temperature
-    )
+    improver_cfgs = [
+        ModelConfig(base_url=improver_url, model=m.strip(), api_key=improver_key, temperature=a.temperature,
+                    max_attempts=2, max_backoff_total_s=10.0)
+        for m in a.improver_model.split(",") if m.strip()
+    ]  # fmt: skip
     model_config = {
         "base_url": a.base_url,
         "model": a.model,
@@ -127,11 +160,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     with (
         Store(a.uri, a.db) as store,
         ModelClient(agent_cfg, transport=None if a.seed is None else SeededTransport(a.seed)) as model,
-        ModelClient(improver_cfg) as improver,
+        contextlib.ExitStack() as stack,
         GuardRuntime() as runtime,
         _mongo(a.uri) as client,
     ):
         store.setup(wait_search=False)
+        improver = FallbackChat([stack.enter_context(ModelClient(c)) for c in improver_cfgs])
         lab = Lab(
             cases=cases,
             run_case=run_case,
@@ -152,7 +186,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = evolve(store, model, a.generations, lab=lab, seed=seed_harness(), select_parent=chooser)
         report = summary(result, signer, time.perf_counter() - started, config)
         report["agent_model_cost"] = model.cost().__dict__
-        report["improver_model_cost"] = improver.cost().__dict__
+        report["improver_model_cost"] = {c.name: c.cost().__dict__ for c in improver.clients}
+        report["improver_served"] = improver.served
+        report["improver_refused"] = improver.refused
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     print(f"wrote {a.out}", flush=True)

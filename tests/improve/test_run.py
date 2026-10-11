@@ -32,6 +32,11 @@ class _Ctx:
     def setup(self, wait_search: bool = True) -> None:
         self.ready = wait_search
 
+    name = "fake-model"
+
+    def complete(self, messages: Any, tools: Any) -> Any:
+        return None
+
     def cost(self) -> Any:
         return type("C", (), {"__dict__": {"model_calls": 3}})()
 
@@ -101,3 +106,26 @@ def test_seeded_transport_adds_the_seed_to_chat_requests_only() -> None:
         mp.undo()
     assert json.loads(seen[0]["body"]) == {"model": "m", "temperature": 0, "seed": 7}
     assert int(seen[0]["len"]) == len(seen[0]["body"]) and seen[1]["path"] == "/v1/models"
+
+
+def test_fallback_chat_hands_a_refused_request_to_the_next_model() -> None:
+    from ratchet.agent.model import ModelError
+
+    class Refuses:
+        name = "a"
+
+        def complete(self, messages: Any, tools: Any) -> Any:
+            raise ModelError("HTTP 429 model_cooldown")
+
+    class Serves:
+        name = "b"
+
+        def complete(self, messages: Any, tools: Any) -> Any:
+            return "turn"
+
+    chat = run.FallbackChat([Refuses(), Serves()])  # type: ignore[list-item]
+    assert chat.complete([], []) == "turn" and chat.served == {"a": 0, "b": 1} and chat.refused["a"] == 1
+    with pytest.raises(ModelError):
+        run.FallbackChat([Refuses()]).complete([], [])  # type: ignore[list-item]
+    with pytest.raises(ValueError):
+        run.FallbackChat([])
