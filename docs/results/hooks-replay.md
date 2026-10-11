@@ -1,8 +1,9 @@
 # Guard replay over real coding-agent history
 
-One Ratchet guard, `no-force-push-main`, replayed in Ratchet's sandboxed guard runtime over the operator's own
-Claude Code session transcripts. No model call is made: each recorded tool call is checked as if the guard had
-been installed before it ran.
+One Ratchet guard, `no-force-push-main`, tested by replay over the operator's own Claude Code session transcripts.
+A guard is a small rule that checks each tool call before it runs. Replay means rerunning recorded past
+conversations through the rule, in Ratchet's sandboxed guard runtime. No model call is made: each recorded tool
+call is checked as if the guard had been installed before it ran.
 
 | Measure | Value |
 |---|---|

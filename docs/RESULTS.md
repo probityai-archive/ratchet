@@ -10,6 +10,7 @@ list disagree.
 | [AgentDojo results](results/agentdojo.md) | The loop run as an AgentDojo world: held-out utility, utility under attack and attack success, graded by AgentDojo's own checks, with every evaluation listed. |
 | [archive.json](results/archive.json) | The version archive export: every harness version as a node with its clade pass rate and admission yield. |
 | [Atlas feature probes on the hackathon sandbox](results/atlas-probes.md) | Each Atlas feature run against the hackathon sandbox before the product claims it, with the result for each server version. |
+| [Guard replay over real coding-agent history](results/hooks-replay.md) | One Ratchet guard, `no-force-push-main`, tested by replay over the operator's own Claude Code session transcripts. |
 | [tau-bench airline: Ratchet results](results/tau-airline.md) | The loop on tau-bench airline with its own database and reward: pass^k by harness and split. |
 | [tau-bench retail: Ratchet results](results/tau-retail.md) | The loop on tau-bench retail with its own database and reward: pass^k by harness and split, with crashed and stopped runs listed. |
 | [Terminal-Bench 2.0: Ratchet results](results/terminal-bench.md) | Run records live under `private/bench/terminal/` (never committed); every number below is read from them and printed with its denominator. |
