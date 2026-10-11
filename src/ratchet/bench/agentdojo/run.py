@@ -98,9 +98,16 @@ class DojoSimulator:
 class JsonStore:
     """The improver's store protocol over JSON-lines files in one directory. Thread-safe appends."""
 
+    FILES = ("harnesses.jsonl", "traces.jsonl", "evals.jsonl", "decisions.jsonl")
+
     def __init__(self, root: Path) -> None:
+        """A store over an empty run directory. Appending a second run to an old one would mix their
+        records, so a directory that already holds any record file is refused."""
         self.root = root
         root.mkdir(parents=True, exist_ok=True)
+        used = [name for name in self.FILES if (root / name).exists()]
+        if used:
+            raise FileExistsError(f"{root} already holds a run ({', '.join(used)}); use a new directory")
         self._lock = threading.Lock()
         self._evals = 0
         self._harnesses: set[str] = set()

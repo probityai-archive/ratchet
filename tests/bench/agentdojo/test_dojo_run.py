@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from dojo_fakes import GroundTruthModel
 
 from ratchet.agent.worker import RunLimits
@@ -131,6 +132,8 @@ def test_json_store_writes_each_record_once(tmp_path: Path, banking: DojoSuite) 
     assert decisions[1] == {"decision_id": "d", "ok": True}
     evals = [json.loads(x) for x in (root / "evals.jsonl").read_text().splitlines()]
     assert evals[-1] == {"eval_id": "eval-0003", "value": [1, 2]}
+    with pytest.raises(FileExistsError, match="already holds a run"):
+        JsonStore(root)
 
 
 class GuardPayload:
