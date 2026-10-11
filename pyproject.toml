@@ -84,7 +84,8 @@ override-dependencies = ["litellm==1.102.1"]
 # pydantic>=2.9; numpy 1.26.4 and openai 1.17.0 conflict with the versions already locked) and declares
 # clients for model providers the adapter never imports. This is the metadata for the modules that
 # `ratchet.bench.toolsandbox` loads: the conflicting pins are relaxed, and polars stays at 0.20.31 because
-# tool-sandbox imports `polars.type_aliases`, which later polars releases removed.
+# tool-sandbox imports `polars.type_aliases`, which later polars releases removed. pint is unpinned because
+# 0.23 calls `numpy.cumproduct`, which numpy 2 removed.
 name = "tool-sandbox"
 version = "0.0.1"
 requires-dist = [
@@ -100,7 +101,7 @@ requires-dist = [
     "numpy",
     "openai",
     "phonenumbers==8.13.39",
-    "pint==0.23",
+    "pint",
     "polars==0.20.31",
     "pydantic",
     "pyyaml",
