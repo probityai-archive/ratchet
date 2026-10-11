@@ -36,6 +36,7 @@ class Tau2Case:
     split: Split
     trial: int = 0
     seed: int | None = None
+    family: str = ""
     must_succeed: bool = True
     kind: str = "must_succeed"
 
@@ -67,7 +68,19 @@ def domain_cases(domain: Domain, task_ids: Sequence[str] | None = None) -> list[
         if unknown:
             raise ValueError(f"unknown {domain} task ids: {unknown}")
         tasks = list(task_ids)
-    return [Tau2Case(case_id(domain, t), t, domain, "heldout" if t in test else "train") for t in tasks]
+    return [
+        Tau2Case(
+            case_id(domain, t), t, domain, "heldout" if t in test else "train", family=family_of(domain, t)
+        )
+        for t in tasks
+    ]
+
+
+def family_of(domain: Domain, task_id: str) -> str:
+    """A case family: the issue category for telecom (`[mobile_data_issue]...`), else the domain."""
+    if task_id.startswith("[") and "]" in task_id:
+        return f"tau2-{domain}-{task_id[1 : task_id.index(']')]}"
+    return f"tau2-{domain}"
 
 
 def trial_seeds(seed: int, trials: int) -> list[int]:
