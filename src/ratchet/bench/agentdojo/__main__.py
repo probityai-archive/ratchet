@@ -33,6 +33,7 @@ from ratchet.bench.agentdojo.report import document, render
 from ratchet.bench.agentdojo.run import DojoRunner, JsonStore
 from ratchet.improve.evaluate import evaluate_many
 
+STOPPED = "STOPPED.txt"  # written by the operator of a run that was stopped on purpose, with the reason
 REFERENCE_CLONE = Path.home() / "Documents" / "git-clones" / "agentdojo"
 
 
@@ -139,9 +140,14 @@ def summarize(out: Path) -> dict[str, Any]:
         raise SystemExit(f"{out}: the rebuilt suite does not match the run's suite digest")
     versions = recorded_lineage(out)
     previous = json.loads((out / "results.json").read_text()) if (out / "results.json").is_file() else {}
-    done = previous.get("status") == "complete"
     command = str(previous.get("command") or "summarize")
-    return write_results(out, dojo, prov, versions, command, "complete" if done else "in progress")
+    if previous.get("status") == "complete":
+        status = "complete"
+    elif (out / STOPPED).is_file():
+        status = "stopped: " + (out / STOPPED).read_text().strip()
+    else:
+        status = "in progress"
+    return write_results(out, dojo, prov, versions, command, status)
 
 
 def transfer(source: Path, s: Settings) -> dict[str, Any]:

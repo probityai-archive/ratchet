@@ -126,6 +126,8 @@ def test_summarize_rebuilds_results_from_the_run_files(
     assert results["metrics"] == first["metrics"] and len(results["generations"]) == 2
     (s.out / "results.json").unlink()
     assert cli.summarize(s.out)["status"] == "in progress"
+    (s.out / cli.STOPPED).write_text("no headroom\n")
+    assert cli.summarize(s.out)["status"] == "stopped: no headroom"
     prov = json.loads((s.out / "provenance.json").read_text())
     (s.out / "provenance.json").write_text(json.dumps({**prov, "seed": 7}))
     with pytest.raises(SystemExit, match="suite digest"):
