@@ -7,7 +7,7 @@ module adds three things around it:
 
 - `Graded`, the same numbers as plain data with each milestone's and minefield's own similarity, so a record
   keeps what the benchmark computed and a report can total it any way the benchmark does;
-- reasons in words, one per milestone not fully met and per minefield reached, naming the state expected (or
+- reasons in words, one per milestone missed and per minefield reached, naming the state expected (or
   forbidden), so `diagnose` can group failures and locate the step that caused them;
 - `PASS_SIMILARITY`, Ratchet's binary reading of the continuous score (see the constant).
 """
@@ -153,14 +153,19 @@ def message_label(context: ExecutionContext, snapshot_index: int | None) -> str:
 
 
 def reasons_for(graded: Graded) -> list[str]:
-    """One sentence per milestone not fully met and per minefield reached, from the first to the last.
+    """One sentence per milestone scored below the pass line and per minefield reached, first to last.
+
+    A milestone scored between the pass line and 1 is a wording gap on free text (ROUGE-L), not a miss, and a
+    trace whose mean is under the pass line always has a milestone under it, so a failure always has a reason.
 
     The sentence names only the state expected or forbidden, never the similarity or the message it matched,
     so it reads the same at every step of a conversation that has not changed it; `diagnose` finds the step
     that caused a failure by watching where a reason starts to hold. The match detail is in `Graded`.
     """
     reasons = [
-        f"milestone {s.index + 1} not met: {s.description}" for s in graded.milestones if s.similarity < EXACT
+        f"milestone {s.index + 1} not met: {s.description}"
+        for s in graded.milestones
+        if s.similarity < PASS_SIMILARITY
     ]
     reasons += [
         f"minefield {s.index + 1} reached: {s.description}" for s in graded.minefields if s.similarity > 0.0

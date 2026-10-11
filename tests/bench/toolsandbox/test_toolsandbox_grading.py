@@ -37,10 +37,14 @@ def test_passed_is_at_the_declared_threshold_and_exact_is_one() -> None:
     assert EXACT < 1.0
 
 
-def test_reasons_name_each_unmet_milestone_and_reached_minefield_only() -> None:
+def test_reasons_name_each_missed_milestone_and_reached_minefield_only() -> None:
     graded = _graded(
         0.0,
-        milestones=(Score(0, 1.0, 5, "SETTING has {}", "m"), Score(1, 0.4, 7, "SANDBOX has {}", "m")),
+        milestones=(
+            Score(0, 1.0, 5, "SETTING has {}", "m"),
+            Score(1, 0.4, 7, "SANDBOX has {}", "m"),
+            Score(2, 0.95, 8, "SANDBOX has text", "m"),
+        ),
         minefields=(Score(0, 0.0, None, "never", "m"), Score(1, 1.0, 9, "CONTACT unchanged", "m")),
     )
     assert reasons_for(graded) == [
