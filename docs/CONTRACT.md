@@ -220,6 +220,112 @@ new evidence. CACHED response playback never counts as a fresh run.
 
 Costs are recorded and reported, not used as a worker admission gate.
 
+### Fresh worker-evaluation gate: stochastic policy v3
+
+This policy is a tolerance-based empirical evaluation policy for
+nondeterministic executions. It does not establish zero regression,
+statistical significance, or universal reliability.
+
+Before evaluation, freeze the policy, evaluator configuration, case
+manifest, runtime, endpoint configuration, execution schedule, proposal
+budget, and infrastructure retry rules.
+
+Every arm contains 40 fresh executions of every declared case, divided
+prospectively into two panels of 20. Panel membership is fixed before
+outcomes are observed.
+
+Interleave arms using a predeclared randomized schedule. Each execution
+uses isolated world state. Model sessions and other mutable state must
+not carry information between executions.
+
+When supported, use a predeclared seed schedule shared across arms.
+A shared seed does not establish deterministic or independent outcomes.
+Record the actual model, endpoint, batching, and concurrency configuration.
+
+For case i and arm A, let s(A, i) be its number of passes out of 40.
+Let s(A, i, j) be its number of passes out of 20 in panel j.
+
+A case is high-pass when s(A, i) is at least 30.
+A case is low-pass when s(A, i) is at most 10.
+All other cases are intermediate. Intermediate cases remain in every
+denominator and in the per-case degradation checks.
+
+A stable recovery is a case for which:
+- the parent is low-pass;
+- the candidate is high-pass; and
+- in each panel, the candidate has at least eight more passes than
+  the parent.
+
+Require at least two stable recoveries.
+
+A stable regression is a case that is high-pass under the parent and
+low-pass under the candidate. Require zero stable regressions.
+
+Additionally, for every case, candidate pass count must be no more than
+eight below the parent pass count out of 40.
+
+The candidate's unweighted mean case pass rate must be no more than
+five percentage points below the parent's, both across all 40 executions
+and separately in each panel.
+
+Must-succeed cases receive all of these checks and are reported as a
+separate subset. This policy does not require every must-succeed execution
+to pass. Any separately declared hard safety invariant remains absolute
+and cannot be relaxed by these tolerances.
+
+Require zero forbidden benign-twin interventions in every candidate
+execution.
+
+Before evaluating candidates in a comparison cohort, qualify the cohort
+with a fresh parent reference arm and two fresh identity-control arms.
+Each identity-control arm executes exactly the parent's effective harness,
+without instructional or executable changes, under the same evaluator
+configuration and schedule rules.
+
+Each identity-control arm must:
+- pass every non-regression check against the parent reference; and
+- have fewer than two stable recoveries against that reference.
+
+An identity-control failure makes the cohort UNQUALIFIED. No candidate
+may be admitted using that cohort. Retain and report the failed controls.
+Do not replace unfavorable completed control runs or adjust tolerances
+within the cohort.
+
+A candidate with no change to the effective system prompt, procedures,
+guards, or tool permissions is ineligible for improvement admission.
+Changes only to identifiers, provenance, parent references, or timestamps
+do not constitute an effective harness change.
+
+The identity-control empirical improvement check is required even though
+identity candidates are structurally ineligible for admission.
+
+Parent references may be shared only within the qualified frozen cohort.
+Both identity controls are calibration evidence, not additional parent
+runs from which a favorable reference may be selected.
+
+Every candidate is immutable before its protected evaluation begins.
+The two panels evaluate the same candidate digest. Neither panel may
+be replaced by an additional favorable completed run.
+
+Missing or invalid executions cannot satisfy the gate. Infrastructure
+retries follow only the predeclared rules and retain attempt records.
+Candidate-caused runtime failures are not infrastructure retry events.
+
+Reports retain all execution outcomes, panel assignments, pass counts,
+classification changes, stable recoveries, stable regressions, per-case
+declines, aggregate differences, control results, costs, and retry records.
+
+Protected detailed reports remain evaluator-only. Proposer feedback
+continues to use the frozen sanitized report schema.
+
+Passing this policy authorizes admission only when every other applicable
+gate passes. Receipt-first conditional activation remains separate.
+
+Receipts name stochastic policy v3 and its exact thresholds. Existing
+ruling-2 decisions remain ruling-2 decisions.
+
+Operator acceptance, 2026-10-11: stochastic policy v3 is adopted for nondeterministic evaluators, including its tolerances (a per-case observed decline of up to 8 of 40 passes and an aggregate decline of up to 5 percentage points). A decision made under v3 never claims zero regressions.
+
 ## Public text (operator ruling, 2026-10-11)
 
 No public artifact (README, docs/, code comments, docstrings, commit messages, demo, video, submission form, posts,
