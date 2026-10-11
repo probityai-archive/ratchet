@@ -148,8 +148,9 @@ def test_cli_run_and_render_with_candidate_file(tmp_path: Path, monkeypatch: pyt
     n = len(by_split("audit"))
     assert data["summaries"]["audit"]["cases"] == n and data["meta"]["trace_db"] is None
     md = tmp_path / "t.md"
-    assert cli.main(["render", str(out), "--out", str(md), "--note", "K=V"]) == 0
-    assert f"{n}/{n}" in md.read_text(encoding="utf-8")
+    assert cli.main(["render", str(out), "--out", str(md), "--note", "K=V", "--control", str(out)]) == 0
+    text = md.read_text(encoding="utf-8")
+    assert f"{n}/{n}" in text and "## A/A control: m" in text
     with pytest.raises(SystemExit):
         cli.main(["run", "--base-url", "u", "--model", "m", "--out", str(out)])
 

@@ -23,14 +23,14 @@ def _passes(xs: Sequence[int], n: int) -> str:
     return ", ".join(f"{x}/{n}" for x in xs)
 
 
-def _model_section(res: dict[str, Any], digest: str) -> list[str]:
+def _model_section(res: dict[str, Any], digest: str, title: str | None = None) -> list[str]:
     meta = res["meta"]
     ep = meta["endpoint"]
     served = ", ".join(
         f"`{s['id']}` (root `{s['root']}`, max_model_len {s['max_model_len']})" for s in ep["served"]
     )
     out = [
-        f"## {meta['model']}",
+        f"## {title or meta['model']}",
         "",
         f"- Served: {served}; vLLM `{ep.get('server_version')}`; sampling: server defaults from the "
         "checkpoint's generation config (the client sends no temperature).",
@@ -96,8 +96,13 @@ def _model_section(res: dict[str, Any], digest: str) -> list[str]:
     return out
 
 
-def render(results: Sequence[tuple[dict[str, Any], str]], header: dict[str, Any]) -> str:
-    """`results` is (payload, sha256 of its file) per model; `header` names the harnesses and suite."""
+def render(
+    results: Sequence[tuple[dict[str, Any], str]],
+    header: dict[str, Any],
+    controls: Sequence[tuple[dict[str, Any], str]] = (),
+) -> str:
+    """`results` is (payload, sha256 of its file) per model; `header` adds setup lines; `controls` are A/A
+    runs (v0 against itself) that measure how much two identical harnesses disagree on each model."""
     if not results:
         raise ValueError("no result files to render")
     first = results[0][0]["meta"]
@@ -140,4 +145,14 @@ def render(results: Sequence[tuple[dict[str, Any], str]], header: dict[str, Any]
     lines.append("")
     for res, digest in results:
         lines += _model_section(res, digest)
+    if controls:
+        lines += [
+            "## A/A controls: v0 against itself",
+            "",
+            "The same pipeline with the candidate replaced by v0. Every discordant pair here is run-to-run "
+            "noise, so these b and c counts are what a change with no effect produces on each model.",
+            "",
+        ]
+        for res, digest in controls:
+            lines += _model_section(res, digest, title=f"A/A control: {res['meta']['model']}")
     return "\n".join(lines).rstrip() + "\n"

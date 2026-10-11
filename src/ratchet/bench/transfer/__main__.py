@@ -194,12 +194,16 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_render(args: argparse.Namespace) -> int:
-    results = []
-    for path in args.results:
-        data = Path(path).read_bytes()
-        results.append((json.loads(data), hashlib.sha256(data).hexdigest()))
+    def load(paths: list[str]) -> list[tuple[dict[str, Any], str]]:
+        out = []
+        for path in paths:
+            data = Path(path).read_bytes()
+            out.append((json.loads(data), hashlib.sha256(data).hexdigest()))
+        return out
+
     header = dict(item.split("=", 1) for item in args.note)
-    Path(args.out).write_text(render(results, header), encoding="utf-8")
+    text = render(load(args.results), header, load(args.control))
+    Path(args.out).write_text(text, encoding="utf-8")
     return 0
 
 
@@ -230,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     rd = sub.add_parser("render")
     rd.add_argument("results", nargs="+")
     rd.add_argument("--out", required=True)
+    rd.add_argument("--control", action="append", default=[], help="an A/A result file (v0 against v0)")
     rd.add_argument("--note", action="append", default=[], help="KEY=VALUE line for the setup section")
     args = p.parse_args(argv)
     handlers = {"probe": cmd_probe, "run": cmd_run, "render": cmd_render}
