@@ -50,9 +50,15 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 strict = true
 python_version = "3.12"
 
+[[tool.mypy.overrides]]
+# AgentDojo ships typed source without a py.typed marker; analyse it rather than treat it as Any.
+module = ["agentdojo", "agentdojo.*"]
+follow_untyped_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-W error"
 
 [tool.uv.sources]
 tau-bench = { git = "https://github.com/sierra-research/tau-bench", rev = "59a200c6d575d595120f1cb70fea53cef0632f6b" }
+probity-verify = { git = "https://github.com/probityai/probity-verify", rev = "b920366397cb131232163706864a70723b867367" }
