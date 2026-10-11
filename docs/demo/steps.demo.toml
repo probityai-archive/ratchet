@@ -1,0 +1,100 @@
+# The 3-minute live demo. `demo.py run <id>` runs `cmd` live; if it fails or times out it shows the stored
+# output of the last good run, labelled RECORDED with its timestamp. `snap` (when present) is the command
+# stored for that fallback (no animation delay, no waiting on a model).
+# {{NAME}} values come from docs/demo/ids.env.
+
+[[step]]
+id = "matrix"
+window = "0:00-0:30"
+title = "Rejected candidate, bad retry, legitimate refund, replay matrix"
+cmd = "ratchet replay {{REJECTED_CAND}} {{CLEARED_CAND}}"
+snap = "ratchet replay {{REJECTED_CAND}} {{CLEARED_CAND}} --delay 0"
+timeout = 60
+
+[[step]]
+id = "trace"
+window = "0:30-0:50"
+title = "The trace from Atlas: commit, timeout, retry, final ledger"
+cmd = "ratchet show trace {{BAD_TRACE}}"
+timeout = 30
+
+[[step]]
+id = "evolve"
+window = "0:50-1:20"
+title = "Evolution run in progress: failure context and proposed guard"
+cmd = "python3 docs/demo/demo.py follow {{EVOLVE_LOG}}"
+snap = "tail -n 40 {{EVOLVE_LOG}}"
+timeout = 40
+mark = "live-generated"
+
+[[step]]
+id = "replay-new"
+window = "0:50-1:20"
+title = "Replay the freshly proposed guard"
+cmd = "ratchet replay"
+snap = "ratchet replay --delay 0"
+timeout = 60
+mark = "live-generated"
+
+[[step]]
+id = "eval-status"
+window = "1:20-1:50"
+title = "Fresh evaluator status (change stream)"
+cmd = "ratchet live --timeout 10 --max-events 8"
+timeout = 20
+
+[[step]]
+id = "admitted"
+window = "1:20-1:50"
+title = "Completed, timestamped paired evaluation and the admission result"
+cmd = "ratchet show decision {{ADMITTED_DECISION}}"
+timeout = 30
+
+[[step]]
+id = "authority"
+window = "1:50-2:10"
+title = "Authority-expansion rejection"
+cmd = "ratchet show decision {{AUTHORITY_DECISION}}"
+timeout = 30
+
+[[step]]
+id = "denied"
+window = "1:50-2:10"
+title = "Denied protected-collection read"
+cmd = "python3 docs/demo/denied_read.py"
+timeout = 30
+
+[[step]]
+id = "verify"
+window = "1:50-2:10"
+title = "Signed receipt checked against the pinned key"
+cmd = "ratchet verify {{ADMITTED_DECISION}}"
+timeout = 30
+
+[[step]]
+id = "lineage"
+window = "2:10-2:35"
+title = "Atlas lineage"
+cmd = "ratchet show lineage"
+timeout = 30
+
+[[step]]
+id = "results"
+window = "2:10-2:35"
+title = "AgentDojo and tau-bench results, subset sizes and provenance"
+cmd = "cat {{RESULTS_FILE}}"
+timeout = 10
+
+[[step]]
+id = "level2"
+window = "2:35-2:50"
+title = "Frozen level-2 experiment result"
+cmd = "cat {{LEVEL2_FILE}}"
+timeout = 10
+
+[[step]]
+id = "resume"
+window = "2:50-3:00"
+title = "Resume an interrupted case without repeating its committed side effect"
+cmd = "{{RESUME_CMD}}"
+timeout = 60

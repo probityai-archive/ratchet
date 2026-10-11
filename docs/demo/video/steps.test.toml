@@ -1,0 +1,25 @@
+# Pipeline test: placeholder commands and synthetic screens. The banner says so.
+[[step]]
+id = "help"
+cmd = "ratchet --help"
+hold = 2.0
+captions = [
+  { at = 0.0, text = "Pipeline test: the real ratchet command line, run for real." },
+]
+
+[[step]]
+id = "matrix"
+cmd = "python3 docs/demo/video/pipeline_fixture.py matrix"
+hold = 3.0
+captions = [
+  { at = 0.0, text = "Synthetic replay matrix: checks glyphs and widths." },
+  { at = 3.0, text = "Second caption beat inside one step." },
+]
+
+[[step]]
+id = "decision"
+cmd = "python3 docs/demo/video/pipeline_fixture.py decision"
+hold = 3.0
+captions = [
+  { at = 0.0, text = "Failure -> executable change -> recorded checks -> signed admission." },
+]

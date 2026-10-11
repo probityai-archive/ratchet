@@ -1,0 +1,4 @@
+# Recordings, casts and recorded-output snapshots are produced on the presenter's machine.
+out/
+recorded/
+ids.env
