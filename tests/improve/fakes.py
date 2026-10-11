@@ -199,3 +199,39 @@ CRASHING_GUARD = """
 def check(call, view, history):
     return view["missing"]
 """
+
+
+@dataclass(frozen=True)
+class FakeCase:
+    id: str
+    split: Any
+    must_succeed: bool = True
+
+
+def fake_cases() -> list[FakeCase]:
+    """Timeout cases fail until a guard exists; plain cases always pass; one plain case refuses-to-run."""
+    return [
+        FakeCase("timeout-1", "train"), FakeCase("timeout-2", "train"), FakeCase("plain-3", "train"),
+        FakeCase("timeout-4", "heldout"), FakeCase("timeout-5", "heldout"), FakeCase("plain-6", "heldout"),
+    ]  # fmt: skip
+
+
+class FakeRunCase:
+    """Stands in for the agent: any guard fixes timeouts; `block_plain` breaks plain cases."""
+
+    def __init__(self, block_plain: bool = False, explode: str | None = None) -> None:
+        self.block_plain = block_plain
+        self.explode = explode
+        self.calls = 0
+
+    def __call__(self, harness: Any, case: Any, model: Any, store: Any) -> Trace:
+        self.calls += 1
+        n = int(case.id.rsplit("-", 1)[-1])
+        run = f"{harness.version}-{case.id}-{self.calls}"
+        if case.id == self.explode:
+            raise RuntimeError("model endpoint down")
+        if case.id.startswith("timeout"):
+            t = good_timeout(n, run) if harness.guards else bad_timeout(n, run)
+        else:
+            t = lazy(n, run) if self.block_plain and harness.guards else good_plain(n, run)
+        return Trace(t.run_id, t.case_id, harness.version, t.model, t.events, t.outcome)
