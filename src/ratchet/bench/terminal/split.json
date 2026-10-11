@@ -1,0 +1,40 @@
+{
+  "digest": "97264170d0b16b2bf9767d369ce4ef6b116b4d6ceafb13c87dc0d871784047df",
+  "phases": {
+    "1": {
+      "heldout": [
+        "model-extraction-relu-logits",
+        "polyglot-rust-c",
+        "torch-tensor-parallelism",
+        "write-compressor"
+      ],
+      "train": [
+        "cancel-async-tasks",
+        "configure-git-webserver",
+        "fix-code-vulnerability",
+        "gpt2-codegolf",
+        "make-doom-for-mips",
+        "password-recovery",
+        "sparql-university",
+        "torch-pipeline-parallelism"
+      ]
+    },
+    "2": {
+      "heldout": [
+        "dna-assembly",
+        "mcmc-sampling-stan",
+        "path-tracing",
+        "path-tracing-reverse"
+      ],
+      "train": [
+        "extract-moves-from-video",
+        "feal-differential-cryptanalysis",
+        "feal-linear-cryptanalysis",
+        "llm-inference-batching-scheduler",
+        "make-mips-interpreter",
+        "protein-assembly"
+      ]
+    }
+  },
+  "seed": 20261011
+}
