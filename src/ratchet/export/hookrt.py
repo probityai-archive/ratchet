@@ -62,6 +62,9 @@ SERVER_TIMEOUT_S = 300.0
 SERVER_START_S = 5.0
 SERVER_IDLE_S = 900.0
 SERVER_SESSIONS = 8
+# Wall time past the guard's CPU limit before the parent stops a guard that blocks without using CPU. The
+# child enforces the limit itself in CPU time, counted from its loading and start markers.
+GUARD_WALL_GRACE_S = 5.0
 SOCKET_PATH_MAX = 107  # bytes in sockaddr_un.sun_path, less the terminating zero, on Linux
 
 
@@ -409,6 +412,9 @@ class GuardChild:
         try:
             self._send(setup, deadline)
             ready = self._recv(deadline)
+            if ready.get("loading"):
+                # The sandbox is up; loading the guard is untrusted work under the guard's own limit.
+                ready = self._recv(time.monotonic() + spec.call_timeout_s + GUARD_WALL_GRACE_S)
         except ChildError:
             self.close()
             raise
@@ -485,6 +491,9 @@ class GuardChild:
             self._send(request, time.monotonic() + spec.startup_timeout_s + spec.call_timeout_s)
             # The child times the guard itself; this backstop also covers decoding a large history.
             reply = self._recv(time.monotonic() + spec.startup_timeout_s + spec.call_timeout_s + 0.5)
+            if reply.get("s") == index:
+                # The child decoded the request and started the guard, which it times in CPU time.
+                reply = self._recv(time.monotonic() + spec.call_timeout_s + GUARD_WALL_GRACE_S)
             if reply.get("i") != index:
                 raise ChildError("guard process sent a malformed reply")
         except ChildError as exc:
