@@ -59,6 +59,7 @@ class Decision:
     exceptions: list[str] = field(default_factory=list)
     context: dict[str, Any] = field(default_factory=dict)
     decided_at: str = ""
+    policy: dict[str, Any] | None = None  # set for stochastic policy v3; ruling-2 decisions carry none
 
     def check(self, name: str) -> Check:
         return next(c for c in self.checks if c.name == name)
@@ -80,7 +81,7 @@ class Decision:
             "exceptions": self.exceptions,
             "context": self.context,
             "decided_at": self.decided_at,
-        }
+        } | ({"policy": self.policy} if self.policy is not None else {})
 
 
 def report_digest(payload: Mapping[str, Any]) -> str:
@@ -414,3 +415,62 @@ def awaiting_confirmation(d: Decision) -> bool:
     f = d.check("heldout").evidence
     others = all(c.passed for c in d.checks if c.name in GATES and c.name != "heldout")
     return others and bool(f["initial_ok"]) and bool(f["confirm_pending"])
+
+
+V3_GATES = ("replay", "stochastic_v3", "cohort_qualified", "effective_change", "benign_twins", "overfit_lint",
+            "authority")  # fmt: skip
+
+
+_V3_SEPARATE = ("cohort_qualified", "effective_change", "zero_benign_twin_interventions")
+
+
+def admit_v3(
+    parent: Harness,
+    candidate: Harness,
+    *,
+    cohort: Mapping[str, Any],
+    comparison: Mapping[str, Any],
+    benign_interventions: int,
+    replay_check: Check,
+    overfit_check: Check,
+    evaluator: Mapping[str, Any],
+    visible_case_ids: Sequence[str],
+    report_digests: Mapping[str, str],
+    corpus_digests: Mapping[str, str],
+    scope: Mapping[str, Any],
+    exceptions: Sequence[str] = (),
+    context: Mapping[str, Any] | None = None,
+) -> Decision:
+    """A decision under stochastic policy v3. It never claims zero regressions: its evaluation gate is
+    `stochastic_v3`, whose evidence carries every count, decline and classification change."""
+    from ratchet.improve.stochastic import POLICY, candidate_gate, effective_change
+
+    if candidate.parent != parent.version:
+        raise ValueError(f"candidate {candidate.version} is not a child of {parent.version}")
+    change = effective_change(parent, candidate)
+    gate = candidate_gate(cohort, comparison, benign_interventions, any(change.values()))
+    checks = [
+        replay_check,
+        Check("stochastic_v3", all(v for k, v in gate["checks"].items() if k not in _V3_SEPARATE),
+              {"gate": gate, "comparison": dict(comparison), "scope": dict(scope)}),
+        Check("cohort_qualified", cohort["status"] == "QUALIFIED", {"cohort": dict(cohort)}),
+        Check("effective_change", any(change.values()), {"changed": change}),
+        Check("benign_twins", benign_interventions == 0, {"interventions": benign_interventions}),
+        overfit_check,
+        check_structure(parent, candidate),
+    ]  # fmt: skip
+    return Decision(
+        parent=parent.version,
+        candidate=candidate.version,
+        candidate_digest=candidate.digest,
+        admitted=all(c.passed for c in checks),
+        checks=checks,
+        visible_case_ids=sorted(visible_case_ids),
+        evaluator=dict(evaluator),
+        corpus_digests=dict(corpus_digests),
+        report_digests=dict(report_digests),
+        exceptions=list(exceptions),
+        context=dict(context or {}),
+        decided_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        policy=dict(POLICY),
+    )

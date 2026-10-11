@@ -108,3 +108,46 @@ def test_schedule_interleaves_every_arm_and_is_predeclared() -> None:
     first = [a for a, _, _ in order[:30]]
     assert {"parent", "id1", "cand"} <= set(first)
     assert POLICY["version"] == "v3"
+
+
+def test_a_v3_decision_names_its_policy_and_verifies_as_v3() -> None:
+    from ratchet.improve.admit import Check, admit_v3
+    from ratchet.improve.receipt import Signer, receipt
+    from ratchet.verify import verify_decision
+
+    seed = Harness.build(parent=None, system_prompt="p", procedures=[], guards=[], tool_allowlist=["t"],
+                         created_by="seed")  # fmt: skip
+    cand_h = seed.child(guards=[Guard("g1", "d", "def check(call, view, history):\n    return None\n")],
+                        created_by="improver")  # fmt: skip
+    cand = arm("cand", {"a": (17, 16), "b": (17, 17), "c": (18, 19)})
+    same = arm("id1", {"a": (2, 3), "b": (4, 4), "c": (18, 19)})
+    cohort = qualify(PARENT, [same, same], CASES)
+    d = admit_v3(
+        seed, cand_h, cohort=cohort, comparison=compare(PARENT, cand, CASES), benign_interventions=0,
+        replay_check=Check("replay", True, {}), overfit_check=Check("overfit_lint", True, {}),
+        evaluator={"version": "ev3", "components": {"suite_file": "ab" * 32}}, visible_case_ids=["t1"],
+        report_digests={"arms": "0" * 64}, corpus_digests={}, scope={"cases": 3},
+    )  # fmt: skip
+    payload = d.to_payload()
+    assert (
+        d.admitted
+        and payload["policy"] == POLICY
+        and all(c["name"] != "no_regression" for c in payload["checks"])
+    )
+    signer = Signer.generate()
+    ok = verify_decision(receipt(d, signer), signer.public_key)
+    assert ok.ok and ok.admitted is True, ok
+    unqualified = admit_v3(
+        seed, cand_h, cohort={"status": "UNQUALIFIED"}, comparison=compare(PARENT, cand, CASES),
+        benign_interventions=0, replay_check=Check("replay", True, {}), overfit_check=Check("overfit_lint", True, {}),
+        evaluator={"version": "ev3", "components": {"suite_file": "ab" * 32}}, visible_case_ids=[],
+        report_digests={"arms": "0" * 64}, corpus_digests={}, scope={},
+    )  # fmt: skip
+    assert not unqualified.admitted and verify_decision(receipt(unqualified, signer), signer.public_key).ok
+
+    from dataclasses import replace
+
+    loose = replace(d, policy={**POLICY, "max_case_decline": 12})
+    assert verify_decision(receipt(loose, signer), signer.public_key).reason == "unsupported_policy"
+    claims = replace(d, checks=[*d.checks, Check("no_regression", True, {})])
+    assert verify_decision(receipt(claims, signer), signer.public_key).reason == "v3_claims_zero_regression"

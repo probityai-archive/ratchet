@@ -45,6 +45,15 @@ POLICY_SCHEMA = "ratchet-decision-policy/v1"
 DECISION_PAYLOAD_TYPE = "application/vnd.ratchet.decision+json"
 PREDICATE_URI = "https://github.com/probityai/agent-evidence-vocabulary/blob/main/docs/predicates/agent-change-admission-v1.md"
 DEFAULT_GATES = ("replay", "heldout", "no_regression", "authority", "benign_twins", "overfit_lint")
+# Stochastic policy v3 (docs/CONTRACT.md): its own gate names, and the exact thresholds a v3 receipt must
+# carry. A v3 decision never carries a zero-regression gate.
+V3_POLICY = {
+    "name": "stochastic", "version": "v3", "runs_per_arm": 40, "panels": 2, "panel_size": 20,
+    "high_pass_min": 30, "low_pass_max": 10, "recovery_panel_margin": 8, "min_stable_recoveries": 2,
+    "max_stable_regressions": 0, "max_case_decline": 8, "max_aggregate_decline_points": 5.0,
+}  # fmt: skip
+V3_GATES = ("replay", "stochastic_v3", "cohort_qualified", "effective_change", "benign_twins", "overfit_lint",
+            "authority")  # fmt: skip
 REPORT_ROLE = "report:"
 HARNESS_ROLE = "harness:"
 RECOMPUTED_ROLE = "recomputed:"
@@ -369,6 +378,14 @@ def adjudicate(case: Any, policy: Any, artifact_root: Path) -> dict[str, Any]:
         {k: payload[k] for k in ("parent", "candidate", "candidate_digest", "admitted", "exceptions")}
     )
 
+    policy = payload.get("policy")
+    if policy is not None:
+        if policy != V3_POLICY:
+            return v.finish("not_established", "unsupported_policy", "policy")
+        if any(c["name"] == "no_regression" for c in payload["checks"]):
+            return v.finish("contradicted", "v3_claims_zero_regression", "policy")
+        required = list(V3_GATES)
+        scope["policy"] = "stochastic-v3"
     if gate := _gate_problem(payload, required):
         return v.finish(gate[0], gate[1], "gates")
     v.met("gates", count=len(required))
