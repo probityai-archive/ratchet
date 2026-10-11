@@ -3,15 +3,19 @@ from __future__ import annotations
 import io
 import json
 import sys
+import threading
 from collections.abc import Iterator
 from dataclasses import asdict
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
+import httpx
 import pytest
 
 from ratchet.agent.guards import GuardRuntime
-from ratchet.export.mcp_gateway import Gateway, main
+from ratchet.export import mcp_gateway
+from ratchet.export.mcp_gateway import NOT_SENT, Gateway, HttpGateway, http_server, main
 from ratchet.improve.admit import Check, Decision
 from ratchet.improve.receipt import Signer, public_key_bytes, receipt
 from ratchet.types import Guard, Harness
@@ -213,3 +217,150 @@ def test_gateway_stops_when_the_server_is_gone(tmp_path: Path) -> None:
 
 def test_gateway_refuses_an_unadmitted_harness(tmp_path: Path) -> None:
     assert main([*admitted(tmp_path, admitted=False), "--", sys.executable, "-c", "pass"]) == 1
+
+
+# --- Streamable HTTP ----------------------------------------------------------------------------------------
+
+
+class Upstream(BaseHTTPRequestHandler):
+    """A fake MCP server on Streamable HTTP: JSON for most requests, SSE for `stream_tool`."""
+
+    seen: ClassVar[list[Any]] = []
+
+    def log_message(self, format: str, *args: Any) -> None:
+        return None
+
+    def do_POST(self) -> None:
+        message = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        Upstream.seen.append(message)
+        if isinstance(message, dict) and "id" not in message:
+            self.send_response(202)
+            self.end_headers()
+            return
+        items = message if isinstance(message, list) else [message]
+        replies = [self.reply(m) for m in items if "id" in m]
+        if items[0].get("params", {}).get("name") == "stream_tool":
+            progress = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 1}}
+            body = "".join(f"event: message\ndata: {json.dumps(m)}\n\n" for m in [progress, *replies])
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(body.encode())
+            return
+        data = json.dumps(replies if isinstance(message, list) else replies[0]).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        if items[0].get("method") == "initialize":
+            self.send_header("Mcp-Session-Id", "sess-1")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def reply(self, message: dict[str, Any]) -> dict[str, Any]:
+        name = message.get("params", {}).get("name", "")
+        result = {"content": [{"type": "text", "text": "ran " + name}], "isError": name == "fail_tool"}
+        return {"jsonrpc": "2.0", "id": message["id"], "result": result}
+
+    def do_GET(self) -> None:
+        self.send_response(405)
+        self.end_headers()
+
+    def do_DELETE(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", "6")
+        self.end_headers()
+        self.wfile.write(b"closed")
+
+
+@pytest.fixture
+def http_pair(runtime: GuardRuntime) -> Iterator[tuple[str, HttpGateway]]:
+    Upstream.seen = []
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    guards = [Guard("no-delete", "", NO_DELETE), Guard("after-failure", "", AFTER_FAILURE)]
+    with httpx.Client(timeout=30) as client:
+        gateway = HttpGateway(guards, runtime, f"http://127.0.0.1:{upstream.server_address[1]}/mcp", client)
+        server = http_server(gateway, "127.0.0.1", 0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        yield f"http://127.0.0.1:{server.server_address[1]}/mcp", gateway
+        server.shutdown()
+        server.server_close()
+    upstream.shutdown()
+    upstream.server_close()
+
+
+def post(url: str, message: Any, session: str | None = None) -> httpx.Response:
+    headers = {"Accept": "application/json, text/event-stream"}
+    if session is not None:
+        headers["Mcp-Session-Id"] = session
+    return httpx.post(url, json=message, headers=headers, timeout=30)
+
+
+def test_http_gateway_forwards_json_and_sse_and_answers_blocked_calls(
+    http_pair: tuple[str, HttpGateway],
+) -> None:
+    url, gateway = http_pair
+    init = post(url, {"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}})
+    assert init.status_code == 200 and init.headers["mcp-session-id"] == "sess-1"
+    assert post(url, {"jsonrpc": "2.0", "method": "notifications/initialized"}, "sess-1").status_code == 202
+    assert (
+        post(url, tools_call(1, "read_file", {}), "sess-1").json()["result"]["content"][0]["text"]
+        == "ran read_file"
+    )
+    streamed = post(url, tools_call(2, "stream_tool", {}), "sess-1")
+    assert streamed.headers["content-type"].startswith("text/event-stream")
+    assert streamed.text.count("data: ") == 2 and "ran stream_tool" in streamed.text
+    blocked = post(url, tools_call(3, "delete_file", {}), "sess-1").json()
+    assert blocked["result"]["isError"] is True and "deleting files is not allowed" in str(blocked)
+    assert post(url, tools_call(4, "fail_tool", {}), "sess-1").json()["result"]["isError"] is True
+    after = post(url, tools_call(5, "write_file", {}), "sess-1").json()
+    assert "a call failed earlier (4)" in after["result"]["content"][0]["text"]
+    assert "ran write_file" in post(url, tools_call(6, "write_file", {}), "other").text
+    forwarded_ids = [m.get("id") for m in Upstream.seen if isinstance(m, dict)]
+    assert 3 not in forwarded_ids and 5 not in forwarded_ids
+    kinds = [e.kind for e in gateway.sessions["sess-1"].events]
+    assert kinds.count("tool_result") == 3 and kinds.count("guard_block") == 2
+
+
+def test_http_gateway_holds_back_a_batch_with_a_blocked_call(http_pair: tuple[str, HttpGateway]) -> None:
+    url, _ = http_pair
+    note = {"jsonrpc": "2.0", "method": "notifications/progress"}
+    replies = post(url, [tools_call(1, "delete_file", {}), tools_call(2, "read_file", {}), note]).json()
+    assert [r["id"] for r in replies] == [1, 2]
+    assert replies[1]["result"]["content"][0]["text"] == NOT_SENT
+    assert Upstream.seen == []
+    passed = post(url, [tools_call(3, "read_file", {}), tools_call(4, "read_file", {})]).json()
+    assert [r["id"] for r in passed] == [3, 4]
+
+
+def test_http_gateway_relays_other_methods_and_upstream_failures(
+    http_pair: tuple[str, HttpGateway], runtime: GuardRuntime
+) -> None:
+    url, _ = http_pair
+    assert httpx.get(url, headers={"Accept": "text/event-stream"}).status_code == 405
+    closed = httpx.delete(url, headers={"Mcp-Session-Id": "sess-1"})
+    assert (closed.status_code, closed.text) == (200, "closed")
+    with httpx.Client(timeout=5) as client:
+        down = http_server(HttpGateway([], runtime, "http://127.0.0.1:9/mcp", client), "127.0.0.1", 0)
+        threading.Thread(target=down.serve_forever, daemon=True).start()
+        response = post(f"http://127.0.0.1:{down.server_address[1]}/mcp", tools_call(1, "read_file", {}))
+        down.shutdown()
+        down.server_close()
+    assert response.status_code == 502 and response.json()["error"]["code"] == -32000
+
+
+def test_command_line_chooses_one_transport(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    args = admitted(tmp_path)
+    assert main(args) == 1
+    assert main([*args, "--upstream", "http://127.0.0.1:9/mcp", "--", "server"]) == 1
+
+    class Stops:
+        def serve_forever(self) -> None:
+            raise KeyboardInterrupt
+
+        def server_close(self) -> None:
+            return None
+
+    monkeypatch.setattr(mcp_gateway, "http_server", lambda gateway, host, port: Stops())
+    assert main([*args, "--upstream", "http://127.0.0.1:9/mcp", "--listen", "127.0.0.1:0"]) == 0
