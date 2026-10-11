@@ -348,13 +348,24 @@ def cmd_rates(args: argparse.Namespace) -> int:
         "phase-1 held-out (audit in phase 2)": [case_id(n) for n in sides["1"]["heldout"]],
     }
     out: dict[str, Any] = {}
+    columns: list[tuple[str, report.Rate]] = []
     for harness in args.harness.split(","):
         results = report.results_for(rows, harness, sources)
-        out[harness] = {
-            label: {"text": report.rate(results, ids).text(), "per_task": report.rate(results, ids).per_task}
-            for label, ids in sets.items()
-        }
-    print(json.dumps(out, indent=2))
+        out[harness] = {}
+        for label, ids in sets.items():
+            r = report.rate(results, ids)
+            out[harness][label] = {"text": r.text(), "per_task": r.per_task}
+            columns.append((f"`{harness}` {label}", r))
+    if not args.markdown:
+        print(json.dumps(out, indent=2))
+        return 0
+    print(report.table(columns))
+    union = [case_id(n) for n in (*PHASE_1, *PHASE_2)]
+    per = [
+        (f"`{h}`", report.rate(report.results_for(rows, h, sources), union)) for h in args.harness.split(",")
+    ]
+    print()
+    print(report.per_task_table(per, union))
     return 0
 
 
@@ -412,6 +423,7 @@ def parser() -> argparse.ArgumentParser:
     r = sub.add_parser("rates")
     r.add_argument("--harness", required=True, help="comma-separated harness versions")
     r.add_argument("--source", default="", help="comma-separated source prefixes under --out")
+    r.add_argument("--markdown", action="store_true", help="print tables instead of JSON")
     r.set_defaults(func=cmd_rates)
     return p
 

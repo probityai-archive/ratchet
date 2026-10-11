@@ -118,6 +118,10 @@ def test_union_trial_and_rates(env: None, tmp_path: Path, capsys: pytest.Capture
     assert rates["phase 1 (12 tasks)"]["text"] == "6/12 runs = 50.0% over 12 tasks"
     assert rates["phase 2 (10 tasks)"]["text"] == "0/10 runs = 0.0% over 10 tasks"
     assert rates["union (22 tasks)"]["text"] == "6/22 runs = 27.3% over 22 tasks"
+    assert M.main(["--out", str(out), "rates", "--harness", version, "--markdown"]) == 0
+    text = capsys.readouterr().out
+    assert f"| `{version}` phase 1 (12 tasks) | 6/12 | 50.0% | 12 | 0 |" in text
+    assert "| term-cancel-async-tasks | 1/1 |" in text
 
 
 def test_load_harness(tmp_path: Path) -> None:
