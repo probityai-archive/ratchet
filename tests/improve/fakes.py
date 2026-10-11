@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ratchet.improve.replay import GuardInput, Verdict
-from ratchet.improve.sim import Step, Walk, call_of, event_json, result_ids
-from ratchet.types import Cost, Event, Outcome, ToolCall, ToolResult, Trace
+from ratchet.improve.sim import Step, Walk, result_ids, tool_call_of
+from ratchet.types import Cost, Event, Guard, Outcome, ToolCall, ToolResult, Trace
 
 
 @dataclass
@@ -122,13 +122,13 @@ class FakeSimulator:
         for i, e in enumerate(trace.events):
             if e.kind != "tool_call":
                 continue
-            c = call_of(e)
+            c = tool_call_of(e)
             view = world.view()
-            executed = c["call_id"] in done
+            executed = c.call_id in done
             if executed:
-                world.call(ToolCall(c["name"], c["args"], c["call_id"]))
+                world.call(c)
             reasons = tuple(world.reasons()) if self.grade else None
-            steps.append(Step(e.seq, c, view, [event_json(x) for x in trace.events[:i]], executed, reasons))
+            steps.append(Step(e.seq, c, view, trace.events[:i], executed, reasons))
         return Walk(trace.run_id, steps, initial, True)
 
 
@@ -138,11 +138,11 @@ class LocalRunner:
     def __init__(self) -> None:
         self.batches = 0
 
-    def check_batch(self, source: str, inputs: Sequence[GuardInput]) -> list[Verdict]:
+    def check_batch(self, guard: Guard, inputs: Sequence[GuardInput]) -> list[Verdict]:
         self.batches += 1
         scope: dict[str, Any] = {}
         try:
-            exec(source, scope)
+            exec(guard.source, scope)
         except Exception as exc:
             return [Verdict(None, f"load: {exc}") for _ in inputs]
         out = []
@@ -182,9 +182,9 @@ class ScriptedChat:
 
 NO_DUP_GUARD = """
 def check(call, view, history):
-    if call["name"] != "refund":
+    if call.name != "refund":
         return None
-    charge = call["args"]["charge_id"]
+    charge = call.args["charge_id"]
     if any(r["charge_id"] == charge and r["status"] == "succeeded" for r in view["refunds"]):
         return "a refund for this charge already succeeded at the provider"
     return None
@@ -192,7 +192,7 @@ def check(call, view, history):
 
 BLOCK_ALL_REFUNDS = """
 def check(call, view, history):
-    return "no refunds" if call["name"] == "refund" else None
+    return "no refunds" if call.name == "refund" else None
 """
 
 CRASHING_GUARD = """

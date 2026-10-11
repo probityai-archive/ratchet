@@ -9,7 +9,7 @@ Replay and diagnosis both stand on this: replay asks "would the guard have block
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ratchet.types import Event, ToolCall, Trace
@@ -17,10 +17,12 @@ from ratchet.types import Event, ToolCall, Trace
 
 @dataclass(frozen=True)
 class Step:
+    """One recorded tool call as a guard would have seen it. `history` shares the trace's Event objects."""
+
     seq: int
-    call: dict[str, Any]
+    call: ToolCall
     view: dict[str, Any]
-    history: list[dict[str, Any]]
+    history: list[Event]
     executed: bool
     reasons_after: tuple[str, ...] | None = None
 
@@ -62,10 +64,6 @@ def result_ids(events: Iterable[Event]) -> set[str]:
     return out
 
 
-def event_json(event: Event) -> dict[str, Any]:
-    return asdict(event)
-
-
 def last_seq(trace: Trace) -> int:
     return trace.events[-1].seq if trace.events else 0
 
@@ -87,9 +85,7 @@ class RecordedViews:
             if not isinstance(view, dict):
                 faithful = False
                 view = {}
-            c = call_of(e)
-            steps.append(
-                Step(e.seq, c, view, [event_json(x) for x in trace.events[:i]], executed=c["call_id"] in done)
-            )
+            c = tool_call_of(e)
+            steps.append(Step(e.seq, c, view, trace.events[:i], executed=c.call_id in done))
         note = "" if faithful else "some tool_call events carry no view snapshot"
         return Walk(trace.run_id, steps, None, faithful, note)

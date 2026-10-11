@@ -15,14 +15,14 @@ from typing import Any, Protocol
 
 from ratchet.improve.diagnose import FailurePoint
 from ratchet.improve.sim import Simulator, Walk
-from ratchet.types import Guard, Trace
+from ratchet.types import Event, Guard, ToolCall, Trace
 
 
 @dataclass(frozen=True)
 class GuardInput:
-    call: dict[str, Any]
+    call: ToolCall
     view: dict[str, Any]
-    history: list[dict[str, Any]]
+    history: list[Event]
 
 
 @dataclass(frozen=True)
@@ -32,9 +32,9 @@ class Verdict:
 
 
 class GuardRunner(Protocol):
-    """Runs untrusted guard source over many inputs in one sandboxed process, one verdict per input."""
+    """Runs untrusted guard source over many inputs in the sandbox, one verdict per input, in order."""
 
-    def check_batch(self, source: str, inputs: Sequence[GuardInput]) -> list[Verdict]: ...
+    def check_batch(self, guard: Guard, inputs: Sequence[GuardInput]) -> list[Verdict]: ...
 
 
 class WalkCache:
@@ -135,7 +135,7 @@ def replay(
                 where.append(("passing", trace.run_id, trace.case_id, s.seq))
 
     started = time.perf_counter()
-    verdicts = runner.check_batch(guard.source, inputs) if inputs else []
+    verdicts = runner.check_batch(guard, inputs) if inputs else []
     check_s = time.perf_counter() - started
     if len(verdicts) != len(inputs):
         raise RuntimeError(f"guard runtime returned {len(verdicts)} verdicts for {len(inputs)} inputs")
