@@ -72,4 +72,33 @@ Harness `d7ff14d17d68` (seed: a generic terminal-agent prompt, both tools, no pr
 Run `evolve/phase-1/run-1`: 2 generations at most, 6 workers, at most 3 candidate evaluations, 4 failure
 clusters and 3 candidates per cluster per generation. Evaluator version `306de2f2ca7e`.
 
-Generation 1 parent (`d7ff14d17d68`, the seed): train 4/8, held-out 3/4 in run 1 and 1/4 in run 2.
+### Run 1, generation 1 (split `97264170...`, 4 held-out tasks)
+
+| Harness | Change | Train passed | Held-out passed | Endpoint retries | Decision |
+|---|---|---|---|---|---|
+| `d7ff14d17d68` (parent run 1) | seed | 4/8 | 3/4 | 0 | parent |
+| `d7ff14d17d68` (parent run 2) | seed | not run | 1/4 | 0 | parent |
+| `805ee4ba2227` | one guard | 5/8 | 1/4 | 1 | rejected: no stable recovery; broke protected held-out tasks model-extraction-relu-logits and torch-tensor-parallelism |
+| `54f0cd991cd9` | one guard | 5/8 | 1/4 | 1 | rejected: same two protected held-out tasks broken, no stable recovery |
+| `637e96b5f8d1` | one procedure | 4/8 | 3/4 | 6 | rejected: nothing broken, but no stable recovery (polyglot-rust-c failed in all three runs) |
+
+The improver proposed 9 candidates from 3 failure clusters; 6 were replay-tested, 4 cleared replay, 3 were
+evaluated, 0 admitted, 3 rejected with signed decisions. The admission rule counts stable recoveries on
+held-out cases only and needs two (a case failing in both parent runs and passing in both candidate runs).
+Only one of the four held-out tasks, polyglot-rust-c, failed in both parent runs, so no candidate could
+reach two. Generation 2 continues on this split; run 2 below uses a wider held-out split for that reason.
+
+### Run 2 (split `d7018648...`, 6 phase-1 held-out tasks)
+
+Split `src/ratchet/bench/terminal/split-heldout-6-5.json` (6 of 12 phase-1 and 5 of 10 phase-2 tasks held
+out, same seed), committed before its first run. Run `evolve/phase-1/run-2-heldout-6`, same settings as run 1.
+
+## Seed harness on phase 2 (transfer baseline)
+
+`runs/d7ff14d17d68/phase2-trial-1`: 5/10 runs passed over 10 tasks (extract-moves-from-video,
+feal-differential-cryptanalysis, feal-linear-cryptanalysis, llm-inference-batching-scheduler,
+mcmc-sampling-stan passed). Four runs were lost to the model endpoint (HTTP 429 after 12 attempts) and re-run
+under the evaluator's predeclared limit of two re-runs; the counted run is the completed one.
+
+Endpoint note: the agent's time limit is checked before each model call; a model call already in flight
+(including its rate-limit retries) is not cut off, so a run can exceed the task's agent timeout in wall time.
