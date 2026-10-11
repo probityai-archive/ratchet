@@ -76,6 +76,10 @@ class ReplayReport:
     notes: list[str] = field(default_factory=list)
 
     @property
+    def benign_fires(self) -> int:
+        return sum(1 for fp in self.false_positives if fp.get("benign_twin"))
+
+    @property
     def checks_per_s(self) -> float:
         return self.checks / self.check_s if self.check_s > 0 else float(self.checks)
 
@@ -87,6 +91,7 @@ class ReplayReport:
             "targets_total": len(self.targets),
             "targets": self.targets,
             "false_positives": self.false_positives,
+            "benign_twin_fires": self.benign_fires,
             "errors": self.errors,
             "unfaithful": self.unfaithful,
             "traces": self.traces,
@@ -105,8 +110,10 @@ def replay(
     passing: Iterable[Trace],
     walks: WalkCache,
     runner: GuardRunner,
+    benign: Iterable[Trace] = (),
 ) -> ReplayReport:
-    """Replay `guard` over the target failures (by run id in `failing`) and every passing trace."""
+    """Replay `guard` over the target failures (by run id in `failing`), every passing trace, and every
+    benign-twin trace whatever its outcome: a guard must fire on none of the last two."""
     walk_before = walks.walk_s
     inputs: list[GuardInput] = []
     # (role, run_id, case_id, seq) for each input, in order.
@@ -130,15 +137,20 @@ def replay(
                 where.append(("target", run_id, trace.case_id, s.seq))
 
     n_passing = 0
-    for trace in passing:
-        n_passing += 1
-        w = walks.walk(trace)
-        if not w.faithful:
-            unfaithful.append(trace.run_id)
-        for s in w.steps:
-            if s.executed:  # a call an existing guard already blocked cannot be a new false positive
-                inputs.append(GuardInput(s.call, s.view, s.history))
-                where.append(("passing", trace.run_id, trace.case_id, s.seq))
+    seen: set[str] = set()
+    for role, traces in (("benign", benign), ("passing", passing)):
+        for trace in traces:
+            if trace.run_id in seen:
+                continue
+            seen.add(trace.run_id)
+            n_passing += 1
+            w = walks.walk(trace)
+            if not w.faithful:
+                unfaithful.append(trace.run_id)
+            for s in w.steps:
+                if s.executed:  # a call an existing guard already blocked cannot be a new false positive
+                    inputs.append(GuardInput(s.call, s.view, s.history))
+                    where.append((role, trace.run_id, trace.case_id, s.seq))
 
     started = time.perf_counter()
     verdicts = runner.check_batch(guard, inputs) if inputs else []
@@ -159,7 +171,13 @@ def replay(
             first_block[run_id] = min(seq, first_block.get(run_id, seq))
         else:
             false_positives.append(
-                {"run_id": run_id, "case_id": case_id, "seq": seq, "reason": v.block[:300]}
+                {
+                    "run_id": run_id,
+                    "case_id": case_id,
+                    "seq": seq,
+                    "reason": v.block[:300],
+                    "benign_twin": role == "benign",
+                }
             )
 
     target_rows = []

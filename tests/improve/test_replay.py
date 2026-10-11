@@ -17,6 +17,7 @@ from .fakes import (
     bad_timeout,
     good_plain,
     good_timeout,
+    without_views,
 )
 
 
@@ -91,7 +92,12 @@ def test_unfaithful_walks_are_reported() -> None:
 
     targets, failing, passing = _setup()
     rep = replay(
-        Guard("g", "", NO_DUP_GUARD), targets, failing, passing[:1], WalkCache(RecordedViews()), LocalRunner()
+        Guard("g", "", NO_DUP_GUARD),
+        targets,
+        failing,
+        [without_views(passing[0])],
+        WalkCache(RecordedViews()),
+        LocalRunner(),
     )  # type: ignore[arg-type]
     assert "good-10" in rep.unfaithful
 

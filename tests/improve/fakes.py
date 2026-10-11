@@ -59,9 +59,27 @@ class World:
         return out
 
 
+def _blocked_by(
+    guards: Sequence[Guard], call: ToolCall, view: dict[str, Any], history: list[Event]
+) -> str | None:
+    for g in guards:
+        scope: dict[str, Any] = {}
+        exec(g.source, scope)
+        reason = scope["check"](call, view, history)
+        if reason is not None:
+            return f"blocked by guard {g.id}: {reason}"
+    return None
+
+
 def make_trace(
-    case_id: str, calls: Sequence[tuple[str, dict[str, Any]]], run_id: str, version: str = "v0"
+    case_id: str,
+    calls: Sequence[tuple[str, dict[str, Any]]],
+    run_id: str,
+    version: str = "v0",
+    guards: Sequence[Guard] = (),
 ) -> Trace:
+    """Run a fixed call script against the fake world, the way the worker records it: each call carries
+    the view the guards saw, and a call a guard blocks gets a `guard_block` event and never executes."""
     world = World.for_case(case_id)
     events: list[Event] = []
 
@@ -71,9 +89,14 @@ def make_trace(
     add("model", {"content": "thinking"})
     for i, (name, args) in enumerate(calls):
         c = ToolCall(name, dict(args), f"{run_id}-c{i}")
-        add("tool_call", {"name": c.name, "args": c.args, "call_id": c.call_id})
+        view, history = world.view(), list(events)
+        add("tool_call", {"call": {"name": c.name, "args": c.args, "call_id": c.call_id}, "view": view})
+        reason = _blocked_by(guards, c, view, history)
+        if reason is not None:
+            add("guard_block", {"call_id": c.call_id, "source": "guard", "message": reason})
+            continue
         r = world.call(c)
-        add("tool_result", {"call_id": r.call_id, "ok": r.ok, "data": r.data, "error": r.error})
+        add("tool_result", {"result": {"call_id": r.call_id, "ok": r.ok, "data": r.data, "error": r.error}})
     add("final", {"content": "done"})
     reasons = world.reasons()
     outcome = Outcome(not reasons, reasons, "d", Cost(model_calls=len(calls) + 1, tool_calls=len(calls)))
@@ -206,37 +229,47 @@ class FakeCase:
     id: str
     split: Any
     must_succeed: bool = True
+    kind: str = "trap"
 
 
 def fake_cases() -> list[FakeCase]:
-    """Timeout cases fail until a guard exists; plain cases always pass; one plain case refuses-to-run."""
+    """Timeout cases are traps a duplicate-refund guard fixes; plain cases are their benign twins."""
     return [
-        FakeCase("timeout-1", "train"), FakeCase("timeout-2", "train"), FakeCase("plain-3", "train"),
-        FakeCase("timeout-4", "heldout"), FakeCase("timeout-5", "heldout"), FakeCase("plain-6", "heldout"),
+        FakeCase("timeout-1", "train"), FakeCase("timeout-2", "train"),
+        FakeCase("plain-3", "train", kind="benign_twin"),
+        FakeCase("timeout-4", "heldout"), FakeCase("timeout-5", "heldout"),
+        FakeCase("plain-6", "heldout", kind="benign_twin"),
     ]  # fmt: skip
 
 
 class FakeRunCase:
-    """Stands in for the agent: any guard fixes timeouts; `block_plain` breaks plain cases."""
+    """Stands in for the agent: a fixed naive script per case family, run under the harness's guards.
 
-    def __init__(self, block_plain: bool = False, explode: str | None = None) -> None:
-        self.block_plain = block_plain
+    timeout-N: get_charge, refund (times out but commits), refund again: a duplicate unless a guard stops it.
+    plain-N:   get_charge, refund: passes unless a guard blocks the refund.
+    omit-N:    get_charge, and a refund only when the harness has a procedure.
+    """
+
+    def __init__(self, explode: str | None = None) -> None:
         self.explode = explode
         self.calls = 0
 
-    def __call__(self, harness: Any, case: Any, model: Any, store: Any) -> Trace:
+    def __call__(self, harness: Any, case: Any, model: Any, store: Any, *, run_id: str) -> Trace:
         self.calls += 1
-        n = int(case.id.rsplit("-", 1)[-1])
-        run = f"{harness.version}-{case.id}-{self.calls}"
         if case.id == self.explode:
             raise RuntimeError("model endpoint down")
+        ch = {"charge_id": "ch_" + case.id.rsplit("-", 1)[-1]}
+        script: list[tuple[str, dict[str, Any]]] = [("get_charge", ch), ("refund", ch)]
         if case.id.startswith("timeout"):
-            t = good_timeout(n, run) if harness.guards else bad_timeout(n, run)
-        elif case.id.startswith("omit"):
-            calls: list[tuple[str, dict[str, Any]]] = [("get_charge", {"charge_id": f"ch_{n}"})]
-            if harness.procedures:
-                calls.append(("refund", {"charge_id": f"ch_{n}"}))
-            t = make_trace(case.id, calls, run)
-        else:
-            t = lazy(n, run) if self.block_plain and harness.guards else good_plain(n, run)
-        return Trace(t.run_id, t.case_id, harness.version, t.model, t.events, t.outcome)
+            script.append(("refund", ch))
+        elif case.id.startswith("omit") and not harness.procedures:
+            script = script[:1]
+        return make_trace(case.id, script, f"{run_id}-{case.id}", harness.version, harness.guards)
+
+
+def without_views(trace: Trace) -> Trace:
+    """The trace as an agent that records no view snapshots would have written it."""
+    events = [
+        Event(e.seq, e.kind, {k: v for k, v in e.payload.items() if k != "view"}, e.ts) for e in trace.events
+    ]
+    return Trace(trace.run_id, trace.case_id, trace.harness_version, trace.model, events, trace.outcome)

@@ -1,14 +1,23 @@
-"""Run a harness over a set of cases with the same model and budget as its parent, in a bounded pool."""
+"""Run a harness over a set of cases with the same model and budget as its parent, in a bounded pool.
+
+Every run gets a fresh run id, so a re-run of the same harness on the same case is a new run, never a
+resumed or deduplicated old one. Each result records how many of its model calls were answered fresh and
+how many came from a cache (a model event whose payload says `"cached": true`), and how many times the
+harness intervened (a `guard_block` event for any reason other than malformed arguments).
+"""
 
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+import uuid
+from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ratchet.types import Cost, Harness, Split, Trace
+
+CaseKind = str  # "trap", "benign_twin" or "must_succeed", as the case suite labels them
 
 
 class CaseLike(Protocol):
@@ -18,10 +27,14 @@ class CaseLike(Protocol):
     def split(self) -> Split: ...
     @property
     def must_succeed(self) -> bool: ...
+    @property
+    def kind(self) -> CaseKind: ...
 
 
-# run_case(harness, case, model, store) -> Trace, the agent lane's entry point.
-RunCase = Callable[[Harness, Any, Any, Any], Trace]
+class RunCase(Protocol):
+    """The agent lane's `run_case(harness, case, model, store, *, run_id)`."""
+
+    def __call__(self, harness: Harness, case: Any, model: Any, store: Any, *, run_id: str) -> Trace: ...
 
 
 @dataclass(frozen=True)
@@ -29,11 +42,26 @@ class CaseResult:
     case_id: str
     split: Split
     must_succeed: bool
+    kind: CaseKind
     passed: bool
     reasons: list[str]
     run_id: str | None
     cost: Cost
+    interventions: int = 0
+    fresh_calls: int = 0
+    cached_calls: int = 0
     error: str | None = None
+
+
+def interventions(trace: Trace) -> int:
+    return sum(1 for e in trace.events if e.kind == "guard_block" and e.payload.get("source") != "arguments")
+
+
+def model_calls(trace: Trace) -> tuple[int, int]:
+    """(fresh, cached) model calls in the trace."""
+    cached = sum(1 for e in trace.events if e.kind == "model" and e.payload.get("cached") is True)
+    total = sum(1 for e in trace.events if e.kind == "model")
+    return total - cached, cached
 
 
 @dataclass(frozen=True)
@@ -75,31 +103,62 @@ class EvalReport:
             "train": {"passed": len(self.passed("train")), "total": self.count("train")},
             "heldout": {"passed": len(self.passed("heldout")), "total": self.count("heldout")},
             "errors": sum(1 for r in self.results if r.error),
-            "cost": {"model_calls": c.model_calls, "input_tokens": c.input_tokens,
-                     "output_tokens": c.output_tokens, "tool_calls": c.tool_calls, "wall_s": c.wall_s},
+            "fresh_calls": sum(r.fresh_calls for r in self.results),
+            "cached_calls": sum(r.cached_calls for r in self.results),
+            "cost": {
+                "model_calls": c.model_calls,
+                "input_tokens": c.input_tokens,
+                "output_tokens": c.output_tokens,
+                "tool_calls": c.tool_calls,
+                "wall_s": c.wall_s,
+            },
             "wall_s": round(self.wall_s, 3),
             "results": [
-                {"case_id": r.case_id, "split": r.split, "must_succeed": r.must_succeed, "passed": r.passed,
-                 "reasons": r.reasons, "run_id": r.run_id, "error": r.error}
+                {
+                    "case_id": r.case_id,
+                    "split": r.split,
+                    "kind": r.kind,
+                    "must_succeed": r.must_succeed,
+                    "passed": r.passed,
+                    "reasons": r.reasons,
+                    "run_id": r.run_id,
+                    "interventions": r.interventions,
+                    "fresh_calls": r.fresh_calls,
+                    "cached_calls": r.cached_calls,
+                    "error": r.error,
+                }
                 for r in self.results
             ],
-        }  # fmt: skip
+        }
 
 
 def _one(
     run_case: RunCase, harness: Harness, case: CaseLike, model: Any, store: Any
 ) -> tuple[CaseResult, Trace | None]:
+    run_id = f"run-{harness.version}-{uuid.uuid4().hex[:12]}"
     try:
-        trace = run_case(harness, case, model, store)
+        trace = run_case(harness, case, model, store, run_id=run_id)
     except Exception as exc:  # an infrastructure failure is recorded as a failed case, never hidden
         msg = f"{type(exc).__name__}: {exc}"[:500]
-        return CaseResult(
-            case.id, case.split, case.must_succeed, False, [f"run error: {msg}"], None, Cost(), msg
-        ), None
+        failed = CaseResult(
+            case.id,
+            case.split,
+            case.must_succeed,
+            case.kind,
+            False,
+            [f"run error: {msg}"],
+            None,
+            Cost(),
+            error=msg,
+        )
+        return failed, None
     o = trace.outcome
-    return CaseResult(
-        case.id, case.split, case.must_succeed, o.passed, list(o.reasons), trace.run_id, o.cost
-    ), trace
+    fresh, cached = model_calls(trace)
+    result = CaseResult(
+        case.id, case.split, case.must_succeed, case.kind, o.passed, list(o.reasons), trace.run_id, o.cost,
+        interventions(trace), fresh, cached,
+    )  # fmt: skip
+    return result, trace
 
 
 def evaluate_many(

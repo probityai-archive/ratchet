@@ -7,7 +7,7 @@ from ratchet.improve.llm import Meter
 from ratchet.improve.sim import RecordedViews
 from ratchet.types import Event
 
-from .fakes import FakeSimulator, ScriptedChat, bad_timeout, good_plain, lazy
+from .fakes import FakeSimulator, ScriptedChat, bad_timeout, good_plain, lazy, without_views
 
 
 def test_normalize_strips_ids_and_quotes() -> None:
@@ -85,7 +85,7 @@ def test_excerpt_marks_the_failing_step_and_truncates() -> None:
 
 
 def test_recorded_views_reads_snapshots() -> None:
-    t = bad_timeout(1)
+    t = without_views(bad_timeout(1))
     w = RecordedViews().walk(t)
     assert not w.faithful and w.initial_reasons is None and len(w.steps) == 3
     events = [
