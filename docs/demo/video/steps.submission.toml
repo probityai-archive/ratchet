@@ -80,6 +80,17 @@ captions = [
 ]
 
 [[step]]
+id = "refusal_v3"
+cmd = "ratchet show decision b972467a3b9a"
+db = "ratchet_v3_full"
+hold = 6.0
+captions = [
+  { at = 0.0, text = "Live gpt-oss-120b, 3,800 fresh runs: a change lifts the pass rate from 33.4% to 42.1%." },
+  { at = 2.5, text = "It also drops one policy case from 21 to 8 of 40. Ratchet refuses it and signs the refusal." },
+  { at = 4.5, text = "An unchanged control moved a case from 32 to 23 of 40. Without this gate, noise looks like progress." },
+]
+
+[[step]]
 id = "authority"
 cmd = "ratchet show decision {{AUTHORITY_DECISION}}"
 db = "{{AUTHORITY_DB}}"
@@ -94,6 +105,15 @@ cmd = "ratchet show lineage"
 hold = 3.5
 captions = [
   { at = 0.0, text = "Every version, trace and decision is kept in MongoDB Atlas, rejections included." },
+]
+
+[[step]]
+id = "hooks"
+cmd = "cat docs/results/hooks-replay.md"
+hold = 4.0
+captions = [
+  { at = 0.0, text = "Real data: one guard replayed over 629,192 tool calls from 13,712 real coding-agent sessions." },
+  { at = 2.0, text = "7 fires, each a push to main the guard would have stopped. 0 errors. 393 seconds." },
 ]
 
 [[step]]

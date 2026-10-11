@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from ratchet.improve.stochastic import RUNS as V3_RUNS
 from ratchet.types import Event, Trace
 from ratchet.view.admission import (
     RUNS,
@@ -129,7 +130,13 @@ def evidence_line(check: Mapping[str, Any]) -> str:
             f"regressed {len(ev.get('regressed') or [])}"
         )
     if name == "benign_twins":
-        return f"{ev.get('heldout_benign_twin_runs')} twin runs, {ev.get('interventions')} intervention(s)"
+        runs = ev.get("heldout_benign_twin_runs")
+        prefix = f"{runs} twin runs, " if runs is not None else ""
+        return f"{prefix}{ev.get('interventions')} intervention(s)"
+    if name == "stochastic_v3":
+        return stochastic_line(ev.get("comparison") or {})
+    if name == "cohort_qualified":
+        return cohort_line(ev.get("cohort") or {})
     if name == "overfit_lint":
         return f"{len(ev.get('hits') or [])} copied literal(s); screened {ev.get('screened')}"
     if name == "structure":
@@ -140,6 +147,33 @@ def evidence_line(check: Mapping[str, Any]) -> str:
         p, c = ev.get("parent") or {}, ev.get("candidate") or {}
         return f"model calls {p.get('model_calls')} -> {c.get('model_calls')} (recorded, not a gate)"
     return ""
+
+
+def _declines(cases: list[Mapping[str, Any]]) -> str:
+    bad = [c for c in cases if not c.get("decline_ok", True)]
+    return "; ".join(f"{c['case_id']} fell {c['parent']} -> {c['arm']}" for c in bad)
+
+
+def stochastic_line(comparison: Mapping[str, Any]) -> str:
+    """Pooled pass rate of parent and candidate, stable recoveries, and every case past the decline limit."""
+    cases = list(comparison.get("cases") or [])
+    if not cases:
+        return ""
+    parent = sum(c["parent"] for c in cases) / (V3_RUNS * len(cases))
+    arm = sum(c["arm"] for c in cases) / (V3_RUNS * len(cases))
+    stable = sum(1 for c in cases if c.get("stable_recovery"))
+    line = f"pass rate {parent:.1%} -> {arm:.1%} ({len(cases)} cases x {V3_RUNS} runs)"
+    line += f"; {stable} stable recoveries"
+    declines = _declines(cases)
+    return f"{line}; over the decline limit: {declines}" if declines else line
+
+
+def cohort_line(cohort: Mapping[str, Any]) -> str:
+    """Which identity control (an unchanged arm) failed, and on which case: the endpoint's noise floor."""
+    failed = [c for c in cohort.get("controls") or [] if not c.get("qualifies")]
+    parts = [f"{c['arm']}: {_declines(list(c.get('cases') or []))}" for c in failed]
+    status = str(cohort.get("status", ""))
+    return f"{status}, unchanged control moved: {'; '.join(parts)}" if parts else status
 
 
 _OUTCOME_STYLE = {"pass": "green", "fail": "red", "invalid": "bold yellow", "pending": "dim"}
