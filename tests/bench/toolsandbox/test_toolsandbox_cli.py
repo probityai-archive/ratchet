@@ -311,3 +311,61 @@ def test_the_commit_is_none_when_git_does_not_answer(monkeypatch: pytest.MonkeyP
         subprocess, "run", lambda *_a, **_k: subprocess.CompletedProcess([], 128, stdout="", stderr="no repo")
     )
     assert cli.ratchet_commit() is None
+
+
+def test_an_admitted_harness_can_be_carried_onto_the_benchmarks_seed(tmp_path: Path) -> None:
+    from ratchet.types import Guard, Harness
+
+    guard = Guard("g1", "Block x.", "def check(call, view, history):\n    return None\n", ["f1"])
+    other = Harness.build(
+        parent="p",
+        system_prompt="another world's prompt",
+        procedures=[],
+        guards=[guard],
+        tool_allowlist=["payments_refund"],
+        created_by="improver",
+    )
+    path = tmp_path / "admitted.json"
+    path.write_text(json.dumps({"harness": to_jsonable(other)}), encoding="utf-8")
+    seed = seed_harness()
+    as_is = cli.load_harness(f"@{path}", tmp_path)
+    assert as_is.digest == other.digest and as_is.tool_allowlist == ["payments_refund"]
+    carried = cli.load_harness(f"@{path}", tmp_path, onto_seed=True)
+    assert carried.parent == seed.version and carried.system_prompt == seed.system_prompt
+    assert carried.tool_allowlist == seed.tool_allowlist
+    assert [g.id for g in carried.guards] == ["g1"] and carried.created_by == "improver"
+    again = cli.load_harness(f"@{path}", tmp_path, onto_seed=True)
+    assert again.digest == carried.digest
+    assert cli.load_harness("seed", tmp_path, onto_seed=True).digest == seed.digest
+
+
+def test_a_trial_records_where_its_harness_came_from(offline: None, tmp_path: Path) -> None:
+    from ratchet.types import Guard, Harness
+
+    guard = Guard("g1", "Block x.", "def check(call, view, history):\n    return None\n", ["f1"])
+    other = Harness.build(
+        parent="p",
+        system_prompt="s",
+        procedures=[],
+        guards=[guard],
+        tool_allowlist=["t"],
+        created_by="improver",
+    )
+    path = tmp_path / "admitted.json"
+    path.write_text(json.dumps({"harness": to_jsonable(other)}), encoding="utf-8")
+    out = tmp_path / "out"
+    args = [
+        "--out",
+        str(out),
+        "trial",
+        "--limit",
+        "1",
+        "--workers",
+        "1",
+        "--harness",
+        f"@{path}",
+        "--onto-seed",
+    ]
+    assert cli.main(args) == 0
+    config = json.loads(next(out.rglob("config.json")).read_text(encoding="utf-8"))
+    assert config["harness_source"] == f"@{path}" and config["onto_seed"] is True

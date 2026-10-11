@@ -90,6 +90,21 @@ def seed_harness() -> Harness:
     )
 
 
+def rebase(source: Harness, target: Harness) -> Harness:
+    """`source`'s guards and procedures appended to `target` (this benchmark's seed harness).
+
+    What an improver learned travels, as executable and instructional changes; the benchmark's own prompt and
+    the tools its scenarios offer stay, since the source harness was admitted for another world's tools.
+    """
+    have_g = {g.id for g in target.guards}
+    have_p = {p.id for p in target.procedures}
+    return target.child(
+        guards=[*target.guards, *(g for g in source.guards if g.id not in have_g)],
+        procedures=[*target.procedures, *(p for p in source.procedures if p.id not in have_p)],
+        created_by=source.created_by,
+    )
+
+
 def endpoint_user(base_url: str, api_key: str, model: str, temperature: float | None = None) -> UserFactory:
     """A factory for the benchmark's simulated user, answering from `model` at `base_url`."""
     return lambda: cast(BaseRole, EndpointUser(base_url, api_key, model, temperature))

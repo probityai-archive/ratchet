@@ -44,6 +44,7 @@ from ratchet.bench.toolsandbox.report import collect, render, render_csv
 from ratchet.bench.toolsandbox.runner import (
     ToolSandboxRunner,
     endpoint_user,
+    rebase,
     seed_harness,
     tool_sandbox_commit,
 )
@@ -57,14 +58,15 @@ from ratchet.improve.sandbox import SandboxRunner
 from ratchet.types import Harness, Trace
 
 
-def load_harness(spec: str, root: Path) -> Harness:
+def load_harness(spec: str, root: Path, *, onto_seed: bool = False) -> Harness:
     """`seed` (the benchmark's own agent prompt), `@file` (an exported harness or admitted candidate, as
     `{"harness": {...}}` or the harness alone), or a harness version recorded anywhere under `root`."""
     if spec == "seed":
         return seed_harness()
     if spec.startswith("@"):
         raw = json.loads(Path(spec[1:]).read_text(encoding="utf-8"))
-        return harness_from(raw.get("harness", raw))
+        loaded = harness_from(raw.get("harness", raw))
+        return rebase(loaded, seed_harness()) if onto_seed else loaded
     for path in sorted(root.rglob("harnesses.jsonl")):
         for line in path.read_text(encoding="utf-8").splitlines():
             raw = json.loads(line)
@@ -165,7 +167,7 @@ def _client(base_url: str, api_key: str, model: str, temperature: float | None) 
 def cmd_trial(args: argparse.Namespace) -> int:
     base_url, api_key = _endpoint(args)
     root = Path(args.out)
-    harness = load_harness(args.harness, root)
+    harness = load_harness(args.harness, root, onto_seed=args.onto_seed)
     key = keyring_key()
     if key:
         os.environ["RAPID_API_KEY"] = key
@@ -189,6 +191,8 @@ def cmd_trial(args: argparse.Namespace) -> int:
         "tool_sandbox_commit": tool_sandbox_commit(),
         "ratchet_commit": ratchet_commit(),
         "harness": harness.version,
+        "harness_source": args.harness,
+        "onto_seed": args.onto_seed,
         "split": args.split,
         "trial": args.trial,
         "limit": args.limit,
@@ -364,6 +368,11 @@ def parser() -> argparse.ArgumentParser:
     t.add_argument("--split", choices=["heldout", "train", "all"], default="all")
     t.add_argument("--trial", type=int, default=1)
     t.add_argument("--limit", type=int, default=0, help="a seeded sample of this many runnable scenarios")
+    t.add_argument(
+        "--onto-seed",
+        action="store_true",
+        help="with @file: append the file's guards and procedures to this benchmark's seed harness",
+    )
     t.add_argument(
         "--shard", default="0/1", help="run shard K of N (K/N); shards are disjoint and cover the set"
     )
