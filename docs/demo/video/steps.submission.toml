@@ -1,20 +1,35 @@
 # The 1-minute submission video: every command runs for real against the Atlas store.
-# Time plan: 0-8 failure, 8-23 replay matrix, 23-38 admission and authority,
-# 38-48 verification and lineage, 48-56 benchmarks and level 2, 56-60 closing line.
+# Two outcomes, chosen by docs/demo/derive_ids.py from what Atlas holds (DEMO_OUTCOME in ids.env):
+#   admitted  the main scene is an admission made by the real gates in the demo scenario (scripted agent,
+#             database ratchet_demo); the refusal scene from the live-model runs follows it
+#   refused   no decision is admitted; the refusal scene from the live-model runs is the main scene
+# A step with `outcome` runs only in that outcome; a step with `db` reads that database.
 # Tune `hold` after the first real take; check.py refuses anything over 60 s.
 # {{NAME}} values are derived by docs/demo/derive_ids.py from Atlas and the stored results; none is typed.
 
 [[step]]
 id = "failure"
+outcome = "admitted"
 cmd = "ratchet show trace {{BAD_TRACE}}"
 hold = 3.5
 captions = [
-  { at = 0.0, text = "Passing held-out tests is necessary. It does not show what a patch would block." },
+  { at = 0.0, text = "Demo scenario, scripted agent. Passing tests does not show what a patch would block." },
   { at = 3.0, text = "A refund commits, then times out. The agent retries. The ledger shows two refunds." },
 ]
 
 [[step]]
+id = "failure_live"
+outcome = "refused"
+cmd = "ratchet show trace {{BAD_TRACE}}"
+hold = 3.5
+captions = [
+  { at = 0.0, text = "Live models. Passing tests does not show what a patch would block." },
+  { at = 3.0, text = "The unchanged harness fails a held-out refund trap with a lost reply." },
+]
+
+[[step]]
 id = "matrix"
+outcome = "admitted"
 cmd = "ratchet replay {{REJECTED_CAND}} {{CLEARED_CAND}}"
 cmd_45 = "ratchet replay {{REJECTED_CAND}} {{CLEARED_CAND}} --max-columns 2"
 hold = 7.0
@@ -24,27 +39,53 @@ captions = [
 ]
 
 [[step]]
-id = "admitted"
-cmd = "ratchet show decision {{ADMITTED_DECISION}}"
+id = "matrix_live"
+outcome = "refused"
+cmd = "ratchet replay {{REJECTED_CAND}} {{REFUSED_CAND}}"
+cmd_45 = "ratchet replay {{REJECTED_CAND}} {{REFUSED_CAND}} --max-columns 2"
 hold = 6.0
 captions = [
-  { at = 0.0, text = "The other clears replay, then fresh held-out runs: {{STABLE_RECOVERIES}} stable recoveries (needs {{STABLE_NEEDED}}), {{PROTECTED_N}} protected cases kept." },
+  { at = 0.0, text = "Ratchet replays each proposed guard over {{REPLAY_TRACES}} recorded traces, with no model call." },
+  { at = 4.0, text = "One guard fails replay and is rejected. The other clears replay and goes on to fresh runs." },
+]
+
+[[step]]
+id = "admitted"
+outcome = "admitted"
+cmd = "ratchet show decision {{ADMITTED_CAND}}"
+hold = 6.0
+captions = [
+  { at = 0.0, text = "Demo scenario, scripted agent. The other clears replay, then fresh held-out runs: {{STABLE_RECOVERIES}} stable recoveries (needs {{STABLE_NEEDED}}), {{PROTECTED_N}} protected cases kept." },
+]
+
+[[step]]
+id = "verify"
+outcome = "admitted"
+cmd = "ratchet verify {{ADMITTED_CAND}}"
+hold = 2.5
+captions = [
+  { at = 0.0, text = "The admission carries a signed receipt, checked against a pinned public key." },
+]
+
+[[step]]
+id = "refusal"
+cmd = "ratchet show decision {{REFUSED_CAND}}"
+db = "{{REFUSED_DB}}"
+hold = 9.0
+captions = [
+  { at = 0.0, text = "Live models: the closest candidate recovered {{REFUSED_RECOVERIES}} held-out cases in {{REFUSED_RECOVERY_RUNS}} and kept {{REFUSED_KEPT}} of {{REFUSED_PROTECTED_N}} protected ones." },
+  { at = 3.0, text = "The gate refused it: {{REFUSED_WHY}}. The refusal is signed and stored." },
+  { at = 5.5, text = "Run twice, the unchanged harness disagreed with itself on {{PARENT_DISCORDANT}} of {{REFUSED_HELDOUT_N}} held-out cases: it fails its own gate." },
+  { at = 7.5, text = "On tau-bench retail the unchanged harness passed {{TAU_SELF_SCORES}} of the same {{TAU_SELF_TOTAL}} held-out tasks (docs/results/tau-retail.md)." },
 ]
 
 [[step]]
 id = "authority"
 cmd = "ratchet show decision {{AUTHORITY_DECISION}}"
+db = "{{AUTHORITY_DB}}"
 hold = 4.0
 captions = [
-  { at = 0.0, text = "A change that grows the agent's authority is rejected, whatever its score." },
-]
-
-[[step]]
-id = "verify"
-cmd = "ratchet verify {{ADMITTED_DECISION}}"
-hold = 2.5
-captions = [
-  { at = 0.0, text = "Every decision carries a signed receipt, checked against a pinned public key." },
+  { at = 0.0, text = "Demo scenario: a change that grants the agent a tool its parent lacks fails the authority gate." },
 ]
 
 [[step]]
@@ -68,6 +109,6 @@ id = "level2"
 cmd = "cat {{LEVEL2_FILE}}"
 hold = 4.0
 captions = [
-  { at = 0.0, text = "The improver's own instructions face the same tests. Search instructions admitted {{LEVEL2_SEARCH_YIELD}}, the starting ones {{LEVEL2_SEED_YIELD}}." },
-  { at = 2.5, text = "Failure -> executable change -> recorded checks -> signed admission." },
+  { at = 0.0, text = "The improver's own instructions face the same gate. On live models, search instructions admitted {{LEVEL2_SEARCH_YIELD}}, the starting ones {{LEVEL2_SEED_YIELD}}." },
+  { at = 2.5, text = "Failure -> executable change -> recorded checks -> signed decision." },
 ]

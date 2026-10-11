@@ -17,6 +17,8 @@ A step is a table in the TOML file:
     hold = 3.0               # seconds the finished screen stays up
     expect_rc = [0]          # exit codes that count as correct (default [0])
     timeout = 90             # seconds before the command is killed (default 120)
+    outcome = "admitted"     # optional: run only when DEMO_OUTCOME (from --ids) is this value
+    db = "{{REFUSED_DB}}"    # optional: the RATCHET_DB this step reads (default: RATCHET_DB from --ids)
     captions = [ { at = 0.0, text = "..." } ]   # at = seconds after the step starts
 """
 
@@ -75,18 +77,27 @@ def load_steps(
     missing: list[str] = []
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
+    outcome = ids.get("DEMO_OUTCOME") or os.environ.get("DEMO_OUTCOME")
     for step in steps:
         if step["id"] in seen:
             raise SystemExit(f"{path}: duplicate step id {step['id']!r}")
         seen.add(step["id"])
+        if "outcome" in step:
+            if not outcome:
+                missing.append("DEMO_OUTCOME")
+                continue
+            if step["outcome"] != outcome:
+                continue
         cmd, miss = resolve(step.get(f"cmd_{variant}", step["cmd"]) if variant else step["cmd"], ids)
+        missing += miss
+        db, miss = resolve(step.get("db", "{{RATCHET_DB}}" if "RATCHET_DB" in ids else ""), ids)
         missing += miss
         captions = []
         for cap in step.get("captions", []):
             text, miss = resolve(cap["text"], ids)
             missing += miss
             captions.append({**cap, "text": text})
-        out.append({**step, "cmd": cmd, "captions": captions})
+        out.append({**step, "cmd": cmd, "captions": captions, "db": db})
     return out, sorted(set(missing))
 
 
@@ -102,7 +113,13 @@ def type_out(text: str) -> None:
     sys.stdout.flush()
 
 
+def step_env(step: dict[str, Any], env: dict[str, str]) -> dict[str, str]:
+    """The environment a step runs in: its own RATCHET_DB when it names one."""
+    return {**env, "RATCHET_DB": step["db"]} if step.get("db") else env
+
+
 def run_step(step: dict[str, Any], env: dict[str, str], origin: float) -> dict[str, Any]:
+    env = step_env(step, env)
     sys.stdout.write("\x1b[2J\x1b[H")
     sys.stdout.flush()
     started = time.monotonic()
@@ -149,7 +166,8 @@ def main() -> int:
         )
         return 2
     if args.check:
-        print(f"{len(steps)} steps, all placeholders resolved")
+        outcome = load_ids(args.ids).get("DEMO_OUTCOME") or os.environ.get("DEMO_OUTCOME", "")
+        print(f"{len(steps)} steps, all placeholders resolved (outcome {outcome or 'not set'})")
         return 0
     if args.warm:
         for step in steps:
@@ -157,6 +175,7 @@ def main() -> int:
                 subprocess.run(
                     step["cmd"],
                     shell=True,
+                    env=step_env(step, dict(os.environ)),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=float(step.get("timeout", 120)),
