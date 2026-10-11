@@ -193,7 +193,7 @@ def render_hook(guard: Guard, provenance: Provenance, limits: GuardLimits | None
         ")",
         "",
         'if __name__ == "__main__":',
-        "    sys.exit(run_hook(CONFIG, sys.stdin, sys.stdout, sys.stderr))",
+        "    sys.exit(main(CONFIG, sys.argv[1:]))",
         "",
     ]
     return "\n".join(lines)

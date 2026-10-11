@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, overload
 
 from ratchet.agent.guards import GuardDecision, GuardItem, GuardRuntime
-from ratchet.export.hookrt import Transcript, parse_transcript
+from ratchet.export.hookrt import Transcript, parse_transcript, reads_history
 from ratchet.types import Event, Guard, ToolCall, sha256_hex
 
 
@@ -70,9 +70,11 @@ class Site:
 
 
 def session_items(guard: Guard, transcript: Transcript) -> list[GuardItem]:
+    """One item per call. A guard that provably never reads its history gets none, as its hook does."""
     events = [Event(e["seq"], e["kind"], e["payload"], e["ts"]) for e in transcript.events]
+    keep = reads_history(guard.source)
     return [
-        GuardItem(guard, ToolCall(**site.call), site.view, Prefix(events, site.history_len))
+        GuardItem(guard, ToolCall(**site.call), site.view, Prefix(events, site.history_len if keep else 0))
         for site in transcript.calls
     ]
 

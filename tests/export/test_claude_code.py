@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from ratchet.agent.guards import CHILD_PATH, GuardLimits, GuardRuntime
+from ratchet.export import hookrt
 from ratchet.export.claude_code import (
     HEADER_KEYS,
     RUNTIME_PATH,
@@ -289,3 +290,32 @@ def test_command_line_refuses(signer: Signer, tmp_path: Path, monkeypatch: pytes
 def test_harness_round_trips_through_json() -> None:
     h = harness()
     assert harness_from_json(json.loads(json.dumps(asdict(h)))) == h
+
+
+def test_decide_starts_and_reuses_the_session_server(signer: Signer, tmp_path: Path) -> None:
+    h = harness()
+    out = tmp_path / "hook.py"
+    prov = export_hook(h, "no-rm", receipt(decision(h), signer), keys(signer), out)
+    lim = GuardLimits()
+    child = CHILD_PATH.read_text(encoding="utf-8")
+    spec = hookrt.SandboxSpec(
+        "no-rm",
+        NO_RM,
+        child,
+        lim.cpu_s,
+        lim.memory_mb,
+        lim.call_timeout_s,
+        lim.startup_timeout_s,
+        lim.require,
+    )
+    runtime = RUNTIME_PATH.read_text(encoding="utf-8")
+    cfg = hookrt.HookConfig(spec, prov.guard_sha256, text_sha256(child), text_sha256(runtime), str(out))
+    path = Session().bash("c1", "ls").result("c1", "a").bash("c2", "rm -rf a").write(tmp_path / "s.jsonl")
+    event = hook_event(path, "c2", "rm -rf a")
+    first = hookrt.decide(cfg, event)
+    assert first == hookrt.decide(cfg, event, use_server=False)
+    assert first.block == "rm is not allowed (3 earlier events)"
+    directory = hookrt.socket_dir()
+    assert directory is not None
+    assert (directory / f"{hookrt.server_key(cfg)}.sock").exists()
+    assert hookrt.decide(cfg, hook_event(path, "c1", "ls")) == hookrt.Verdict(None)

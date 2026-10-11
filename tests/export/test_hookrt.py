@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import socket
 import sys
+import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +16,7 @@ import pytest
 from ratchet.agent.guards import CHILD_PATH, GUARD_ERROR_REASON, GuardLimits
 from ratchet.export import hookrt
 from ratchet.export.hookrt import (
+    GuardChild,
     HookConfig,
     SandboxSpec,
     Verdict,
@@ -171,25 +177,63 @@ def test_evaluate_once_runs_the_guard_in_the_real_sandbox() -> None:
     assert evaluate_once(spec(CRASH_GUARD), call, {}, []) == Verdict(None, "RuntimeError: boom")
 
 
+def child_script(*writes: bytes, reads: int = 2, sleep: float = 0.0) -> str:
+    """A stand-in sandbox child: reads `reads` lines in turn and writes each of `writes` after one."""
+    lines = ["import os, sys, time"]
+    for index in range(max(reads, len(writes))):
+        if index < reads:
+            lines.append("sys.stdin.buffer.readline()")
+        if index < len(writes):
+            lines.append(f"os.write(1, {writes[index]!r})")
+    lines.append(f"time.sleep({sleep})")
+    return "\n".join(lines) + "\n"
+
+
+READY = b'{"ready": true}\n'
+
+
 def test_evaluate_once_fails_closed() -> None:
     call = {"name": "Bash", "args": {}, "call_id": "c"}
     assert evaluate_once(spec("x = 1\n"), call, {}, []).error is not None
     assert evaluate_once(spec(LOOP_GUARD, call_timeout_s=0.2), call, {}, []).error == "timeout"
     unavailable = evaluate_once(spec(ALLOW_GUARD, require=("no-such-layer",)), call, {}, [])
     assert str(unavailable.error).startswith("isolation unavailable")
-    assert evaluate_once(spec(ALLOW_GUARD, "raise SystemExit(3)"), call, {}, []).error == (
-        "guard process exited with status 3"
+    exits = evaluate_once(
+        spec(ALLOW_GUARD, "import sys\nsys.stdin.buffer.readline()\nraise SystemExit(3)"), call, {}, []
     )
-    ready_only = "import os\nos.write(1, b'{\"ready\": true}\\nnot json\\n')\n"
-    assert evaluate_once(spec(ALLOW_GUARD, ready_only), call, {}, []).error == (
-        "guard process exited with status 0"
+    assert exits.error == "guard process exited with status 3"
+    malformed = "guard process sent a malformed reply"
+    assert (
+        evaluate_once(spec(ALLOW_GUARD, child_script(READY, b"not json\n")), call, {}, []).error == malformed
     )
-    listy = "import os\nos.write(1, b'[1]\\n')\n"
-    assert evaluate_once(spec(ALLOW_GUARD, listy), call, {}, []).error == "guard process exited with status 0"
-    slow = "import time\ntime.sleep(5)\n"
-    assert evaluate_once(
-        spec(ALLOW_GUARD, slow, startup_timeout_s=0.1, call_timeout_s=0.1), call, {}, []
-    ) == (Verdict(None, "timeout"))
+    assert (
+        evaluate_once(spec(ALLOW_GUARD, child_script(READY, b'{"i": 99}\n')), call, {}, []).error == malformed
+    )
+    assert evaluate_once(spec(ALLOW_GUARD, child_script(b"[1]\n")), call, {}, []).error == malformed
+    slow = spec(ALLOW_GUARD, child_script(sleep=5), startup_timeout_s=0.1, call_timeout_s=0.1)
+    assert evaluate_once(slow, call, {}, []) == Verdict(None, "timeout")
+    gone = spec(ALLOW_GUARD, child_script(READY, reads=1))
+    big = [{"seq": 0, "kind": "model", "payload": {"content": "x" * 2_000_000}, "ts": 0.0}]
+    assert evaluate_once(gone, call, {}, big) == Verdict(None, "guard process exited with status 0")
+    stuck = spec(
+        ALLOW_GUARD, child_script(READY, reads=1, sleep=5), startup_timeout_s=0.2, call_timeout_s=0.1
+    )
+    history = [{"seq": 0, "kind": "model", "payload": {"content": "x" * 2_000_000}, "ts": 0.0}]
+    assert evaluate_once(stuck, call, {}, history) == Verdict(None, "timeout")
+
+
+def test_guard_child_sends_history_incrementally() -> None:
+    events = parse_transcript(session().text().splitlines()).events
+    call = {"name": "Bash", "args": {}, "call_id": "c"}
+    child = GuardChild(spec(ECHO_GUARD))
+    try:
+        for session_key, n in (("s", 3), ("s", 7), ("s", 2), ("t", 1), (None, 4)):
+            seen = json.loads(str(child.ask(session_key, call, {}, events[:n]).block))
+            assert seen["seqs"] == list(range(n))
+        assert (child.session, child.sent) == (None, 4)
+    finally:
+        child.close()
+    assert not child.alive
 
 
 def test_evaluate_once_reports_a_missing_interpreter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -271,11 +315,224 @@ def test_decide_rehashes_the_embedded_runtime(tmp_path: Path) -> None:
     good = config(ALLOW_GUARD)
     pinned = HookConfig(good.spec, good.guard_sha256, good.child_sha256, hookrt._sha256(runtime), str(hook))
     event = hook_event(None, "c", "ls")
-    assert decide(pinned, event) == Verdict(None)
+    assert decide(pinned, event, use_server=False) == Verdict(None)
     hook.write_text(
         hook.read_text().replace('GUARD_ERROR_REASON = "guard error"', 'GUARD_ERROR_REASON = "x"')
     )
-    assert decide(pinned, event).error == "hook runtime does not match its recorded digest"
+    assert decide(pinned, event, use_server=False).error == "hook runtime does not match its recorded digest"
     hook.write_text("no markers\n")
     assert hookrt.embedded_runtime(hook.read_text()) is None
     assert decide(pinned, event).error == "hook runtime does not match its recorded digest"
+
+
+# --- history elision --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("source", "reads"),
+    [
+        ("def check(call, view, history):\n    return None\n", False),
+        ("import re\ndef check(c, v, h):\n    return 'x' if re.match('a', c.name) else None\n", False),
+        ("def check(call, view, history):\n    return str(len(history))\n", True),
+        ("def check(call, view, h):\n    return locals()['h']\n", True),
+        ("import sys\ndef check(call, view, history):\n    return None\n", True),
+        ("from operator import attrgetter\ndef check(call, view, history):\n    return None\n", True),
+        ("def check(call, view, history):\n    return getattr(call, 'name')\n", True),
+        ("def check(call, view, history):\n    try:\n        1/0\n    except Exception as e:\n"
+         "        return str(e.__traceback__.tb_frame)\n", True),
+        ("def check(call, view, history):\n    return 'history'\n", True),
+        ("def check(call, view, history):\n    return None\ncheck = print\n", True),
+        ("def check(call, view, history):\n    def check(): pass\n    return None\n", True),
+        ("def check(call, view, *rest):\n    return None\n", True),
+        ("def check(call, view, history=None, *, k=1):\n    return None\n", True),
+        ("def check(call, view):\n    return None\n", True),
+        ("@staticmethod\ndef check(call, view, history):\n    return None\n", True),
+        ("async def check(call, view, history):\n    return None\n", True),
+        ("check = lambda call, view, history: None\n", True),
+        ("def check(:\n", True),
+    ],
+)  # fmt: skip
+def test_reads_history_is_false_only_when_provable(source: str, reads: bool) -> None:
+    assert hookrt.reads_history(source) is reads
+
+
+# --- incremental tailing and the session server -----------------------------------------------------------
+
+
+def test_tail_parses_complete_lines_only_and_restarts_on_shrink(tmp_path: Path) -> None:
+    path = tmp_path / "s.jsonl"
+    tail = hookrt.Tail(path)
+    tail.update()
+    assert tail.transcript.events == []
+    text = session().text()
+    cut = text.index("\n", len(text) // 2) + 10
+    path.write_text(text[:cut])
+    tail.update()
+    partial = len(tail.transcript.events)
+    path.write_text(text)
+    tail.update()
+    tail.update()
+    whole = parse_transcript(text.splitlines())
+    assert partial < len(whole.events)
+    assert tail.transcript.events == whole.events and tail.transcript.lines == whole.lines
+    path.write_text(Session().bash("z", "ls").text())
+    tail.update()
+    assert [c.call["call_id"] for c in tail.transcript.calls] == ["z"]
+    tail.close()
+
+
+def test_session_server_matches_the_one_shot_verdict(tmp_path: Path) -> None:
+    path = session().write(tmp_path / "s.jsonl")
+    other = Session().bash("d1", "ls").write(tmp_path / "t.jsonl")
+    server = hookrt.SessionServer(spec(ECHO_GUARD), sessions=1)
+    try:
+        for event in (
+            hook_event(path, "c2", "git push"),
+            hook_event(other, "d1", "ls"),
+            hook_event(path, "c1", "x"),
+        ):
+            assert server.verdict(event) == decide(config(ECHO_GUARD), event, use_server=False)
+        assert list(server.tails) == [str(path)]
+        dead = server.tails[str(path)].child
+        assert dead is not None
+        dead.close()
+        assert server.verdict(hook_event(path, "c2", "git push")).block is not None
+        assert server.verdict({"hook_event_name": "Stop"}).error is not None
+    finally:
+        server.close()
+    plain = hookrt.SessionServer(spec(ALLOW_GUARD))
+    try:
+        assert plain.verdict(hook_event(path, "c2", "x")) == Verdict(None)
+        assert plain.verdict(hook_event(other, "d1", "x")) == Verdict(None)
+        assert list(plain.tails) == [""]
+    finally:
+        plain.close()
+    broken = hookrt.SessionServer(spec(ALLOW_GUARD, require=("no-such-layer",)))
+    assert str(broken.verdict(hook_event(None, "c", "ls")).error).startswith("isolation unavailable")
+
+
+def test_socket_dir_is_private(monkeypatch: pytest.MonkeyPatch, private_runtime_dir: Path) -> None:
+    directory = hookrt.socket_dir()
+    assert directory == private_runtime_dir / "ratchet-hook"
+    directory.chmod(0o755)
+    assert hookrt.socket_dir() is None
+    blocker = private_runtime_dir / "file"
+    blocker.write_text("")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(blocker))
+    assert hookrt.socket_dir() is None
+    monkeypatch.delenv("XDG_RUNTIME_DIR")
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(private_runtime_dir))
+    assert hookrt.socket_dir() == private_runtime_dir / f"ratchet-hook-{os.getuid()}"
+
+
+def serving(cfg: HookConfig, path: Path, idle_s: float = 30.0) -> threading.Thread:
+    thread = threading.Thread(target=hookrt.serve_sessions, args=(cfg, path, idle_s), daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not path.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return thread
+
+
+def test_serve_sessions_answers_until_its_socket_goes(tmp_path: Path, private_runtime_dir: Path) -> None:
+    sock = private_runtime_dir / "s.sock"
+    cfg = config(ECHO_GUARD)
+    thread = serving(cfg, sock)
+    path = session().write(tmp_path / "s.jsonl")
+    event = hook_event(path, "c2", "git push")
+    assert hookrt._exchange(sock, event) == decide(cfg, event, use_server=False)
+    assert hookrt.serve_sessions(cfg, sock) == 0  # the lock is held: a second server leaves at once
+    with socket.socket(socket.AF_UNIX) as conn:
+        conn.connect(str(sock))
+        conn.sendall(b"[1]")
+        conn.shutdown(socket.SHUT_WR)
+        assert json.loads(hookrt._read_all(conn))["error"] == "bad request"
+    with socket.socket(socket.AF_UNIX) as conn:
+        conn.connect(str(sock))
+        conn.sendall(b"{not json")
+        conn.shutdown(socket.SHUT_WR)
+        assert json.loads(hookrt._read_all(conn))["error"].startswith("JSONDecodeError")
+    with pytest.raises(ValueError, match="malformed"):
+        reply = private_runtime_dir / "r.sock"
+        fake = socket.socket(socket.AF_UNIX)
+        fake.bind(str(reply))
+        fake.listen(1)
+        answer = threading.Thread(target=lambda: _answer(fake, b"[1]"), daemon=True)
+        answer.start()
+        hookrt._exchange(reply, event)
+    sock.unlink()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+
+
+def _answer(listener: socket.socket, data: bytes) -> None:
+    conn, _ = listener.accept()
+    with conn:
+        hookrt._read_all(conn)
+        conn.sendall(data)
+    listener.close()
+
+
+def test_serve_sessions_exits_when_idle(private_runtime_dir: Path) -> None:
+    sock = private_runtime_dir / "idle.sock"
+    thread = serving(config(ALLOW_GUARD), sock, idle_s=1.5)
+    thread.join(timeout=5)
+    assert not thread.is_alive() and not sock.exists()
+
+
+def test_serve_sessions_turns_away_other_users(
+    monkeypatch: pytest.MonkeyPatch, private_runtime_dir: Path
+) -> None:
+    sock = private_runtime_dir / "u.sock"
+    thread = serving(config(ALLOW_GUARD), sock)
+    monkeypatch.setattr(os, "getuid", lambda: -5)
+    with pytest.raises((ValueError, OSError)):  # turned away unanswered: an empty reply or a reset
+        hookrt._exchange(sock, hook_event(None, "c", "ls"))
+    monkeypatch.undo()
+    monkeypatch.setattr(socket, "SO_PEERCRED", None, raising=False)
+    monkeypatch.delattr(socket, "SO_PEERCRED")
+    assert hookrt._exchange(sock, hook_event(None, "c", "ls")) == Verdict(None)
+    sock.unlink()
+    thread.join(timeout=5)
+
+
+def test_ask_server_needs_a_hook_file_and_a_private_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    event = hook_event(None, "c", "ls")
+    assert hookrt.ask_server(config(ALLOW_GUARD), event) is None
+    failing = tmp_path / "fails.py"
+    failing.write_text("raise SystemExit(1)\n")
+    cfg = config(ALLOW_GUARD)
+    with_file = HookConfig(cfg.spec, cfg.guard_sha256, cfg.child_sha256, None, str(failing))
+    started = time.monotonic()
+    assert hookrt.ask_server(with_file, event) is None
+    assert time.monotonic() - started < hookrt.SERVER_START_S
+    quiet = tmp_path / "quiet.py"
+    quiet.write_text("pass\n")
+    monkeypatch.setattr(hookrt, "SERVER_START_S", 0.3)
+    quiet_cfg = HookConfig(cfg.spec, cfg.guard_sha256, cfg.child_sha256, None, str(quiet))
+    assert hookrt.ask_server(quiet_cfg, event) is None
+    monkeypatch.setattr(hookrt, "socket_dir", lambda: None)
+    assert hookrt.ask_server(with_file, event) is None
+
+
+def test_main_serves_or_runs_one_call(monkeypatch: pytest.MonkeyPatch, private_runtime_dir: Path) -> None:
+    good = config(ALLOW_GUARD)
+    tampered = HookConfig(good.spec, "0" * 64, good.child_sha256)
+    assert hookrt.main(tampered, ["--serve", str(private_runtime_dir / "x.sock")]) == 1
+    assert hookrt.main(good, ["--serve", "/tmp/" + "x" * 120 + ".sock"]) == 1
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(hook_event(None, "c", "ls"))))
+    assert hookrt.main(good, []) == 0
+    monkeypatch.setattr(os, "fork", lambda: 4242)
+    assert hookrt.main(good, ["--serve", str(private_runtime_dir / "p.sock")]) == 0
+    monkeypatch.setattr(os, "fork", lambda: 0)
+    sock = private_runtime_dir / "m.sock"
+    thread = threading.Thread(target=hookrt.main, args=(good, ["--serve", str(sock)]), daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not sock.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    sock.unlink()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
