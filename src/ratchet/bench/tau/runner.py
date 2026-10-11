@@ -9,6 +9,8 @@ as the grader. Guards run in the agent lane's sandboxed guard runtime, as in eve
 from __future__ import annotations
 
 import json
+import random
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import metadata
@@ -28,14 +30,68 @@ MAX_ACTIONS = 30  # tau-bench's `max_num_steps` for the tool-calling agent
 USER_PROVIDER = "openai"
 
 
-def configure_user_endpoint(base_url: str, api_key: str, *, retries: int = 3) -> None:
-    """Point tau-bench's user simulator (litellm, provider `openai`) at an OpenAI-compatible endpoint."""
+def configure_user_endpoint(base_url: str, api_key: str) -> None:
+    """Point tau-bench's user simulator (litellm, provider `openai`) at an OpenAI-compatible endpoint, and
+    give its model calls the patient retry below (litellm's own retries are turned off so the two do not
+    multiply)."""
     import litellm
+    import tau_bench.envs.user as user_module  # type: ignore[import-untyped]  # no type info
 
     litellm.api_base = base_url
     litellm.api_key = api_key
-    litellm.num_retries = retries
+    litellm.num_retries = 0
     litellm.suppress_debug_info = True
+    if not getattr(user_module.completion, "patient", False):
+        user_module.completion = patient(user_module.completion, transient_errors())
+
+
+def transient_errors() -> tuple[type[BaseException], ...]:
+    """litellm errors for a busy or unreachable endpoint: worth waiting out, never a verdict on the agent."""
+    import litellm
+
+    names = (
+        "RateLimitError",
+        "APIConnectionError",
+        "Timeout",
+        "ServiceUnavailableError",
+        "InternalServerError",
+    )
+    return tuple(getattr(litellm, n) for n in names if isinstance(getattr(litellm, n, None), type))
+
+
+def patient(
+    fn: Callable[..., Any],
+    transient: tuple[type[BaseException], ...],
+    *,
+    attempts: int = 12,
+    cap_s: float = 60.0,
+    budget_s: float = 900.0,
+    sleep: Callable[[float], None] = time.sleep,
+    rng: random.Random | None = None,
+) -> Callable[..., Any]:
+    """`fn` retried on `transient` errors with full-jitter exponential backoff inside a time budget.
+
+    tau-bench's user simulator calls its model once per turn with no retry, so a rate limit at the shared
+    endpoint would end a run as an infrastructure error. The call is retried unchanged; tau-bench appends the
+    reply to the user's transcript only after a call succeeds, so a retry never duplicates a message.
+    """
+    draw = rng or random.Random()
+
+    def call(*args: Any, **kwargs: Any) -> Any:
+        slept = 0.0
+        for attempt in range(attempts):
+            try:
+                return fn(*args, **kwargs)
+            except transient:
+                delay = draw.uniform(0.0, min(cap_s, 2.0 * 2**attempt))
+                if attempt + 1 == attempts or slept + delay > budget_s:
+                    raise
+                sleep(delay)
+                slept += delay
+        raise AssertionError("unreachable")  # pragma: no cover - the loop returns or raises
+
+    call.patient = True  # type: ignore[attr-defined]  # marks the wrapper so it is installed once
+    return call
 
 
 def _env_class(domain: Domain) -> Any:

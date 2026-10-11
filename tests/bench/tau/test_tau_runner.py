@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import random
+
 import litellm
+import pytest
 from tau_testkit import ScriptedUser, case, gold_turns, make_env
 
 from ratchet.agent.model import ScriptedModel, scripted_turn
@@ -9,9 +12,11 @@ from ratchet.bench.tau.runner import (
     TauRunner,
     agent_cost,
     configure_user_endpoint,
+    patient,
     seed_harness,
     tau_bench_commit,
     tau_tool_names,
+    transient_errors,
 )
 from ratchet.bench.tau.tasks import TauCase
 from ratchet.bench.tau.world import RESPOND
@@ -79,14 +84,58 @@ def test_agent_cost_skips_closing_turns() -> None:
     assert agent_cost([]).wall_s == 0.0
 
 
-def test_endpoint_configuration_and_commit_record() -> None:
+def test_endpoint_configuration_installs_one_patient_retry() -> None:
+    import tau_bench.envs.user as user_module  # type: ignore[import-untyped]  # no type info
+
     saved = (litellm.api_base, litellm.api_key, litellm.num_retries, litellm.suppress_debug_info)
+    original = user_module.completion
     try:
-        configure_user_endpoint("http://127.0.0.1:1/v1", "k", retries=2)
-        assert (litellm.api_base, litellm.api_key, litellm.num_retries) == ("http://127.0.0.1:1/v1", "k", 2)
+        configure_user_endpoint("http://127.0.0.1:1/v1", "k")
+        configure_user_endpoint("http://127.0.0.1:1/v1", "k")
+        assert (litellm.api_base, litellm.api_key, litellm.num_retries) == ("http://127.0.0.1:1/v1", "k", 0)
+        assert user_module.completion.patient is True
+        assert user_module.completion is not original
     finally:
         litellm.api_base, litellm.api_key, litellm.num_retries, litellm.suppress_debug_info = saved
+        user_module.completion = original
     assert tau_bench_commit() == "59a200c6d575d595120f1cb70fea53cef0632f6b"
+    assert litellm.RateLimitError in transient_errors()
+
+
+class _Busy(Exception):
+    pass
+
+
+def test_patient_retries_transient_errors_then_succeeds() -> None:
+    calls: list[int] = []
+    slept: list[float] = []
+
+    def flaky(x: int) -> int:
+        calls.append(x)
+        if len(calls) < 3:
+            raise _Busy
+        return x * 2
+
+    fn = patient(flaky, (_Busy,), sleep=slept.append, rng=random.Random(0))
+    assert fn(4) == 8 and len(calls) == 3 and len(slept) == 2
+
+
+def test_patient_gives_up_after_attempts_or_budget_and_passes_other_errors() -> None:
+    def busy() -> None:
+        raise _Busy
+
+    with pytest.raises(_Busy):
+        patient(busy, (_Busy,), attempts=3, sleep=lambda _s: None)()
+    with pytest.raises(_Busy):
+        patient(busy, (_Busy,), budget_s=0.0, sleep=lambda _s: None)()
+
+    def broken() -> None:
+        raise ValueError("bad request")
+
+    slept: list[float] = []
+    with pytest.raises(ValueError):
+        patient(broken, (_Busy,), sleep=slept.append)()
+    assert slept == []
 
 
 def test_case_object_is_built_from_the_tau_case() -> None:
