@@ -77,7 +77,7 @@ def _v2() -> Case:
 
 def _v3() -> Case:
     c = Company()
-    c.product("prod_rug", "Wool rug", {"sku-rug-160": ({"size": "160x230"}, 21900)})
+    c.product("prod_rug", "Wool rug", {"sku-rug-160": ({"size": "160x230"}, 23900)})
     c.customer("cus_ik31", "Ingrid Karlsen", "ingrid.karlsen@online.example", "pm_ik_visa")
     c.order(
         "ord_ik_412",
@@ -146,5 +146,31 @@ def _v4() -> Case:
     )
 
 
+def _a1() -> Case:
+    c = Company()
+    c.customer("cus_lb88", "Lucia Blanco", "lucia.blanco@movistar.example", "pm_lb_visa")
+    c.subscription("sub_lb_6", "cus_lb88", "Language lessons, monthly", 3900, 20)
+    c.ticket(
+        "T-0222",
+        "cus_lb88",
+        "End lessons now",
+        "Please end my language lessons subscription sub_lb_6 right away, not at the end of the period.",
+        [{"type": "cancel_subscription", "subscription_id": "sub_lb_6", "at_period_end": False}],
+    )
+    return make_case(
+        _ID,
+        "a1",
+        "audit",
+        c,
+        "T-0222",
+        Expect(
+            ticket_status={"T-0222": "solved"},
+            subscriptions={"sub_lb_6": {"status": "cancelled", "cancel_at_period_end": False}},
+            mail_required=[{"template": "cancellation_confirmed", "reference_id": "sub_lb_6"}],
+            mail_to="lucia.blanco@movistar.example",
+        ),
+    )
+
+
 def cases() -> list[Case]:
-    return [_v1(), _v2(), _v3(), _v4()]
+    return [_v1(), _v2(), _v3(), _v4(), _a1()]

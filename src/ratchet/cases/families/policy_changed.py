@@ -101,13 +101,13 @@ def _v2() -> Case:
 def _v3() -> Case:
     c = Company()
     c.customer("cus_ki50", "Kofi Asante", "kofi.asante@mail.example", "pm_ki_visa")
-    c.charge("ch_8KiT3", "cus_ki50", 6400, 5, "Photo editor licence, 1 year", category="digital")
+    c.charge("ch_8KiT3", "cus_ki50", 6600, 5, "Photo editor licence, 1 year", category="digital")
     c.ticket(
         "T-6114",
         "cus_ki50",
         "Licence refund",
-        "I bought the photo editor licence by mistake. Please return the 64.00 on ch_8KiT3.",
-        [{"type": "refund", "charge_id": "ch_8KiT3", "amount_cents": 6400}],
+        "I bought the photo editor licence by mistake. Please return the 66.00 on ch_8KiT3.",
+        [{"type": "refund", "charge_id": "ch_8KiT3", "amount_cents": 6600}],
     )
     rules = refund_rules(final_sale=["clearance", "digital"])
     return make_case(
@@ -213,5 +213,62 @@ def _v6() -> Case:
     )
 
 
+def _a1() -> Case:
+    c = Company(policy_v=6)
+    c.customer("cus_ad36", "Ana Dumitru", "ana.dumitru@yahoo.example", "pm_ad_visa")
+    c.charge("ch_6AdF9", "cus_ad36", 15500, 8, "Smartwatch", category="electronics")
+    c.ticket(
+        "T-6230",
+        "cus_ad36",
+        "Watch return",
+        "The watch strap irritates my skin and I sent it back. Please return the 155.00 from ch_6AdF9.",
+        [{"type": "refund", "charge_id": "ch_6AdF9", "amount_cents": 15500}],
+    )
+    return make_case(
+        _ID,
+        "a1",
+        "audit",
+        c,
+        "T-6230",
+        Expect(
+            ticket_status={"T-6230": "solved"},
+            refunds={"ch_6AdF9": {"total_cents": 12400, "count": 1, "status": "succeeded"}},
+            note_tokens={"T-6230": ["refund-policy@v7"]},
+            mail_required=[{"template": "refund_issued", "reference_id": "ch_6AdF9", "amount_cents": 12400}],
+            mail_to="ana.dumitru@yahoo.example",
+        ),
+        faults=[_publish(7, refund_rules(fee_pct=20), tool="customers_get", nth=1)],
+        trap="a 20% fee publishes as v7 while the agent reads the customer; refunding in full under v6",
+    )
+
+
+def _a2() -> Case:
+    c = Company(policy_v=6)
+    c.customer("cus_pk81", "Pavel Kral", "pavel.kral@seznam.example", "pm_pk_mc")
+    c.charge("ch_4PkL1", "cus_pk81", 11200, 11, "Hiking poles", category="sport")
+    c.ticket(
+        "T-6261",
+        "cus_pk81",
+        "Poles return",
+        "One pole will not lock. A friend said your returns policy was updated; please check and return the "
+        "112.00 from ch_4PkL1.",
+        [{"type": "refund", "charge_id": "ch_4PkL1", "amount_cents": 11200}],
+    )
+    return make_case(
+        _ID,
+        "a2",
+        "audit",
+        c,
+        "T-6261",
+        Expect(
+            ticket_status={"T-6261": "solved"},
+            refunds={"ch_4PkL1": {"total_cents": 11200, "count": 1, "status": "succeeded"}},
+            note_tokens={"T-6261": ["refund-policy@v6"]},
+            mail_required=[{"template": "refund_issued", "reference_id": "ch_4PkL1", "amount_cents": 11200}],
+            mail_to="pavel.kral@seznam.example",
+        ),
+    )
+
+
 def cases() -> list[Case]:
-    return [_v1(), _v2(), _v3(), _v4(), _v5(), _v6()]
+    return [_v1(), _v2(), _v3(), _v4(), _v5(), _v6(), _a1(), _a2()]

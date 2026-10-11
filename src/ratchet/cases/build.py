@@ -6,8 +6,7 @@ import copy
 from datetime import timedelta
 from typing import Any
 
-from ratchet.cases.model import Case, Expect
-from ratchet.types import Split
+from ratchet.cases.model import Case, CaseSplit, Expect
 from ratchet.world.core import format_time, parse_time
 from ratchet.world.faults import Fault
 
@@ -49,7 +48,9 @@ def policy_version(version: int, rules: JSON, published_at: str = "2026-01-01T00
 class Company:
     """Accumulates one case's initial state. Times are relative to the clock start."""
 
-    def __init__(self, start: str = "2026-03-16T15:00:00Z", rules: JSON | None = None) -> None:
+    def __init__(
+        self, start: str = "2026-03-16T15:00:00Z", rules: JSON | None = None, policy_v: int = 3
+    ) -> None:
         self.start = start
         self.state: JSON = {
             "clock": {"start": start},
@@ -60,7 +61,9 @@ class Company:
             "orders": {"orders": {}},
             "tickets": {"tickets": {}},
             "approvals": {"approvals": {}},
-            "policy": {"docs": {REFUND_POLICY: {"versions": [policy_version(3, rules or refund_rules())]}}},
+            "policy": {
+                "docs": {REFUND_POLICY: {"versions": [policy_version(policy_v, rules or refund_rules())]}}
+            },
             "mail": {"inbound": {}, "outbox": []},
             "billing": {"batches": {}, "accounts": {}, "invoices": {}, "journals": [], "idempotency": {}},
         }
@@ -259,7 +262,7 @@ class Company:
 def make_case(
     family: str,
     variant: str,
-    split: Split,
+    split: CaseSplit,
     company: Company,
     ticket_id: str,
     expect: Expect,

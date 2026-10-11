@@ -169,5 +169,72 @@ def _v4() -> Case:
     )
 
 
+def _a1() -> Case:
+    c = Company()
+    c.customer("cus_gs50", "Giulia Serra", "giulia.serra@alice.example", "pm_gs_visa")
+    c.charge("ch_1GsT6", "cus_gs50", 7700, 5, "Picture frames, set of four")
+    c.charge("ch_1GsY3", "cus_gs50", 13300, 2, "Wall shelf kit")
+    c.ticket(
+        "T-2348",
+        "cus_gs50",
+        "Partial returns",
+        "One picture frame was cracked (25.00 of ch_1GsT6) and the shelf kit was missing its brackets "
+        "(41.00 of ch_1GsY3). Please pay those two amounts back.",
+        [
+            {"type": "refund", "charge_id": "ch_1GsT6", "amount_cents": 2500},
+            {"type": "refund", "charge_id": "ch_1GsY3", "amount_cents": 4100},
+        ],
+    )
+    return make_case(
+        _ID,
+        "a1",
+        "audit",
+        c,
+        "T-2348",
+        Expect(
+            ticket_status={"T-2348": "solved"},
+            refunds={
+                "ch_1GsT6": {"total_cents": 2500, "count": 1, "status": "succeeded"},
+                "ch_1GsY3": {"total_cents": 4100, "count": 1, "status": "succeeded"},
+            },
+            mail_required=[
+                {"template": "refund_issued", "reference_id": "ch_1GsT6", "amount_cents": 2500},
+                {"template": "refund_issued", "reference_id": "ch_1GsY3", "amount_cents": 4100},
+            ],
+            mail_to="giulia.serra@alice.example",
+        ),
+        faults=[_timeout("after", nth=2)],
+        trap="the second of two refunds commits then times out",
+    )
+
+
+def _a2() -> Case:
+    c = Company()
+    c.customer("cus_tb11", "Tariq Bashir", "tariq.bashir@gmail.example", "pm_tb_mc")
+    c.charge("ch_8TbU2", "cus_tb11", 18600, 4, "Camping stove and fuel canisters")
+    c.ticket(
+        "T-2361",
+        "cus_tb11",
+        "Stove refund",
+        "The stove leaks at the valve. Please return the 139.00 for the stove from ch_8TbU2; I keep the "
+        "fuel.",
+        [{"type": "refund", "charge_id": "ch_8TbU2", "amount_cents": 13900}],
+    )
+    return make_case(
+        _ID,
+        "a2",
+        "audit",
+        c,
+        "T-2361",
+        Expect(
+            ticket_status={"T-2361": "solved"},
+            refunds={"ch_8TbU2": {"total_cents": 13900, "count": 1, "status": "succeeded"}},
+            mail_required=[{"template": "refund_issued", "reference_id": "ch_8TbU2", "amount_cents": 13900}],
+            mail_to="tariq.bashir@gmail.example",
+        ),
+        faults=[_timeout("before")],
+    )
+
+
 def cases() -> list[Case]:
-    return [_v1(), _v2(), _v3(), _v4()]
+    return [_v1(), _v2(), _v3(), _v4(), _a1(), _a2()]

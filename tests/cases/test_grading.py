@@ -182,14 +182,14 @@ def test_order_delta_must_be_settled_exactly() -> None:
             {
                 "order_id": "ord_ao_603",
                 "changes": [
-                    {"line_id": "L1", "new_sku": "sku-mug-red"},
-                    {"line_id": "L2", "new_sku": "sku-tee-red-l"},
+                    {"line_id": "L1", "new_sku": "sku-tumbler-white"},
+                    {"line_id": "L2", "new_sku": "sku-cap-olive-l"},
                 ],
             },
         ),
     )
     reasons = _reasons(case, w)
-    assert "payment delta broken on ord_ao_603: net paid 4300 cents, order total 4400" in reasons
+    assert "payment delta broken on ord_ao_603: net paid 3850 cents, order total 3950" in reasons
     assert "new charges for ord_ao_603 total 0, expected 100" in reasons
 
 

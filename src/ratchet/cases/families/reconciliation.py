@@ -190,5 +190,91 @@ def _v4() -> Case:
     )
 
 
+def _a1() -> Case:
+    c = Company()
+    c.account("acct_631", "Willow Dental", {"B-0416": 30500})
+    c.account("acct_632", "Summit Roofing", {"B-0416": 88000})
+    c.account("acct_633", "Copper Kettle Diner", {"B-0416": 17125})
+    c.account("acct_634", "Ridge Pharmacy", {"B-0416": 52000})
+    c.invoice("inv_7611", "acct_631", 31750)
+    c.invoice("inv_7612", "acct_632", 88000)
+    c.invoice("inv_7613", "acct_633", 9000)
+    c.invoice("inv_7614", "acct_633", 6875)
+    c.invoice("inv_7615", "acct_634", 52000)
+    c.batch(
+        "B-0416",
+        [
+            {"line": 1, "invoice_id": "inv_7612", "account_id": "acct_632", "amount_cents": 88000},
+            {"line": 2, "invoice_id": "inv_7613", "amount_cents": 9000},
+            {"line": 3, "invoice_id": "inv_7611", "amount_cents": 31750},
+            {"line": 4, "invoice_id": "inv_7615", "account_id": "acct_634", "amount_cents": 52000},
+            {"line": 5, "invoice_id": "inv_7614", "amount_cents": 6875},
+        ],
+    )
+    c.ticket(
+        "T-F416",
+        None,
+        "Close April 16 lockbox batch",
+        "Finance close: reconcile remittance batch B-0416 against the ledger and close it.",
+        [{"type": "reconcile_batch", "batch_id": "B-0416"}],
+    )
+    return make_case(
+        _ID,
+        "a1",
+        "audit",
+        c,
+        "T-F416",
+        Expect(
+            ticket_status={"T-F416": "solved"},
+            accounts_applied={
+                "acct_631": {"B-0416": 31750},
+                "acct_632": {"B-0416": 88000},
+                "acct_633": {"B-0416": 15875},
+                "acct_634": {"B-0416": 52000},
+            },
+            batches={"B-0416": {"status": "closed"}},
+            note_tokens={"T-F416": ["acct_631", "acct_633"]},
+        ),
+        trap="12.50 misapplied between two of four accounts; lines mix account ids and invoice-only rows",
+    )
+
+
+def _a2() -> Case:
+    c = Company()
+    c.account("acct_741", "Beacon Tutors", {"B-0423": 21000})
+    c.account("acct_742", "Saffron Kitchen", {"B-0423": 46350})
+    c.invoice("inv_7701", "acct_741", 21000)
+    c.invoice("inv_7702", "acct_742", 30000)
+    c.invoice("inv_7703", "acct_742", 16350)
+    c.batch(
+        "B-0423",
+        [
+            {"line": 1, "invoice_id": "inv_7703", "amount_cents": 16350},
+            {"line": 2, "invoice_id": "inv_7701", "account_id": "acct_741", "amount_cents": 21000},
+            {"line": 3, "invoice_id": "inv_7702", "amount_cents": 30000},
+        ],
+    )
+    c.ticket(
+        "T-F423",
+        None,
+        "Close April 23 lockbox batch",
+        "Finance close: reconcile remittance batch B-0423 against the ledger and close it. Last week's "
+        "batch had a misapplied payment, so check carefully.",
+        [{"type": "reconcile_batch", "batch_id": "B-0423"}],
+    )
+    return make_case(
+        _ID,
+        "a2",
+        "audit",
+        c,
+        "T-F423",
+        Expect(
+            ticket_status={"T-F423": "solved"},
+            accounts_applied={"acct_741": {"B-0423": 21000}, "acct_742": {"B-0423": 46350}},
+            batches={"B-0423": {"status": "closed"}},
+        ),
+    )
+
+
 def cases() -> list[Case]:
-    return [_v1(), _v2(), _v3(), _v4()]
+    return [_v1(), _v2(), _v3(), _v4(), _a1(), _a2()]

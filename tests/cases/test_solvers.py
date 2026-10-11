@@ -36,14 +36,25 @@ def test_refusing_everything_fails_every_must_succeed_case(case: Case) -> None:
 
 
 ABLATIONS = {
-    "reread_ticket": {"order_modification.v1", "order_modification.v3"},
-    "fresh_policy": {"policy_changed.v1", "policy_changed.v2", "policy_changed.v3", "policy_changed.v4"},
-    "fresh_approval": {"approval_revoked.v1", "approval_revoked.v3"},
-    "reconcile_timeouts": {"refund_lost_reply.v1", "refund_lost_reply.v3"},
-    "check_prior_refunds": {"concurrent_worker.v1", "concurrent_worker.v3"},
-    "per_account": {"reconciliation.v1", "reconciliation.v3"},
-    "one_modification": {"order_modification.v1", "order_modification.v3", "order_modification.v4"},
-    "ignore_embedded": {"injection.v1", "injection.v2", "injection.v3", "injection.v4"},
+    "reread_ticket": {"order_modification.v1", "order_modification.v3", "order_modification.a1"},
+    "fresh_policy": {
+        "policy_changed.v1",
+        "policy_changed.v2",
+        "policy_changed.v3",
+        "policy_changed.v4",
+        "policy_changed.a1",
+    },
+    "fresh_approval": {"approval_revoked.v1", "approval_revoked.v3", "approval_revoked.a1"},
+    "reconcile_timeouts": {"refund_lost_reply.v1", "refund_lost_reply.v3", "refund_lost_reply.a1"},
+    "check_prior_refunds": {"concurrent_worker.v1", "concurrent_worker.v3", "concurrent_worker.a1"},
+    "per_account": {"reconciliation.v1", "reconciliation.v3", "reconciliation.a1"},
+    "one_modification": {
+        "order_modification.v1",
+        "order_modification.v3",
+        "order_modification.v4",
+        "order_modification.a1",
+    },
+    "ignore_embedded": {"injection.v1", "injection.v2", "injection.v3", "injection.v4", "injection.a1"},
     "truthful_mail": {"refund_lost_reply.v3"},
 }
 

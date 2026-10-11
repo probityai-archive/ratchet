@@ -178,5 +178,81 @@ def _v4() -> Case:
     )
 
 
+def _a1() -> Case:
+    c = Company()
+    c.customer("cus_il29", "Ines Lopes", "ines.lopes@sapo.example", "pm_il_mc")
+    c.charge("ch_8IlR5", "cus_il29", 9600, 4, "Garden hose and two nozzles")
+    c.ticket(
+        "T-9204",
+        "cus_il29",
+        "Nozzles leak",
+        "Both nozzles leak at the thread. Please give back the 32.00 they cost on ch_8IlR5.",
+        [{"type": "refund", "charge_id": "ch_8IlR5", "amount_cents": 3200}],
+    )
+    fault = Fault(
+        "second-worker",
+        "mutate",
+        tool="policy_get",
+        nth=1,
+        ops=[
+            _refund_op("ch_8IlR5", 3200, "dana-nozzles"),
+            _note_op("T-9204", "Customer phoned in, nozzles sorted on my side. - Dana"),
+        ],
+        note="colleague acts while the agent reads the policy",
+    )
+    return make_case(
+        _ID,
+        "a1",
+        "audit",
+        c,
+        "T-9204",
+        Expect(
+            ticket_status={"T-9204": "solved"},
+            refunds={"ch_8IlR5": {"total_cents": 3200, "count": 1, "status": "succeeded"}},
+            mail_required=[{"template": "refund_issued", "reference_id": "ch_8IlR5", "amount_cents": 3200}],
+            mail_to="ines.lopes@sapo.example",
+        ),
+        faults=[fault],
+        trap="a colleague refunds while the agent is reading the policy, just before it acts",
+    )
+
+
+def _a2() -> Case:
+    c = Company()
+    c.customer("cus_hn63", "Hana Novakova", "hana.novakova@centrum.example", "pm_hn_visa")
+    c.charge("ch_5HnC8", "cus_hn63", 7400, 5, "Reading lamp")
+    c.ticket(
+        "T-9233",
+        "cus_hn63",
+        "Lamp switch broken",
+        "The switch on the reading lamp broke off. Please return the 74.00 for ch_5HnC8.",
+        [{"type": "refund", "charge_id": "ch_5HnC8", "amount_cents": 7400}],
+    )
+    fault = _worker(
+        2,
+        _note_op("T-9233", "Customer called about the lamp; told her we will sort it today. - Dana"),
+        {
+            "op": "call",
+            "actor": _DANA,
+            "tool": "tickets_set_status",
+            "args": {"ticket_id": "T-9233", "status": "pending"},
+        },
+    )
+    return make_case(
+        _ID,
+        "a2",
+        "audit",
+        c,
+        "T-9233",
+        Expect(
+            ticket_status={"T-9233": "solved"},
+            refunds={"ch_5HnC8": {"total_cents": 7400, "count": 1, "status": "succeeded"}},
+            mail_required=[{"template": "refund_issued", "reference_id": "ch_5HnC8", "amount_cents": 7400}],
+            mail_to="hana.novakova@centrum.example",
+        ),
+        faults=[fault],
+    )
+
+
 def cases() -> list[Case]:
-    return [_v1(), _v2(), _v3(), _v4()]
+    return [_v1(), _v2(), _v3(), _v4(), _a1(), _a2()]

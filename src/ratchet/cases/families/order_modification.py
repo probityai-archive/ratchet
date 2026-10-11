@@ -59,13 +59,13 @@ def _modify(order_id: str, *changes: tuple[str, str]) -> dict[str, Any]:
     }
 
 
-def _followup(ticket_id: str, body: str, request: dict[str, Any], tool: str) -> Fault:
+def _followup(ticket_id: str, body: str, requests: list[dict[str, Any]], tool: str) -> Fault:
     return Fault(
         "customer-followup",
         "mutate",
         tool=tool,
         nth=1,
-        ops=[{"op": "customer_message", "ticket_id": ticket_id, "body": body, "requests": [request]}],
+        ops=[{"op": "customer_message", "ticket_id": ticket_id, "body": body, "requests": requests}],
         note="customer adds a change mid-run",
     )
 
@@ -91,7 +91,7 @@ def _v1() -> Case:
     fault = _followup(
         "T-1201",
         "Sorry, one more thing before it goes out: please also make the mug (L2) blue.",
-        _modify("ord_hw_510", ("L2", "sku-mug-blue")),
+        [_modify("ord_hw_510", ("L2", "sku-mug-blue"))],
         "orders_get",
     )
     return make_case(
@@ -199,7 +199,7 @@ def _v3() -> Case:
     fault = _followup(
         "T-1388",
         "And the bottle (L1) in black please, if it is not too late.",
-        _modify("ord_lm_918", ("L1", "sku-bottle-black")),
+        [_modify("ord_lm_918", ("L1", "sku-bottle-black"))],
         "catalog_get_product",
     )
     return make_case(
@@ -227,23 +227,53 @@ def _v3() -> Case:
     )
 
 
+def _outfitters(c: Company) -> None:
+    """A different shop for held-out and audit cases, so nothing about the training catalog carries over."""
+    c.product(
+        "prod_cap",
+        "Field cap",
+        {
+            "sku-cap-navy-s": ({"color": "navy", "size": "S"}, 2100),
+            "sku-cap-navy-l": ({"color": "navy", "size": "L"}, 2300),
+            "sku-cap-olive-s": ({"color": "olive", "size": "S"}, 2100),
+            "sku-cap-olive-l": ({"color": "olive", "size": "L"}, 2300),
+        },
+    )
+    c.product(
+        "prod_tumbler",
+        "Travel tumbler",
+        {
+            "sku-tumbler-white": ({"finish": "white"}, 1650),
+            "sku-tumbler-sage": ({"finish": "sage"}, 1750),
+        },
+    )
+    c.product(
+        "prod_chair",
+        "Folding chair",
+        {
+            "sku-chair-walnut": ({"wood": "walnut"}, 12900),
+            "sku-chair-ash": ({"wood": "ash"}, 11400),
+        },
+    )
+
+
 def _v4() -> Case:
     c = Company()
-    _shop(c)
+    _outfitters(c)
     c.customer("cus_ao77", "Amara Obi", "amara.obi@yahoo.example", "pm_ao_visa")
     c.order(
         "ord_ao_603",
         "cus_ao77",
         "ch_2AoX5",
-        [("prod_mug", "sku-mug-blue"), ("prod_tee", "sku-tee-red-m")],
+        [("prod_tumbler", "sku-tumbler-sage"), ("prod_cap", "sku-cap-olive-s")],
         address("14 Allen Ave", "Lagos", "100271", "NG"),
     )
     c.ticket(
         "T-1405",
         "cus_ao77",
         "Two changes",
-        "On order ord_ao_603: the mug (L1) in red instead of blue, and the tee (L2) in L instead of M.",
-        [_modify("ord_ao_603", ("L1", "sku-mug-red"), ("L2", "sku-tee-red-l"))],
+        "On order ord_ao_603: the tumbler (L1) in white instead of sage, and the cap (L2) in L instead of S.",
+        [_modify("ord_ao_603", ("L1", "sku-tumbler-white"), ("L2", "sku-cap-olive-l"))],
     )
     return make_case(
         _ID,
@@ -255,9 +285,9 @@ def _v4() -> Case:
             ticket_status={"T-1405": "solved"},
             orders={
                 "ord_ao_603": {
-                    "skus": ["sku-mug-red", "sku-tee-red-l"],
+                    "skus": ["sku-tumbler-white", "sku-cap-olive-l"],
                     "status": "pending_modified",
-                    "total_cents": 4400,
+                    "total_cents": 3950,
                 }
             },
             new_charges={"ord_ao_603": 100},
@@ -271,22 +301,22 @@ def _v4() -> Case:
 
 def _v5() -> Case:
     c = Company()
-    _shop(c)
+    _outfitters(c)
     c.customer("cus_mk64", "Marta Kowalska", "marta.kowalska@wp.example", "pm_mk_mc")
     c.order(
         "ord_mk_745",
         "cus_mk64",
         "ch_4MkE7",
-        [("prod_mug", "sku-mug-red"), ("prod_tee", "sku-tee-red-m")],
+        [("prod_tumbler", "sku-tumbler-white"), ("prod_cap", "sku-cap-navy-s")],
         address("ul. Prosta 7", "Warsaw", "00-838", "PL"),
     )
     c.ticket(
         "T-1466",
         "cus_mk64",
-        "Tee size",
-        "Please switch the tee on order ord_mk_745 (line L2) to size L. I wondered about the mug colour "
-        "too, but I will keep it red. That is everything.",
-        [_modify("ord_mk_745", ("L2", "sku-tee-red-l"))],
+        "Cap size",
+        "Please switch the cap on order ord_mk_745 (line L2) to size L. I wondered about the tumbler colour "
+        "too, but I will keep it white. That is everything.",
+        [_modify("ord_mk_745", ("L2", "sku-cap-navy-l"))],
     )
     return make_case(
         _ID,
@@ -298,9 +328,9 @@ def _v5() -> Case:
             ticket_status={"T-1466": "solved"},
             orders={
                 "ord_mk_745": {
-                    "skus": ["sku-mug-red", "sku-tee-red-l"],
+                    "skus": ["sku-tumbler-white", "sku-cap-navy-l"],
                     "status": "pending_modified",
-                    "total_cents": 4400,
+                    "total_cents": 3950,
                 }
             },
             new_charges={"ord_mk_745": 200},
@@ -311,5 +341,96 @@ def _v5() -> Case:
     )
 
 
+def _a1() -> Case:
+    c = Company()
+    _outfitters(c)
+    c.customer("cus_ej05", "Emma Johansson", "emma.johansson@telia.example", "pm_ej_visa")
+    c.order(
+        "ord_ej_877",
+        "cus_ej05",
+        "ch_7EjN3",
+        [("prod_cap", "sku-cap-olive-s"), ("prod_chair", "sku-chair-walnut")],
+        address("Drottninggatan 50", "Stockholm", "11121", "SE"),
+    )
+    c.ticket(
+        "T-1520",
+        "cus_ej05",
+        "Chair wood",
+        "Please make the folding chair on order ord_ej_877 (line L2) ash instead of walnut.",
+        [_modify("ord_ej_877", ("L2", "sku-chair-ash"))],
+    )
+    fault = _followup(
+        "T-1520",
+        "Also the cap (L1) in L please, I just checked the size chart.",
+        [_modify("ord_ej_877", ("L1", "sku-cap-olive-l"))],
+        "customers_get",
+    )
+    return make_case(
+        _ID,
+        "a1",
+        "audit",
+        c,
+        "T-1520",
+        Expect(
+            ticket_status={"T-1520": "solved"},
+            orders={
+                "ord_ej_877": {
+                    "skus": ["sku-cap-olive-l", "sku-chair-ash"],
+                    "status": "pending_modified",
+                    "total_cents": 13700,
+                }
+            },
+            refunds={"ch_7EjN3": {"total_cents": 1300, "count": 1, "status": "succeeded"}},
+            paid_equals_total=["ord_ej_877"],
+            mail_required=[{"template": "order_updated", "reference_id": "ord_ej_877"}],
+            mail_to="emma.johansson@telia.example",
+        ),
+        faults=[fault],
+        trap="the extra change lands early, while the agent reads the customer; net delta is a refund",
+    )
+
+
+def _a2() -> Case:
+    c = Company()
+    _outfitters(c)
+    c.customer("cus_ns18", "Nikos Stavrou", "nikos.stavrou@otenet.example", "pm_ns_mc")
+    c.order(
+        "ord_ns_391",
+        "cus_ns18",
+        "ch_9NsK6",
+        [("prod_cap", "sku-cap-navy-l"), ("prod_tumbler", "sku-tumbler-sage")],
+        address("Ermou 22", "Athens", "10563", "GR"),
+    )
+    c.ticket(
+        "T-1544",
+        "cus_ns18",
+        "Cap colour",
+        "On order ord_ns_391, please switch the cap (L1) from navy to olive, same size L.",
+        [_modify("ord_ns_391", ("L1", "sku-cap-olive-l"))],
+    )
+    fault = _followup("T-1544", "Thanks! Nothing else to change, the tumbler is perfect.", [], "orders_get")
+    return make_case(
+        _ID,
+        "a2",
+        "audit",
+        c,
+        "T-1544",
+        Expect(
+            ticket_status={"T-1544": "solved"},
+            orders={
+                "ord_ns_391": {
+                    "skus": ["sku-cap-olive-l", "sku-tumbler-sage"],
+                    "status": "pending_modified",
+                    "total_cents": 4050,
+                }
+            },
+            paid_equals_total=["ord_ns_391"],
+            mail_required=[{"template": "order_updated", "reference_id": "ord_ns_391"}],
+            mail_to="nikos.stavrou@otenet.example",
+        ),
+        faults=[fault],
+    )
+
+
 def cases() -> list[Case]:
-    return [_v1(), _v2(), _v3(), _v4(), _v5()]
+    return [_v1(), _v2(), _v3(), _v4(), _v5(), _a1(), _a2()]
