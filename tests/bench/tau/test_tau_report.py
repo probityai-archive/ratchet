@@ -37,7 +37,7 @@ def test_report_counts_every_run_and_lists_stopped_ones(tmp_path: Path) -> None:
     _config(trial, note="first trial")
     JsonlStore(trial).put_eval(_eval("h1", [("x", "heldout", True), ("y", "heldout", False)]))
     evo = tmp_path / "evolve" / "retail" / "run-1"
-    _config(evo, improver_model="i")
+    _config(evo, improver_model="i", stopped="cut off")
     store = JsonlStore(evo)
     store.put_eval({"type": "evaluator"})
     store.put_eval(
@@ -66,6 +66,7 @@ def test_report_counts_every_run_and_lists_stopped_ones(tmp_path: Path) -> None:
     for rid, cid, ok in [("r1", "x", True), ("r1", "x", True), ("r2", "z", False)]:
         store.put_trace(Trace(rid, cid, "h2", "m", [], Outcome(ok, [], "d", Cost())))
     store.put_trace(Trace("r3", "x", "h1", "m", [], Outcome(True, [], "d", Cost())))
+    store.put_eval(_eval("h1", [("w", "train", False)], role="parent_run_1", generation=1))
     _config(tmp_path / "runs" / "airline" / "h9" / "all-trial-1", domain="airline")
 
     assert {r["source"] for r in collect(tmp_path)} == {
@@ -74,10 +75,12 @@ def test_report_counts_every_run_and_lists_stopped_ones(tmp_path: Path) -> None:
     }
     text = render(tmp_path, "retail")
     assert "| `h1` | heldout | 2 | 2 | 4 | 3 | 0 | 75.0% | 50.0% |" in text
+    assert "| `h1` | train | 1 | 1 | 1 | 0 | 0 | 0.0% |" in text
     assert "`runs/retail/h1/all-trial-9`: rate limits" in text
     assert "| run-1 | `h1->h2` | False | heldout |" in text
     assert "parent_run_2" in text and "note: n" in text and "airline" not in text
     assert "Note: first trial" in text
+    assert "Stopped: cut off" in text
     assert "| `evolve/retail/run-1` | `h2` | 1/1 | 0/1 |" in text
     assert "`h1` | 1/1" not in text
 

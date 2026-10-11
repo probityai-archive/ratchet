@@ -46,4 +46,9 @@ def summary(successes: Mapping[str, list[bool]], ks: Iterable[int]) -> dict[str,
     for k in ks:
         if 1 <= k <= trials:
             out[f"pass^{k}"] = round(pass_hat_k(successes, k), 4)
+            continue
+        # Not every task has k trials: pass^k over the tasks that do, always shown with that task count.
+        enough = {t: runs for t, runs in successes.items() if len(runs) >= k}
+        if k >= 1 and enough:
+            out[f"pass^{k}_subset"] = {"value": round(pass_hat_k(enough, k), 4), "tasks": len(enough)}
     return out

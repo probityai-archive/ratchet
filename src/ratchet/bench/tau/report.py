@@ -70,6 +70,14 @@ def _pct(value: float | None) -> str:
     return "" if value is None else f"{100 * value:.1f}%"
 
 
+def _cell(row: dict[str, Any], k: int) -> str:
+    """pass^k over every task, or over the tasks with at least k trials, with their count named."""
+    if f"pass^{k}" in row:
+        return _pct(row[f"pass^{k}"])
+    sub = row.get(f"pass^{k}_subset")
+    return f"{_pct(sub['value'])} ({sub['tasks']} of {row['tasks']} tasks)" if sub else ""
+
+
 def _configs(root: Path, domain: str) -> list[dict[str, Any]]:
     out = []
     for path in sorted(root.rglob("config.json")):
@@ -165,6 +173,8 @@ def render(root: Path, domain: str) -> str:
         line = f"- `{cfg['source']}`: {fields}; split {split}, digest `{str(rec.get('digest', ''))[:16]}`"
         if cfg.get("note"):
             line += f". Note: {cfg['note']}"
+        if cfg.get("stopped"):
+            line += f". Stopped: {cfg['stopped']}"
         if line not in seen:
             seen.add(line)
             lines.append(line)
@@ -178,7 +188,9 @@ def render(root: Path, domain: str) -> str:
     lines += ["", "## pass^k by harness and split", ""]
     lines += [
         "A run that crashed is a failed run. pass^k is tau-bench's estimator, mean over tasks of "
-        "C(successes, k) / C(trials, k); it needs k trials of every task.",
+        "C(successes, k) / C(trials, k). Where some tasks have fewer than k trials, the cell gives pass^k "
+        "over the tasks that have k, with their count; those tasks are the seeded held-out subset an evolve "
+        "run evaluated, not a selection by outcome.",
         "",
         "| harness | split | tasks | trials/task | runs | successes | crashed | "
         + " | ".join(f"pass^{k}" for k in range(1, MAX_K + 1))
@@ -186,7 +198,7 @@ def render(root: Path, domain: str) -> str:
         "|---|---|---|---|---|---|---|" + "---|" * MAX_K,
     ]
     for t in table:
-        ks = " | ".join(_pct(t.get(f"pass^{k}")) for k in range(1, MAX_K + 1))
+        ks = " | ".join(_cell(t, k) for k in range(1, MAX_K + 1))
         lines.append(
             f"| `{t['harness']}` | {t['split']} | {t['tasks']} | {t['trials_per_task']} | {t['runs']} | "
             f"{t['successes']} | {t['errors']} | {ks} |"

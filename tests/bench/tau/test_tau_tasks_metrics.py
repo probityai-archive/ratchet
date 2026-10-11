@@ -52,7 +52,14 @@ def test_summary_and_grouping() -> None:
     grouped = by_task(rows)
     assert grouped == {"a": [True, False], "b": [True]}
     s = summary(grouped, [1, 2])
-    assert s == {"tasks": 2, "trials_per_task": 1, "runs": 3, "successes": 2, "pass^1": 0.75}
+    assert s == {
+        "tasks": 2,
+        "trials_per_task": 1,
+        "runs": 3,
+        "successes": 2,
+        "pass^1": 0.75,
+        "pass^2_subset": {"value": 0.0, "tasks": 1},
+    }
 
 
 def test_heldout_subset_is_seeded_and_bounded() -> None:
