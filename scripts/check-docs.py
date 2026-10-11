@@ -51,6 +51,13 @@ DESCRIPTIONS = {
         "The loop on tau-bench retail with its own database and reward: pass^k by harness and split, "
         "with crashed and stopped runs listed."
     ),
+    "atlas-probes.md": (
+        "Each Atlas feature run against the hackathon sandbox before the product claims it, "
+        "with the result for each server version."
+    ),
+    "tau-airline.md": (
+        "The loop on tau-bench airline with its own database and reward: pass^k by harness and split."
+    ),
     "archive.json": (
         "The version archive export: every harness version as a node with its clade pass rate and "
         "admission yield."

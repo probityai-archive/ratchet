@@ -30,7 +30,7 @@ failures --> diagnose --> propose --> replay --> fresh evaluation --> admit --> 
 | `view` | The terminal views and the static report: replay matrix, lineage, trace, decision, live change stream |
 | `bench` | Adapters that run the same loop on public agent benchmarks, plus cross-model transfer runs; the measured results are in [RESULTS.md](RESULTS.md) |
 | `telemetry` | An optional sink that sends runs, evaluations and decisions to Raindrop |
-| `atlas_features` | Probes that run an Atlas capability on the cluster before the product claims it |
+| `atlas_features` | Probes that run an Atlas capability on the cluster before the product claims it; the results are in [the probe page](results/atlas-probes.md) |
 
 ## The guard sandbox
 
