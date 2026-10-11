@@ -190,7 +190,8 @@ class Tau2World:
 
         self.steps += 1
         if self.ending is not None:
-            return ToolResult(call.call_id, False, None, "the conversation has ended")
+            ended = {"observation": "", "done": True}
+            return ToolResult(call.call_id, False, ended, "the conversation has ended")
         if call.name == RESPOND:
             content = call.args.get("content")
             if not isinstance(content, str) or not content.strip():
@@ -394,6 +395,7 @@ def reward_reasons(world: Tau2World) -> list[str]:
         reasons.append(f"the conversation ended by {sim.termination_reason.value}, not by the customer")
     if info is None:
         return reasons
+    by_kind: dict[str, list[str]] = {}
     if info.db_check is not None and not info.db_check.db_match:
         gold, gold_user = gold_databases(world.orchestrator.task, world.env.get_domain_name())
         diffs = record_diffs(world.env.tools.db.model_dump(mode="json"), gold)
@@ -401,19 +403,32 @@ def reward_reasons(world: Tau2World) -> list[str]:
             diffs += record_diffs(
                 {"user": world.env.user_tools.db.model_dump(mode="json")}, {"user": gold_user}
             )
-        reasons += diffs or ["the final database differs from the gold one"]
-    for a in info.action_checks or []:
-        if not a.action_match:
-            reasons.append(f"the agent never made the call {a.action.name}({_short(a.action.arguments)})")
-    for c in info.communicate_checks or []:
-        if not c.met:
-            reasons.append(f"the agent never told the user {c.info!r}")
-    for n in info.nl_assertions or []:
-        if not n.met:
-            reasons.append(f"not met: {n.nl_assertion} (judge: {n.justification})")
-    for e in info.env_assertions or []:
-        if not e.met:
-            reasons.append(f"environment assertion failed: {_short(e.env_assertion.model_dump(mode='json'))}")
+        by_kind["DB"] = diffs or ["the final database differs from the gold one"]
+    by_kind["ACTION"] = [
+        f"the agent never made the call {a.action.name}({_short(a.action.arguments)})"
+        for a in info.action_checks or []
+        if not a.action_match
+    ]
+    by_kind["COMMUNICATE"] = [
+        f"the agent never told the user {c.info!r}" for c in info.communicate_checks or [] if not c.met
+    ]
+    by_kind["NL_ASSERTION"] = [
+        f"not met: {n.nl_assertion} (judge: {n.justification})" for n in info.nl_assertions or [] if not n.met
+    ]
+    by_kind["ENV_ASSERTION"] = [
+        f"environment assertion failed: {_short(e.env_assertion.model_dump(mode='json'))}"
+        for e in info.env_assertions or []
+        if not e.met
+    ]
+    # Checks in the task's reward basis decide the reward and come first; tau2-bench also runs checks
+    # outside the basis, which are reported but marked, since they did not cost the reward.
+    basis = {str(getattr(b, "value", b)) for b in info.reward_basis or []}
+    for kind, found in by_kind.items():
+        if kind in basis:
+            reasons += found
+    for kind, found in by_kind.items():
+        if kind not in basis:
+            reasons += [f"(not scored) {r}" for r in found]
     return reasons
 
 

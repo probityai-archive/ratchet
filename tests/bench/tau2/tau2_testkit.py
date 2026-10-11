@@ -83,6 +83,15 @@ def factory(user: ScriptedUser) -> Any:
     return make
 
 
+def fresh_factory(replies: Sequence[Reply] = (STOP,)) -> Any:
+    """An orchestrator factory that seats a new scripted customer in every conversation."""
+
+    def make(cfg: Any, t: Any, seed: int | None, sim_id: str) -> Any:
+        return factory(ScriptedUser(replies))(cfg, t, seed, sim_id)
+
+    return make
+
+
 def make_world(domain: Domain, task_id: str, user: ScriptedUser | None = None) -> Tau2World:
     orch = factory(user or ScriptedUser())(config(domain), task(domain, task_id), 7, "sim-test")
     return Tau2World.start(orch, VIEWS[domain])

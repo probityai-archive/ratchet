@@ -54,6 +54,7 @@ def test_respond_returns_the_reply_and_stop_ends_with_a_reward() -> None:
     assert sim.termination_reason.value == "user_stop" and sim.reward_info is not None
     after = world.call(ToolCall(RESPOND, {"content": "again"}, "r2"))
     assert not after.ok and after.error == "the conversation has ended"
+    assert after.data == {"observation": "", "done": True}
 
 
 def test_empty_respond_is_refused_without_stepping() -> None:
@@ -161,11 +162,13 @@ def test_reward_reasons_cover_every_check_kind() -> None:
     info.communicate_checks = [Obj(met=False, info="the refund amount")]
     info.nl_assertions = [Obj(met=False, nl_assertion="agent asks first", justification="it did not")]
     info.env_assertions = [Obj(met=False, env_assertion=Obj())]
+    info.reward_basis = ["ACTION", "COMMUNICATE", "NL_ASSERTION"]
     reasons = reward_reasons(world)
-    assert any(r.startswith("the agent never made the call find_user_id_by_name_zip") for r in reasons)
-    assert "the agent never told the user 'the refund amount'" in reasons
-    assert "not met: agent asks first (judge: it did not)" in reasons
-    assert any(r.startswith("environment assertion failed") for r in reasons)
+    assert reasons[0] == "the conversation ended by max_steps, not by the customer"
+    assert reasons[1].startswith("the agent never made the call find_user_id_by_name_zip")
+    assert reasons[2] == "the agent never told the user 'the refund amount'"
+    assert reasons[3] == "not met: agent asks first (judge: it did not)"
+    assert reasons[4].startswith("(not scored) environment assertion failed")
     world.ending.simulation.reward_info = None
     assert reward_reasons(world) == ["the conversation ended by max_steps, not by the customer"]
 

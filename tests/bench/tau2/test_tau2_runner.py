@@ -156,3 +156,11 @@ def test_run_config_and_endpoints() -> None:
         assert (litellm.api_base, litellm.api_key) == ("http://127.0.0.1:1/v1", "k")
     finally:
         litellm.api_base, litellm.api_key, litellm.suppress_debug_info = saved
+
+
+def test_a_customer_who_stops_at_once_closes_the_run_after_one_action() -> None:
+    runner = _runner("airline", ScriptedUser(opening=STOP))
+    model = ScriptedModel([scripted_turn("Hello?")] * 3)
+    trace = runner(seed_harness("airline"), case("airline", "0"), model, None, run_id="s1")
+    assert len(model.requests) == 1 and trace.events[-1].payload["reason"] == "answered"
+    assert runner.simulations["s1"].termination_reason.value == "user_stop"
