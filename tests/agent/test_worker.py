@@ -93,6 +93,7 @@ def _case(message: str = "Please refund 30 dollars on my order") -> Case:
         faults=[],
         grader=Expect(),
         ticket_id="T-1",
+        kind="must_succeed",
     )
 
 

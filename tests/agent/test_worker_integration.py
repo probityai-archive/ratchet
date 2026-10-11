@@ -35,6 +35,7 @@ def _refund_case() -> Case:
             refunds={"ch_1": {"total_cents": 4200, "count": 1, "status": "succeeded"}},
         ),
         ticket_id="T-1",
+        kind="must_succeed",
     )
 
 
