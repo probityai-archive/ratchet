@@ -139,7 +139,8 @@ def test_a_v3_decision_names_its_policy_and_verifies_as_v3() -> None:
     assert ok.ok and ok.admitted is True, ok
     unqualified = admit_v3(
         seed, cand_h, cohort={"status": "UNQUALIFIED"}, comparison=compare(PARENT, cand, CASES),
-        benign_interventions=0, replay_check=Check("replay", True, {}), overfit_check=Check("overfit_lint", True, {}),
+        benign_interventions=0, replay_check=Check("replay", True, {}),
+        overfit_check=Check("overfit_lint", True, {}),
         evaluator={"version": "ev3", "components": {"suite_file": "ab" * 32}}, visible_case_ids=[],
         report_digests={"arms": "0" * 64}, corpus_digests={}, scope={},
     )  # fmt: skip
