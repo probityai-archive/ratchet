@@ -30,9 +30,15 @@ STDOUT_TAIL = 20000
 MAX_REASONS = 12
 MAX_MESSAGE = 200
 
+# The script is started from bash when the image has it, as the suite's own runner does: a test.sh whose
+# `#!` line is not its first line then runs under bash, not under sh.
 RUN_TESTS = f"""mkdir -p {VERIFIER_DIR} /logs/agent
 chmod +x {TESTS_DIR}/test.sh
-{TESTS_DIR}/test.sh > {VERIFIER_DIR}/test-stdout.txt 2>&1
+if command -v bash >/dev/null 2>&1; then
+  bash -c '{TESTS_DIR}/test.sh > {VERIFIER_DIR}/test-stdout.txt 2>&1'
+else
+  {TESTS_DIR}/test.sh > {VERIFIER_DIR}/test-stdout.txt 2>&1
+fi
 echo "test.sh exited $?"
 """
 
