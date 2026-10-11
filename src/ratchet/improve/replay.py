@@ -54,6 +54,12 @@ class WalkCache:
             self._walks[trace.run_id] = hit
         return hit
 
+    def has(self, run_id: str) -> bool:
+        return run_id in self._walks
+
+    def walk_by_id(self, run_id: str) -> Walk:
+        return self._walks[run_id]
+
 
 @dataclass(frozen=True)
 class ReplayReport:
