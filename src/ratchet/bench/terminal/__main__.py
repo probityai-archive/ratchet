@@ -234,6 +234,8 @@ def oracle_one(task: TaskSpec, factory: Callable[[TaskSpec], Container] = start_
         return {
             "task": task.name,
             "solution_exit_code": (result.data or {}).get("exit_code"),
+            "solution_output": str((result.data or {}).get("output", ""))[-3000:],
+            "tests_output": verdict.stdout_tail[-3000:],
             "view": world.view().to_json(),
             **summary(verdict),
             "reasons": reasons_of(verdict, None),
