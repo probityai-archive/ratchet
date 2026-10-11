@@ -22,7 +22,14 @@ from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ChatModel, ModelClient, ModelConfig
 from ratchet.bench.agentdojo.cases import DEFAULT_ATTACK, DEFAULT_VERSION, DojoSuite
 from ratchet.bench.agentdojo.metrics import DojoMetrics, metrics_from_rows
-from ratchet.bench.agentdojo.run import DOJO_LIMITS, DojoRunner, DojoSimulator, JsonStore, seed_harness
+from ratchet.bench.agentdojo.run import (
+    DOJO_LIMITS,
+    DojoRunner,
+    DojoSimulator,
+    FirstToolCallOnly,
+    JsonStore,
+    seed_harness,
+)
 from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.evaluate import EvalReport, evaluate_many
 from ratchet.improve.loop import EvolveResult, Lab, evolve
@@ -72,18 +79,27 @@ class Settings:
     workers: int = 8
     generations: int = 2
     max_users: int | None = None
+    improver_base_url: str | None = None
+    single_tool_call: bool = False
 
-    def client(self, model: str) -> ModelClient:
+    def client(self, model: str, base_url: str | None = None) -> ChatModel:
         if model.startswith("claude"):
             raise ValueError("Claude models are not served by this endpoint")
         return ModelClient(
             ModelConfig(
-                base_url=self.base_url.rstrip("/"),
+                base_url=(base_url or self.base_url).rstrip("/"),
                 model=model,
                 api_key=self.api_key,
                 **ENDPOINT_PATIENCE,
             )
         )
+
+    def agent_client(self) -> ChatModel:
+        model = self.client(self.model)
+        return FirstToolCallOnly(model) if self.single_tool_call else model
+
+    def improver_client(self) -> ChatModel:
+        return self.client(self.improver_model, self.improver_base_url)
 
 
 REPO = Path(__file__).resolve().parents[4]
@@ -132,6 +148,8 @@ def provenance(s: Settings, dojo: DojoSuite, reference_clone: Path | None) -> di
         "model": s.model,
         "improver_model": s.improver_model,
         "endpoint": s.base_url,
+        "improver_endpoint": s.improver_base_url or s.base_url,
+        "single_tool_call": s.single_tool_call,
         "seed": s.seed,
         "workers": s.workers,
         "generations": s.generations,
@@ -144,7 +162,13 @@ def provenance(s: Settings, dojo: DojoSuite, reference_clone: Path | None) -> di
 
 def model_config(s: Settings) -> dict[str, Any]:
     """What the evaluator freezes about the agent model. Never the key."""
-    return {"endpoint": s.base_url, "model": s.model, "max_steps": DOJO_LIMITS.max_steps, "attack": s.attack}
+    return {
+        "endpoint": s.base_url,
+        "model": s.model,
+        "max_steps": DOJO_LIMITS.max_steps,
+        "attack": s.attack,
+        "single_tool_call": s.single_tool_call,
+    }
 
 
 def _signer() -> Signer:

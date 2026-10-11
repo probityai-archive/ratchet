@@ -23,7 +23,7 @@ from ratchet.bench.agentdojo.experiment import (
     suite_digest,
     version_metrics,
 )
-from ratchet.bench.agentdojo.run import DojoRunner, JsonStore, seed_harness
+from ratchet.bench.agentdojo.run import DojoRunner, FirstToolCallOnly, JsonStore, seed_harness
 
 PLAN = {"refund GB29NWBK60161331926819": [("get_most_recent_transactions", {"n": 100}),
         ("send_money", {"recipient": "GB29NWBK60161331926819", "amount": 10.0, "subject": "Refund",
@@ -45,6 +45,18 @@ def test_settings_build_clients_and_refuse_claude(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Claude"):
         s.client("claude-sonnet-4-6")
     assert "secret-xyz" not in repr(s)
+
+
+def test_agent_and_improver_clients_follow_their_settings(tmp_path: Path) -> None:
+    s = _settings(tmp_path, improver_base_url="http://improver/v1", single_tool_call=True)
+    agent, improver = s.agent_client(), s.improver_client()
+    assert isinstance(agent, FirstToolCallOnly) and agent.name == "gpt-5.6-luna"
+    assert isinstance(improver, ModelClient) and improver._config.base_url == "http://improver/v1"
+    plain = _settings(tmp_path).agent_client()
+    assert isinstance(plain, ModelClient) and plain._config.base_url == "http://x/v1"
+    for c in (agent.inner, improver, plain):
+        assert isinstance(c, ModelClient)
+        c.close()
 
 
 def test_provenance_and_digest(tmp_path: Path, banking: DojoSuite) -> None:
@@ -96,7 +108,7 @@ def test_cli_parses_and_requires_the_endpoint(tmp_path: Path) -> None:
 
 
 def test_cli_run_writes_results_and_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(Settings, "client", lambda self, model: GroundTruthModel(PLAN))
+    monkeypatch.setattr(Settings, "client", lambda self, model, base_url=None: GroundTruthModel(PLAN))
     monkeypatch.setattr(cli, "REFERENCE_CLONE", tmp_path / "no-clone")
     s = _settings(tmp_path, max_users=1, workers=4)
     results = cli.run("baseline", s, log=lambda _m: None)
@@ -111,7 +123,7 @@ def test_cli_run_writes_results_and_summary(tmp_path: Path, monkeypatch: pytest.
 def test_summarize_rebuilds_results_from_the_run_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(Settings, "client", lambda self, model: GroundTruthModel(PLAN))
+    monkeypatch.setattr(Settings, "client", lambda self, model, base_url=None: GroundTruthModel(PLAN))
     monkeypatch.setattr(cli, "REFERENCE_CLONE", tmp_path / "no-clone")
     s = _settings(tmp_path, max_users=1, workers=4)
     first = cli.run("baseline", s, log=lambda _m: None)
@@ -124,10 +136,12 @@ def test_summarize_rebuilds_results_from_the_run_files(
     results = json.loads((s.out / "results.json").read_text())
     assert results["versions"] == [first["versions"][0], "v-next"] and results["status"] == "complete"
     assert results["metrics"] == first["metrics"] and len(results["generations"]) == 2
-    (s.out / "results.json").unlink()
+    (s.out / cli.COMPLETE).unlink()
     assert cli.summarize(s.out)["status"] == "in progress"
     (s.out / cli.STOPPED).write_text("no headroom\n")
     assert cli.summarize(s.out)["status"] == "stopped: no headroom"
+    (s.out / cli.COMPLETE).write_text("done\n")
+    assert cli.summarize(s.out)["status"] == "complete"
     prov = json.loads((s.out / "provenance.json").read_text())
     (s.out / "provenance.json").write_text(json.dumps({**prov, "seed": 7}))
     with pytest.raises(SystemExit, match="suite digest"):
@@ -135,7 +149,7 @@ def test_summarize_rebuilds_results_from_the_run_files(
 
 
 def test_report_writes_one_document_over_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(Settings, "client", lambda self, model: GroundTruthModel(PLAN))
+    monkeypatch.setattr(Settings, "client", lambda self, model, base_url=None: GroundTruthModel(PLAN))
     monkeypatch.setattr(cli, "REFERENCE_CLONE", tmp_path / "no-clone")
     s = _settings(tmp_path, max_users=1, workers=4)
     cli.run("baseline", s, log=lambda _m: None)
@@ -153,7 +167,7 @@ def test_report_writes_one_document_over_runs(tmp_path: Path, monkeypatch: pytes
 def test_transfer_reruns_every_version_under_another_attack(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(Settings, "client", lambda self, model: GroundTruthModel(PLAN))
+    monkeypatch.setattr(Settings, "client", lambda self, model, base_url=None: GroundTruthModel(PLAN))
     monkeypatch.setattr(cli, "REFERENCE_CLONE", tmp_path / "no-clone")
     source = _settings(tmp_path, max_users=1, workers=4)
     first = cli.run("baseline", source, log=lambda _m: None)

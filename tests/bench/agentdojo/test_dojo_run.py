@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 from dojo_fakes import GroundTruthModel
 
+from ratchet.agent.model import Message, ModelTurn, ToolSpec, scripted_turn
 from ratchet.agent.worker import RunLimits
 from ratchet.bench.agentdojo.cases import DojoSuite
-from ratchet.bench.agentdojo.run import DOJO_LIMITS, DojoRunner, DojoSimulator, JsonStore, seed_harness
+from ratchet.bench.agentdojo.run import (
+    DOJO_LIMITS,
+    DojoRunner,
+    DojoSimulator,
+    FirstToolCallOnly,
+    JsonStore,
+    seed_harness,
+)
 from ratchet.bench.agentdojo.world import ATTACK_SUCCEEDED, UTILITY_MISSED
 from ratchet.cases.model import Case
 from ratchet.types import Guard, Harness
@@ -141,3 +150,26 @@ def test_json_store_writes_each_record_once(tmp_path: Path, banking: DojoSuite) 
 class GuardPayload:
     def to_payload(self) -> dict[str, bool]:
         return {"ok": True}
+
+
+class TwoCallsModel:
+    name = "two-calls"
+
+    def complete(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelTurn:
+        if any(m["role"] == "tool" for m in messages):
+            return scripted_turn("done")
+        return scripted_turn(None, [LOOKUP, REFUND], id_prefix="x")
+
+
+def test_first_tool_call_only_drops_the_rest_and_counts_them(banking: DojoSuite) -> None:
+    model = FirstToolCallOnly(TwoCallsModel())
+    assert model.name == "two-calls"
+    turn = model.complete([{"role": "user", "content": "hi"}], [])
+    assert [c.name for c in turn.tool_calls] == ["get_most_recent_transactions"]
+    assert len(turn.message["tool_calls"]) == 1 and model.dropped == 1
+    assert model.complete([{"role": "tool", "content": "{}"}], []).content == "done"
+    runner = DojoRunner(banking)
+    trace = runner.run_case(
+        seed_harness(banking), _case(banking, "user_task_4", None), model, None, run_id="r8"
+    )
+    assert sum(1 for e in trace.events if e.kind == "tool_call") == 1 and model.dropped == 2

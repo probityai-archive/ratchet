@@ -33,6 +33,7 @@ from ratchet.bench.agentdojo.report import document, render
 from ratchet.bench.agentdojo.run import DojoRunner, JsonStore
 from ratchet.improve.evaluate import evaluate_many
 
+COMPLETE = "COMPLETE"  # written by `run` when the run's last generation has finished
 STOPPED = "STOPPED.txt"  # written by the operator of a run that was stopped on purpose, with the reason
 REFERENCE_CLONE = Path.home() / "Documents" / "git-clones" / "agentdojo"
 
@@ -52,6 +53,8 @@ def parse(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--generations", type=int, default=2)
     ap.add_argument("--max-users", type=int, default=None)
+    ap.add_argument("--improver-base-url", default=None, help="improver endpoint, when not the agent's")
+    ap.add_argument("--single-tool-call", action="store_true", help="keep only each turn's first tool call")
     args = ap.parse_args(list(argv))
     if args.out is None:
         ap.error("--out is required")
@@ -75,6 +78,8 @@ def settings_from(args: argparse.Namespace, env: dict[str, str]) -> Settings:
         workers=args.workers,
         generations=args.generations if args.command == "evolve" else 0,
         max_users=args.max_users,
+        improver_base_url=args.improver_base_url,
+        single_tool_call=args.single_tool_call,
     )
 
 
@@ -86,7 +91,7 @@ def run(command: str, s: Settings, log: Any = print) -> dict[str, Any]:
     prov = provenance(s, dojo, REFERENCE_CLONE if REFERENCE_CLONE.is_dir() else None)
     (s.out / "provenance.json").write_text(json.dumps(prov, indent=2))
     runner, store = DojoRunner(dojo), JsonStore(s.out)
-    model, improver = s.client(s.model), s.client(s.improver_model)
+    model, improver = s.agent_client(), s.improver_client()
     started = time.perf_counter()
     v0, v0_eval = baseline(dojo, runner, model, store, s.workers)
     elapsed = time.perf_counter() - started
@@ -95,7 +100,9 @@ def run(command: str, s: Settings, log: Any = print) -> dict[str, Any]:
     if command == "evolve":
         result = evolve_from(dojo, runner, model, improver, store, v0, s, log)
     versions = lineage(v0, result)
-    return write_results(s.out, dojo, prov, versions, command, "complete")
+    results = write_results(s.out, dojo, prov, versions, command, "complete")
+    (s.out / COMPLETE).write_text(time.strftime("%Y-%m-%dT%H:%M:%SZ\n", time.gmtime()))
+    return results
 
 
 NOTES = [
@@ -141,7 +148,7 @@ def summarize(out: Path) -> dict[str, Any]:
     versions = recorded_lineage(out)
     previous = json.loads((out / "results.json").read_text()) if (out / "results.json").is_file() else {}
     command = str(previous.get("command") or "summarize")
-    if previous.get("status") == "complete":
+    if (out / COMPLETE).is_file():
         status = "complete"
     elif (out / STOPPED).is_file():
         status = "stopped: " + (out / STOPPED).read_text().strip()
@@ -181,7 +188,7 @@ def transfer(source: Path, s: Settings) -> dict[str, Any]:
     for h in harnesses:
         store.put_harness(h)
     held = dojo.by_split("heldout")
-    reports = evaluate_many(harnesses, held, DojoRunner(dojo).run_case, s.client(s.model), workers=s.workers)
+    reports = evaluate_many(harnesses, held, DojoRunner(dojo).run_case, s.agent_client(), workers=s.workers)
     for r in reports:
         for t in r.traces:
             store.put_trace(t)

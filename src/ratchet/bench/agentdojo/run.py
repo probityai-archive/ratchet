@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Mapping
-from dataclasses import asdict
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, cast
 
 from agentdojo.agent_pipeline.agent_pipeline import load_system_message
 
-from ratchet.agent.model import ChatModel
+from ratchet.agent.model import ChatModel, Message, ModelTurn, ToolSpec
 from ratchet.agent.worker import RunLimits
 from ratchet.agent.worker import run_case as worker_run_case
 from ratchet.bench.agentdojo.cases import DojoSuite
@@ -68,6 +68,36 @@ class DojoRunner:
             world_factory=lambda _case: cast(World, world),
             grader=lambda _case, _world, trace: outcome(world, trace),
         )
+
+
+class FirstToolCallOnly:
+    """Keeps only the first tool call of each model turn and counts the calls it dropped.
+
+    Some served checkpoints emit several tool calls in one turn while their own chat template refuses an
+    assistant message carrying more than one, so the next request of the run fails with HTTP 400 (measured
+    on the HiPerGator llama-3.3-70b-instruct endpoint: 7 of 136 runs). The agent sees the first call's
+    result and can issue the rest on later turns."""
+
+    def __init__(self, inner: ChatModel) -> None:
+        self.inner = inner
+        self.dropped = 0
+        self._lock = threading.Lock()
+
+    @property
+    def name(self) -> str:
+        return self.inner.name
+
+    def complete(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelTurn:
+        turn = self.inner.complete(messages, tools)
+        if len(turn.tool_calls) <= 1:
+            return turn
+        first = turn.tool_calls[0]
+        with self._lock:
+            self.dropped += len(turn.tool_calls) - 1
+        raw = [c for c in turn.message.get("tool_calls") or [] if c.get("id") == first.call_id]
+        message = {**turn.message, "tool_calls": raw[:1]}
+        errors = {k: v for k, v in turn.arg_errors.items() if k == first.call_id}
+        return replace(turn, message=message, tool_calls=[first], arg_errors=errors)
 
 
 class DojoSimulator:
