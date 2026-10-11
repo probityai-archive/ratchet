@@ -64,6 +64,11 @@ python_version = "3.12"
 module = ["agentdojo", "agentdojo.*"]
 follow_untyped_imports = true
 
+[[tool.mypy.overrides]]
+# tool_sandbox ships typed source without a py.typed marker; analyse it rather than treat it as Any.
+module = ["tool_sandbox", "tool_sandbox.*"]
+follow_untyped_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-W error"
