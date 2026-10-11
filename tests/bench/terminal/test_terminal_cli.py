@@ -60,6 +60,23 @@ def test_split_prints_and_writes(tmp_path: Path, capsys: pytest.CaptureFixture[s
     assert '"seed": 20261011' in capsys.readouterr().out
 
 
+def test_split_with_a_wider_held_out_set(tmp_path: Path) -> None:
+    out = tmp_path / "wide.json"
+    assert M.main(["split", "--heldout", "6,5", "--write", str(out)]) == 0
+    assert json.loads(out.read_text(encoding="utf-8")) == T.committed_record(T.WIDE_SPLIT_FILE)
+
+
+def test_trial_and_evolve_take_the_wider_split(env: None, tmp_path: Path) -> None:
+    root = suite(tmp_path / "s")
+    out = tmp_path / "out"
+    args = ["--out", str(out), "trial", "--suite", str(root), "--set", "phase1-heldout", "--heldout", "6,5"]
+    assert M.main(args) == 0
+    run_dir = next((out / "runs" / seed_harness().version).glob("phase1-heldout-trial-1"))
+    assert len((run_dir / "traces.jsonl").read_text(encoding="utf-8").splitlines()) == 6
+    config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    assert config["split_record"]["heldout_per_phase"] == {"1": 6, "2": 5}
+
+
 def test_endpoint_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RATCHET_BASE_URL", raising=False)
     with pytest.raises(SystemExit, match="RATCHET_BASE_URL"):

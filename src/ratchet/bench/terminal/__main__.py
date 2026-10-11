@@ -34,6 +34,7 @@ from ratchet.bench.terminal.grade import reasons_of, summary, verify
 from ratchet.bench.terminal.runner import TerminalRunner, package_version, seed_harness, start_container
 from ratchet.bench.terminal.tasks import (
     DEFAULT_SEED,
+    HELDOUT_PER_PHASE,
     PHASE_1,
     PHASE_2,
     TaskSpec,
@@ -153,10 +154,19 @@ def _config(args: argparse.Namespace, cases: Sequence[TerminalCase], **extra: An
         "package": f"terminal-bench=={package_version()}",
         "workers": args.workers,
         "cases": [c.id for c in cases],
-        "split_record": split_record(args.seed),
+        "split_record": split_record(args.seed, _heldout(args)),
         "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         **extra,
     }
+
+
+def _heldout(args: argparse.Namespace) -> dict[int, int]:
+    """Held-out tasks per phase: `--heldout 6,5`, or the first split's 4,4."""
+    raw = getattr(args, "heldout", "")
+    if not raw:
+        return dict(HELDOUT_PER_PHASE)
+    one, two = (int(x) for x in raw.split(","))
+    return {1: one, 2: two}
 
 
 def _suite_commit(root: Path) -> str:
@@ -171,7 +181,7 @@ def _suite_commit(root: Path) -> str:
 
 
 def cmd_split(args: argparse.Namespace) -> int:
-    record = split_record(args.seed)
+    record = split_record(args.seed, _heldout(args))
     if args.suite:
         found = phases(load_suite(Path(args.suite)))
         record["suite_check"] = {str(p): len(n) for p, n in found.items()}
@@ -192,7 +202,7 @@ def _trial_cases(args: argparse.Namespace) -> tuple[list[TerminalCase], str]:
     if args.set in ("phase1", "phase2"):
         return task_cases(tasks, PHASE_1 if args.set == "phase1" else PHASE_2), args.set
     phase, side = args.set.split("-")
-    cases = [c for c in phase_cases(tasks, int(phase[-1]), args.seed) if c.split == side]
+    cases = [c for c in phase_cases(tasks, int(phase[-1]), args.seed, _heldout(args)) if c.split == side]
     return cases, args.set
 
 
@@ -277,7 +287,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     parent = load_harness(args.parent, Path(args.out))
     if args.phase == 2 and parent.created_by == "seed":
         raise SystemExit("phase 2 starts from the harness phase 1 admitted, not from the seed")
-    cases = phase_cases(load_suite(Path(args.suite)), args.phase, args.seed)
+    cases = phase_cases(load_suite(Path(args.suite)), args.phase, args.seed, _heldout(args))
     store = TerminalStore(root)
     config = _config(
         args,
@@ -375,6 +385,7 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--temperature", type=float, default=None)
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    p.add_argument("--heldout", default="", help="held-out tasks per phase, e.g. 6,5 (default 4,4)")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -384,6 +395,7 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("split")
     s.add_argument("--suite", default="")
     s.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    s.add_argument("--heldout", default="")
     s.add_argument("--write", default="")
     s.set_defaults(func=cmd_split)
     o = sub.add_parser("oracle")

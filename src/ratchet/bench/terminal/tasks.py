@@ -37,6 +37,11 @@ Phase = Literal[1, 2]
 DEFAULT_SEED = 20261011
 HELDOUT_PER_PHASE: dict[int, int] = {1: 4, 2: 4}
 SPLIT_FILE = Path(__file__).with_name("split.json")
+# The second split version: 6 of 12 phase-1 tasks and 5 of 10 phase-2 tasks held out. The admission rule
+# counts stable recoveries on held-out cases only and needs two; in the first phase-1 generation on the
+# 4-task held-out set, one held-out task failed both parent runs, so no candidate could reach two.
+WIDE_HELDOUT: dict[int, int] = {1: 6, 2: 5}
+WIDE_SPLIT_FILE = Path(__file__).with_name("split-heldout-6-5.json")
 
 PHASE_1: tuple[str, ...] = (
     "cancel-async-tasks",
@@ -179,19 +184,24 @@ def heldout_of(names: Sequence[str], n_heldout: int, seed: int) -> list[str]:
     return sorted(random.Random(seed).sample(sorted(names), n_heldout))
 
 
-def assignment(seed: int = DEFAULT_SEED) -> dict[str, dict[str, list[str]]]:
+def assignment(
+    seed: int = DEFAULT_SEED, heldout: Mapping[int, int] = HELDOUT_PER_PHASE
+) -> dict[str, dict[str, list[str]]]:
     """Per phase, the train and held-out task names drawn with `seed` (phase 2 uses `seed + 1`)."""
     out: dict[str, dict[str, list[str]]] = {}
     for p, names in ((1, PHASE_1), (2, PHASE_2)):
-        held = heldout_of(names, HELDOUT_PER_PHASE[p], seed + p - 1)
+        held = heldout_of(names, heldout[p], seed + p - 1)
         out[str(p)] = {"train": [n for n in names if n not in held], "heldout": held}
     return out
 
 
-def split_record(seed: int = DEFAULT_SEED) -> dict[str, Any]:
-    sides = assignment(seed)
+def split_record(seed: int = DEFAULT_SEED, heldout: Mapping[int, int] = HELDOUT_PER_PHASE) -> dict[str, Any]:
+    sides = assignment(seed, heldout)
     digest = hashlib.sha256(json.dumps(sides, sort_keys=True).encode("utf-8")).hexdigest()
-    return {"seed": seed, "phases": sides, "digest": digest}
+    record: dict[str, Any] = {"seed": seed, "phases": sides, "digest": digest}
+    if dict(heldout) != HELDOUT_PER_PHASE:
+        record["heldout_per_phase"] = {str(p): n for p, n in sorted(heldout.items())}
+    return record
 
 
 def committed_record(path: Path = SPLIT_FILE) -> dict[str, Any]:
@@ -199,8 +209,8 @@ def committed_record(path: Path = SPLIT_FILE) -> dict[str, Any]:
     return record
 
 
-def _sides(phase: int, seed: int) -> list[tuple[str, Split]]:
-    sides = assignment(seed)
+def _sides(phase: int, seed: int, heldout: Mapping[int, int]) -> list[tuple[str, Split]]:
+    sides = assignment(seed, heldout)
     p1, p2 = sides["1"], sides["2"]
     if phase == 1:
         return [(n, "train") for n in p1["train"]] + [(n, "heldout") for n in p1["heldout"]]
@@ -213,11 +223,16 @@ def _sides(phase: int, seed: int) -> list[tuple[str, Split]]:
     raise ValueError(f"phase must be 1 or 2, got {phase}")
 
 
-def phase_cases(tasks: Mapping[str, TaskSpec], phase: int, seed: int = DEFAULT_SEED) -> list[TerminalCase]:
+def phase_cases(
+    tasks: Mapping[str, TaskSpec],
+    phase: int,
+    seed: int = DEFAULT_SEED,
+    heldout: Mapping[int, int] = HELDOUT_PER_PHASE,
+) -> list[TerminalCase]:
     """The cases of one evolution phase, with their sides (see the module docstring)."""
     found = phases(tasks)
     home = {n: p for p, names in found.items() for n in names}
-    return [TerminalCase(case_id(n), split, tasks[n], home[n]) for n, split in _sides(phase, seed)]
+    return [TerminalCase(case_id(n), split, tasks[n], home[n]) for n, split in _sides(phase, seed, heldout)]
 
 
 def task_cases(

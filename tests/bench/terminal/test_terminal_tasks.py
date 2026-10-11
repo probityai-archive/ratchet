@@ -124,3 +124,14 @@ def test_phase_of(tmp_path: Path) -> None:
     assert T.phase_of(tasks["long-hard"]) is None
     assert T.phase_of(tasks["medium-one"]) is None
     assert T.phase_of(tasks["dna-assembly"]) == 2
+
+
+def test_the_wide_split_is_committed_and_keeps_the_first_one_unchanged(tmp_path: Path) -> None:
+    record = T.committed_record(T.WIDE_SPLIT_FILE)
+    assert record == T.split_record(T.DEFAULT_SEED, T.WIDE_HELDOUT)
+    assert record["heldout_per_phase"] == {"1": 6, "2": 5}
+    assert "heldout_per_phase" not in T.split_record()
+    assert T.committed_record()["digest"] != record["digest"]
+    cases = T.phase_cases(suite(tmp_path), 2, heldout=T.WIDE_HELDOUT)
+    counts = {s: sum(1 for c in cases if c.split == s) for s in ("train", "heldout", "audit")}
+    assert counts == {"train": 11, "heldout": 5, "audit": 6}
