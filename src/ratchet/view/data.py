@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from ratchet.types import Guard, Harness, Trace
+from ratchet.view.admission import check_reasons
 
 Doc = dict[str, Any]
 Status = Literal["seed", "promoted", "admitted", "rejected"]
@@ -35,6 +36,9 @@ class ViewStore(Protocol):
     ) -> Iterator[Any]: ...
     def close(self) -> None: ...
 
+    @property
+    def db(self) -> Any: ...
+
 
 class StoreFactory(Protocol):
     def __call__(self) -> AbstractContextManager[ViewStore]: ...
@@ -51,6 +55,21 @@ class VersionStats:
     interventions: int = 0
     false_interventions: int = 0
     model_calls: int = 0
+    mode: str = "FRESH"
+
+
+def eval_mode(doc: Mapping[str, Any]) -> str:
+    """How an evaluation's results were produced, in the words every view uses: FRESH (every model call
+    answered fresh; the only mode that counts as evidence), RECORDED with its timestamp (a stored fresh result
+    shown again) or CACHED (byte-identical response playback; debugging only)."""
+    results = doc.get("results") or []
+    modes = {str(r.get("mode") or "FRESH") for r in results}
+    if "CACHED" in modes:
+        return "CACHED"
+    if "RECORDED" in modes:
+        stamps = sorted(str(r["recorded_at"]) for r in results if r.get("recorded_at"))
+        return f"RECORDED {stamps[-1]}" if stamps else "RECORDED"
+    return "FRESH"
 
 
 def stats_from_eval(doc: Mapping[str, Any]) -> VersionStats:
@@ -66,6 +85,7 @@ def stats_from_eval(doc: Mapping[str, Any]) -> VersionStats:
         interventions=sum(int(r.get("interventions", 0)) for r in results),
         false_interventions=sum(int(r.get("interventions", 0)) for r in results if r.get("kind") != "trap"),
         model_calls=int((doc.get("cost") or {}).get("model_calls", 0)),
+        mode=eval_mode(doc),
     )
 
 
@@ -78,75 +98,6 @@ def receipt_id(envelope_b64: str | None) -> str | None:
     except ValueError:
         return None
     return "rcpt:" + hashlib.sha256(raw).hexdigest()[:10]
-
-
-def check_reasons(check: Mapping[str, Any]) -> list[str]:
-    """Why one admission check failed, in the words of the demo ("blocks 4 past successes")."""
-    if check.get("passed"):
-        return []
-    name, ev = str(check.get("name")), check.get("evidence") or {}
-    if name == "replay":
-        return _replay_reasons(ev)
-    if name == "heldout":
-        return _heldout_reasons(ev)
-    if name == "no_regression":
-        n = len(ev.get("regressed") or [])
-        return [f"regresses {n} must-succeed case{'s' if n != 1 else ''}"]
-    if name == "benign_twins":
-        n = len(ev.get("intervened") or [])
-        return [f"intervenes on {n} held-out benign twin{'s' if n != 1 else ''}"]
-    if name == "overfit_lint":
-        hits = ev.get("hits") or []
-        shown = ", ".join(str(h.get("literal")) for h in hits[:3])
-        return [f"copies {len(hits)} literal(s) from training traces ({shown})"]
-    if name == "authority":
-        return _authority_reasons(ev)
-    return [f"{name} failed"]
-
-
-def _heldout_reasons(ev: Mapping[str, Any]) -> list[str]:
-    if not ev.get("same_case_set", True):
-        return ["held-out case set differs from the parent's"]
-    got, need = ev.get("candidate_fresh_passed"), ev.get("required")
-    if not ev.get("initial_ok", False):
-        best = max(ev.get("parent_fresh_passed") or [0])
-        return [f"held-out fresh passes {got}, needs {need} (parent best {best})"]
-    if ev.get("confirm_pending"):
-        return ["awaiting the confirming held-out run"]
-    return [f"confirming run passed {ev.get('confirm_fresh_passed')}, needs {need}"]
-
-
-def _replay_reasons(ev: Mapping[str, Any]) -> list[str]:
-    out: list[str] = []
-    for rep in ev.get("reports") or []:
-        if rep.get("missing"):
-            out.append(f"no replay recorded for {rep.get('guard_id')}")
-            continue
-        twins = int(rep.get("benign_twin_fires", 0))
-        fps = len(rep.get("false_positives") or []) - twins
-        if fps > 0:
-            out.append(f"blocks {fps} past success{'es' if fps != 1 else ''}")
-        if twins:
-            out.append(f"fires on {twins} benign twin{'s' if twins != 1 else ''}")
-        miss = int(rep.get("targets_total", 0)) - int(rep.get("targets_hit", 0))
-        if miss > 0:
-            out.append(f"misses {miss} of {rep.get('targets_total')} target failures")
-        if rep.get("errors"):
-            out.append(f"{rep['errors']} guard error(s)")
-    return out or ["replay failed"]
-
-
-def _authority_reasons(ev: Mapping[str, Any]) -> list[str]:
-    out = []
-    if ev.get("tools_granted"):
-        out.append("grants tools: " + ", ".join(ev["tools_granted"]))
-    if ev.get("guards_removed"):
-        out.append("removes guards: " + ", ".join(ev["guards_removed"]))
-    if ev.get("guards_altered"):
-        out.append("alters guards: " + ", ".join(ev["guards_altered"]))
-    if not ev.get("digest_valid", True):
-        out.append("digest does not match content")
-    return out or ["authority grew"]
 
 
 @dataclass(frozen=True)
@@ -223,6 +174,12 @@ class VersionNode:
     stats: VersionStats | None = None
     decision: DecisionInfo | None = None
     children: list[VersionNode] = field(default_factory=list)
+    active_revision: int | None = None
+
+    @property
+    def active(self) -> bool:
+        """True for the harness the workers run: admission records a decision, activation makes it live."""
+        return self.active_revision is not None
 
     def walk(self) -> Iterator[VersionNode]:
         yield self
@@ -277,7 +234,28 @@ def build_lineage(store: ViewStore) -> list[VersionNode]:
             roots.append(n)
         else:
             parent.children.append(n)
+    live = read_active(store)
+    if live is not None and live.version in nodes:
+        nodes[live.version].active_revision = live.revision
     return roots
+
+
+@dataclass(frozen=True)
+class ActiveInfo:
+    version: str
+    revision: int
+    decision_id: str | None = None
+    receipt_digest: str | None = None
+
+
+def read_active(store: ViewStore) -> ActiveInfo | None:
+    """The harness the workers currently run (the `active` pointer), or None before the first bootstrap."""
+    doc = store.db["active"].find_one({})
+    if doc is None:
+        return None
+    return ActiveInfo(
+        str(doc["version"]), int(doc["revision"]), doc.get("decision_id"), doc.get("receipt_digest")
+    )
 
 
 def _status(n: VersionNode, is_root: bool) -> Status:

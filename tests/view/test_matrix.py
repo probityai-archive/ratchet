@@ -22,9 +22,11 @@ from ratchet.view.matrix import (
 )
 
 from .fakes import (
+    REJECTED_RUNS,
     RULES,
     FakeRunner,
     decision_doc,
+    fresh_evidence,
     info,
     make_trace,
     sample_guards,
@@ -48,16 +50,7 @@ def build(decisions: dict[str, bool] | None = None) -> Matrix:
                     decisions[key],
                     checks=[
                         {"name": "replay", "passed": decisions[key], "evidence": {}},
-                        {
-                            "name": "heldout",
-                            "passed": False,
-                            "evidence": {
-                                "initial_ok": False,
-                                "candidate_fresh_passed": 1,
-                                "required": 4,
-                                "parent_fresh_passed": [1, 1],
-                            },
-                        },
+                        {"name": "fresh", "passed": False, "evidence": fresh_evidence(REJECTED_RUNS)},
                     ],
                 )
             )
@@ -143,7 +136,7 @@ def test_error_never_hides_an_earlier_fire() -> None:
 
 def test_verdicts_without_a_decision() -> None:
     m = build()
-    assert m.verdict(0).label == "REPLAY OK"
+    assert m.verdict(0).label == "CLEARED"
     assert m.verdict(0).ok
     v = m.verdict(1)
     assert v.label == "REJECTED"
@@ -155,12 +148,14 @@ def test_verdict_with_a_decision_reports_the_decision() -> None:
     m = build({"g-retry": True, "g-all-refunds": False})
     assert m.verdict(0).label == "ADMITTED"
     assert m.verdict(1).label == "REJECTED"
-    assert m.verdict(1).reasons[-1].startswith("held-out fresh passes 1")
+    assert any(r.startswith("protected case broke") for r in m.verdict(1).reasons)
+    assert m.verdict(1).replay == "11/11 checked, REJECTED"
     assert "blocks 2 past successes" in m.verdict(1).reasons
     # a decision that rejects a guard replay found clean says why, from the decision
     clean_but_rejected = build({"g-retry": False})
     assert clean_but_rejected.verdict(0).label == "REJECTED"
-    assert clean_but_rejected.verdict(0).reasons[0].startswith("held-out")
+    assert any(r.startswith("protected case broke") for r in clean_but_rejected.verdict(0).reasons)
+    assert clean_but_rejected.verdict(0).replay == "11/11 checked, CLEARED"
 
 
 def test_no_trap_failures_means_nothing_proved() -> None:
@@ -291,3 +286,34 @@ def test_audit_cohort_traces_are_left_out_of_the_matrix() -> None:
     picked, rows = pick_rows(sample_traces(), with_audit)
     assert "refund.t2" not in {r.case_id for r in rows}
     assert len(picked) == len(rows) == 10
+
+
+def test_replay_coverage_is_n_of_n_when_complete_and_incomplete_when_a_guard_errors() -> None:
+    m = build()
+    assert m.coverage(0) == (11, 11)
+    assert m.verdict(0).replay == "11/11 checked, CLEARED"
+    assert m.coverage(4) == (0, 11)
+    assert m.verdict(4).label == "INCOMPLETE"
+    assert m.verdict(4).replay == "0/11 checked, INCOMPLETE"
+    out = text(MatrixView(m, full=True))
+    assert "INCOMPLETE" in out
+    assert "replay 11/11 checked, CLEARED" in out
+    assert "replay 0/11 checked, INCOMPLETE" in out
+
+
+def test_a_trace_whose_views_were_not_recorded_cannot_be_checked() -> None:
+    from ratchet.types import Event, Trace
+
+    t = sample_traces()[0]
+    bare = [Event(e.seq, e.kind, {k: v for k, v in e.payload.items() if k != "view"}, e.ts) for e in t.events]
+    traces = [Trace(t.run_id, t.case_id, t.harness_version, t.model, bare, t.outcome), *sample_traces()[1:]]
+    col = MatrixColumn(sample_guards()[0], "c", "A")
+    m = compute_matrix("p", [col], traces, info, walks(), FakeRunner(RULES))
+    assert m.coverage(0) == (10, 11)
+    assert m.verdict(0).label == "INCOMPLETE"
+    assert "rebuilt world differs" in " ".join(m.replay_reasons(0))
+
+
+def test_matrix_header_says_the_traces_are_recorded() -> None:
+    out = text(MatrixView(build(), full=True))
+    assert "RECORDED 1970-01-01T" in out

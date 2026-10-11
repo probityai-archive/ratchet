@@ -193,8 +193,45 @@ class FakeNode:
             yield from c.walk()
 
 
+class FakeStream:
+    def __init__(self, changes: list[dict[str, Any]]) -> None:
+        self.changes = list(changes)
+
+    def __enter__(self) -> FakeStream:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def try_next(self) -> dict[str, Any] | None:
+        return self.changes.pop(0) if self.changes else None
+
+
+class FakeCollection:
+    def __init__(self, docs: list[dict[str, Any]], changes: list[dict[str, Any]]) -> None:
+        self.docs, self.changes = docs, changes
+        self.watch_args: list[dict[str, Any]] = []
+
+    def find_one(self, flt: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        return self.docs[0] if self.docs else None
+
+    def watch(self, pipeline: list[Any], **kw: Any) -> FakeStream:
+        self.watch_args.append(kw)
+        return FakeStream(self.changes)
+
+
+class FakeDb:
+    def __init__(self, store: FakeStore) -> None:
+        self.store = store
+
+    def __getitem__(self, name: str) -> FakeCollection:
+        return FakeCollection(self.store.collections.get(name, []), self.store.raw_changes.get(name, []))
+
+
 class FakeStore:
     def __init__(self) -> None:
+        self.collections: dict[str, list[dict[str, Any]]] = {}
+        self.raw_changes: dict[str, list[dict[str, Any]]] = {}
         self.harnesses: dict[str, Harness] = {}
         self.eval_docs: list[dict[str, Any]] = []
         self.decision_docs: list[dict[str, Any]] = []
@@ -241,6 +278,10 @@ class FakeStore:
         self, collection: str, *, timeout_s: float | None = None, resume_after: dict[str, Any] | None = None
     ) -> Iterator[ChangeEvent]:
         yield from self.changes.get(collection, [])
+
+    @property
+    def db(self) -> FakeDb:
+        return FakeDb(self)
 
     def close(self) -> None:
         self.closed = True
@@ -316,8 +357,8 @@ def scenario() -> tuple[FakeStore, Harness, Harness]:
             True,
             change=guard_change(guards["g-retry"]),
             checks=[
-                {"name": "replay", "passed": True, "evidence": {}},
-                {"name": "heldout", "passed": True, "evidence": {}},
+                {"name": "replay", "passed": True, "evidence": {"reports": [replay_report("g-retry")]}},
+                {"name": "fresh", "passed": True, "evidence": fresh_evidence(STABLE)},
             ],
         ),
         decision_doc(
@@ -333,27 +374,16 @@ def scenario() -> tuple[FakeStore, Harness, Harness]:
                     "passed": False,
                     "evidence": {
                         "reports": [
-                            {
-                                "guard_id": "g-all-refunds",
-                                "false_positives": ["a@1", "b@1", "c@1"],
-                                "benign_twin_fires": 1,
-                                "targets_hit": 1,
-                                "targets_total": 1,
-                            }
+                            replay_report(
+                                "g-all-refunds",
+                                "REJECTED",
+                                false_fires=["a@1", "b@1", "c@1"],
+                                benign_twin_fires=1,
+                            )
                         ]
                     },
                 },
-                {
-                    "name": "heldout",
-                    "passed": False,
-                    "evidence": {
-                        "same_case_set": True,
-                        "initial_ok": False,
-                        "candidate_fresh_passed": 3,
-                        "required": 5,
-                        "parent_fresh_passed": [3, 3],
-                    },
-                },
+                {"name": "fresh", "passed": False, "evidence": fresh_evidence(REJECTED_RUNS)},
             ],
         ),
         decision_doc(
@@ -379,3 +409,51 @@ def scenario() -> tuple[FakeStore, Harness, Harness]:
         ),
     ]
     return store, seed, good
+
+
+def fresh_evidence(outcomes: dict[str, list[str]], *, pending: bool = False) -> dict[str, Any]:
+    """The `fresh` gate's evidence for outcome vectors over P1, P2, C1 (and C2 unless pending), by the
+    contract's rule: stable recoveries fail P1 and P2 and pass C1 and C2; protected cases pass P1 or P2 and
+    must pass C1 and C2."""
+    protected = sorted(k for k, v in outcomes.items() if "pass" in v[:2])
+    need = 3 if pending else 4
+    broken = sorted(k for k in protected if any(x != "pass" for x in outcomes[k][2:need]))
+    stable = sorted(
+        k for k, v in outcomes.items()
+        if v[:2] == ["fail", "fail"] and all(x == "pass" for x in v[2:need]) and not pending
+    )  # fmt: skip
+    c1 = sorted(k for k, v in outcomes.items() if v[:2] == ["fail", "fail"] and v[2] == "pass")
+    discordant = sorted(k for k, v in outcomes.items() if v[0] != v[1])
+    return {
+        "manifest": len(outcomes), "same_manifest": True, "order": ["P1", "P2", "C1", "C2"],
+        "outcomes": {k: v[:need] for k, v in outcomes.items()},
+        "stable_recoveries": stable, "stable_recoveries_c1": c1, "protected": protected,
+        "protected_broken": broken, "parent_discordance": len(discordant), "discordant": discordant,
+        "invalid_evidence": [], "initial_ok": not broken and len(c1) >= 2, "confirm_pending": pending,
+        "runs": {},
+    }  # fmt: skip
+
+
+def replay_report(
+    guard_id: str, verdict: str = "CLEARED", coverage: str = "11/11 traces checked", **kw: Any
+) -> dict[str, Any]:
+    return {
+        "guard_id": guard_id, "passed": verdict == "CLEARED", "verdict": verdict, "coverage": coverage,
+        "targets_hit": 1, "targets_total": 1, "false_fires": [], "benign_twin_fires": 0, "errors": 0, **kw,
+    }  # fmt: skip
+
+
+REJECTED_RUNS = {
+    "inj.v3": ["fail", "fail", "pass", "pass"],
+    "inj.v4": ["fail", "fail", "fail", "fail"],
+    "ord.v3": ["pass", "pass", "pass", "fail"],
+    "ref.v4": ["pass", "fail", "pass", "pass"],
+}
+
+STABLE = {
+    "inj.v3": ["fail", "fail", "pass", "pass"],  # a stable recovery
+    "inj.v4": ["fail", "fail", "pass", "pass"],  # a stable recovery
+    "ref.v3": ["fail", "fail", "fail", "fail"],  # still failing
+    "ord.v3": ["pass", "pass", "pass", "pass"],  # protected, kept
+    "ref.v4": ["pass", "fail", "pass", "pass"],  # protected (parent discordant), kept
+}

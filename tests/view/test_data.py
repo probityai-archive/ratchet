@@ -4,10 +4,10 @@ from typing import Any
 
 import pytest
 
+from ratchet.view.admission import check_reasons
 from ratchet.view.data import (
     DecisionInfo,
     build_lineage,
-    check_reasons,
     decision_info,
     find_decision_doc,
     receipt_id,
@@ -17,128 +17,83 @@ from ratchet.view.data import (
 
 from .fakes import FakeStore, decision_doc, eval_doc, scenario
 
+MISSING = {"guard_id": "g", "verdict": "MISSING"}
+MISSING_EV = {"reports": [MISSING]}
+HITS = [{"literal": "ch_1"}, {"literal": "3200"}]
+
+
+def rep(**kw: Any) -> dict[str, Any]:
+    return {"guard_id": "g", "verdict": "REJECTED", "coverage": "12/12 traces checked", "targets_hit": 1,
+            "targets_total": 1, "false_fires": [], "benign_twin_fires": 0, "errors": 0, **kw}  # fmt: skip
+
+
+def fresh(**kw: Any) -> dict[str, Any]:
+    base = {"same_manifest": True, "invalid_evidence": [], "stable_recoveries": ["a", "b"]}
+    base |= {"stable_recoveries_c1": ["a", "b"], "protected_broken": [], "confirm_pending": False}
+    return {**base, **kw}
+
 
 @pytest.mark.parametrize(
     ("check", "expected"),
     [
         ({"name": "replay", "passed": True}, []),
         (
-            {
-                "name": "replay",
-                "passed": False,
-                "evidence": {
-                    "reports": [
-                        {
-                            "guard_id": "g",
-                            "false_positives": ["a", "b", "c"],
-                            "benign_twin_fires": 1,
-                            "targets_hit": 1,
-                            "targets_total": 3,
-                            "errors": 2,
-                        }
-                    ]
-                },
-            },
-            [
-                "blocks 2 past successes",
-                "fires on 1 benign twin",
-                "misses 2 of 3 target failures",
-                "2 guard error(s)",
-            ],
+            {"name": "replay", "passed": False, "evidence": {"reports": [
+                rep(false_fires=["a", "b", "c"], benign_twin_fires=1, targets_hit=1, targets_total=3)]}},
+            ["blocks 2 past successes", "fires on 1 benign twin", "misses 2 of 3 target failures"],
         ),
         (
             {
                 "name": "replay",
                 "passed": False,
-                "evidence": {
-                    "reports": [
-                        {
-                            "guard_id": "g",
-                            "false_positives": ["a", "b"],
-                            "benign_twin_fires": 1,
-                            "targets_hit": 1,
-                            "targets_total": 1,
-                        }
-                    ]
-                },
+                "evidence": {"reports": [rep(false_fires=["a", "b"], benign_twin_fires=1)]},
             },
             ["blocks 1 past success", "fires on 1 benign twin"],
         ),
         (
-            {
-                "name": "replay",
-                "passed": False,
-                "evidence": {"reports": [{"guard_id": "g", "missing": True}]},
-            },
-            ["no replay recorded for g"],
+            {"name": "replay", "passed": False, "evidence": {"reports": [
+                rep(verdict="INCOMPLETE", coverage="9/12 traces checked", errors=2)]}},
+            ["replay INCOMPLETE (9/12 checked, 2 errors)"],
         ),
+        (
+            {"name": "replay", "passed": False, "evidence": {"reports": [rep()], "composed": {
+                "verdict": "REJECTED", "passed": False, "coverage": "12/12 traces checked"}}},
+            ["composed guards: 12/12 checked, REJECTED"],
+        ),
+        ({"name": "replay", "passed": False, "evidence": MISSING_EV}, ["no replay recorded for g"]),
         ({"name": "replay", "passed": False, "evidence": {}}, ["replay failed"]),
-        (
-            {"name": "heldout", "passed": False, "evidence": {"same_case_set": False}},
-            ["held-out case set differs from the parent's"],
-        ),
-        (
-            {
-                "name": "heldout",
-                "passed": False,
-                "evidence": {
-                    "initial_ok": False,
-                    "candidate_fresh_passed": 4,
-                    "required": 6,
-                    "parent_fresh_passed": [3, 4],
-                },
-            },
-            ["held-out fresh passes 4, needs 6 (parent best 4)"],
-        ),
-        (
-            {"name": "heldout", "passed": False, "evidence": {"initial_ok": True, "confirm_pending": True}},
-            ["awaiting the confirming held-out run"],
-        ),
-        (
-            {
-                "name": "heldout",
-                "passed": False,
-                "evidence": {"initial_ok": True, "confirm_fresh_passed": 4, "required": 6},
-            },
-            ["confirming run passed 4, needs 6"],
-        ),
-        (
-            {"name": "no_regression", "passed": False, "evidence": {"regressed": ["a"]}},
-            ["regresses 1 must-succeed case"],
-        ),
-        (
-            {"name": "no_regression", "passed": False, "evidence": {"regressed": ["a", "b"]}},
-            ["regresses 2 must-succeed cases"],
-        ),
-        (
-            {"name": "benign_twins", "passed": False, "evidence": {"intervened": ["a", "b"]}},
-            ["intervenes on 2 held-out benign twins"],
-        ),
-        (
-            {
-                "name": "overfit_lint",
-                "passed": False,
-                "evidence": {"hits": [{"literal": "ch_1"}, {"literal": "3200"}]},
-            },
-            ["copies 2 literal(s) from training traces (ch_1, 3200)"],
-        ),
-        (
-            {
-                "name": "authority",
-                "passed": False,
-                "evidence": {
-                    "tools_granted": ["x"],
-                    "guards_removed": ["g"],
-                    "guards_altered": ["h"],
-                    "digest_valid": False,
-                },
-            },
-            ["grants tools: x", "removes guards: g", "alters guards: h", "digest does not match content"],
-        ),
-        ({"name": "authority", "passed": False, "evidence": {}}, ["authority grew"]),
+        ({"name": "fresh", "passed": False, "evidence": fresh(same_manifest=False)},
+         ["the four runs did not use the same case manifest"]),
+        ({"name": "fresh", "passed": False, "evidence": fresh(invalid_evidence=["a", "b"])},
+         ["2 cases lack valid FRESH evidence"]),
+        ({"name": "fresh", "passed": False, "evidence": fresh(invalid_evidence=["a"])},
+         ["1 case lacks valid FRESH evidence"]),
+        ({"name": "fresh", "passed": False, "evidence": fresh(protected_broken=["p1", "p2"])},
+         ["protected case broke: p1, p2"]),
+        ({"name": "fresh", "passed": False, "evidence": fresh(confirm_pending=True)},
+         ["awaiting the confirming run C2"]),
+        ({"name": "fresh", "passed": False, "evidence": fresh(
+            confirm_pending=True, stable_recoveries_c1=["a"], stable_recoveries=[])},
+         ["stable recoveries so far 1, needs 2; awaiting the confirming run C2"]),
+        ({"name": "fresh", "passed": False, "evidence": fresh(stable_recoveries=["a"])},
+         ["1 stable recoveries over C1 and C2, needs 2"]),
+        ({"name": "fresh", "passed": False, "evidence": fresh()}, ["paired recovery not shown"]),
+        ({"name": "no_regression", "passed": False, "evidence": {"regressed": ["a"]}},
+         ["regresses 1 must-succeed case"]),
+        ({"name": "no_regression", "passed": False, "evidence": {"regressed": ["a", "b"]}},
+         ["regresses 2 must-succeed cases"]),
+        ({"name": "benign_twins", "passed": False, "evidence": {"intervened": ["a", "b"]}},
+         ["intervenes on 2 held-out benign twins"]),
+        ({"name": "overfit_lint", "passed": False, "evidence": {"hits": HITS}},
+         ["copies 2 literal(s) from training traces (ch_1, 3200)"]),
+        ({"name": "structure", "passed": False, "evidence": {
+            "violations": ["tools_granted", "prompt_prefix_lost", "duplicate_ids", "weird"],
+            "tools_granted": ["x"], "duplicate_ids": ["g1"]}},
+         ["grants tools: x", "rewrites the existing prompt", "duplicate ids: g1", "weird"]),
+        ({"name": "structure", "passed": False, "evidence": {}}, ["structure rule broken"]),
         ({"name": "novel", "passed": False}, ["novel failed"]),
     ],
-)
+)  # fmt: skip
 def test_check_reasons(check: dict[str, Any], expected: list[str]) -> None:
     assert check_reasons(check) == expected
 

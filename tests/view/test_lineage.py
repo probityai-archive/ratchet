@@ -26,7 +26,8 @@ def test_tree_shows_scores_receipts_and_rejections() -> None:
     assert "rcpt:" in out
     assert "block a retried refund" in out
     assert "rej00000001" in out
-    assert "held-out fresh passes 3, needs 5" in out
+    assert "protected case broke: ord.v3" in out
+    assert "FRESH" in out
     assert "intervenes on 1 held-out benign twin" in out
     assert out.index(good.version) < out.index("rej00000001")  # the winner is listed before the losers
 
@@ -67,3 +68,18 @@ def test_rejected_node_without_reasons_still_prints() -> None:
     d = decision_info(decision_doc("p", "c", False, checks=[]))
     node = VersionNode("c", "p", "improver", "rejected", stored=False, decision=d)
     assert "rejected" in render(lineage_tree([node]))
+
+
+def test_the_active_version_is_marked_and_admission_alone_does_not_activate() -> None:
+    store, seed, good = scenario()
+    assert "ACTIVE" not in render(lineage_tree(build_lineage(store)))
+    store.collections["active"] = [{"_id": "worker", "version": good.version, "revision": 3}]
+    roots = build_lineage(store)
+    nodes = {n.version: n for r in roots for n in r.walk()}
+    assert nodes[good.version].active
+    assert nodes[good.version].active_revision == 3
+    assert not nodes[seed.version].active
+    out = render(lineage_tree(roots))
+    assert "ACTIVE rev 3" in out
+    store.collections["active"] = [{"_id": "worker", "version": "unknown-version", "revision": 1}]
+    assert not any(n.active for r in build_lineage(store) for n in r.walk())

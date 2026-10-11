@@ -5,23 +5,26 @@ from __future__ import annotations
 import queue
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from rich.console import Console
 from rich.text import Text
 
-from ratchet.view.data import ViewStore, decision_info
+from ratchet.store import ChangeEvent
+from ratchet.store.atlas import WATCHABLE
+from ratchet.view.data import ViewStore, decision_info, eval_mode
 from ratchet.view.show import clip
 
-DEFAULT_COLLECTIONS = ("harness_versions", "traces", "decisions", "evals", "failures")
+DEFAULT_COLLECTIONS = ("harness_versions", "traces", "decisions", "activations", "evals", "failures")
 TAGS = {
     "traces": ("TRACE", "blue"),
     "harness_versions": ("VERSION", "cyan"),
     "decisions": ("DECISION", "bold magenta"),
     "evals": ("EVAL", "yellow"),
     "failures": ("FAILURE", "red"),
+    "activations": ("ACTIVE", "bold green"),
 }
 
 
@@ -76,11 +79,23 @@ def _decision(doc: dict[str, Any]) -> Text:
     return t
 
 
+def _activation(doc: dict[str, Any]) -> Text:
+    t = Text.assemble(
+        (" ACTIVATED ", "bold black on bright_green"),
+        f" {doc.get('previous') or '-'} -> {doc.get('version')}  ",
+        (f"revision {doc.get('revision')}", "bold"),
+    )
+    if doc.get("receipt_digest"):
+        t.append(f"  receipt {str(doc['receipt_digest'])[:12]}", style="magenta")
+    return t
+
+
 def _eval(doc: dict[str, Any]) -> Text | None:
     kind = doc.get("type")
     if kind == "generation":
-        promoted = doc.get("promoted")
-        before, after = doc.get("parent_score") or {}, doc.get("child_score") or {}
+        level1 = doc.get("level1") or {}
+        promoted = level1.get("promoted")
+        before, after = level1.get("parent_score") or {}, level1.get("child_score") or {}
         t = Text.assemble((f"generation {doc.get('generation')}", "bold"), f"  parent {doc.get('parent')}")
         if promoted:
             t.append(f" -> promoted {promoted}", style="bold green")
@@ -96,7 +111,7 @@ def _eval(doc: dict[str, Any]) -> Text | None:
         h, tr = doc.get("heldout") or {}, doc.get("train") or {}
         return Text(
             f"harness {doc.get('harness_version')}  train {tr.get('passed')}/{tr.get('total')}"
-            f"  held-out {h.get('passed')}/{h.get('total')}"
+            f"  held-out {h.get('passed')}/{h.get('total')}  {eval_mode(doc)}"
         )
     if kind == "improver_instructions":
         return Text(
@@ -120,11 +135,47 @@ def format_change(
         body = _decision(document)
     elif collection == "evals":
         body = _eval(document)
+    elif collection == "activations":
+        body = _activation(document)
     elif collection == "failures":
         body = Text(clip(str(document.get("summary") or ""), 100))
     else:
         body = None
     return None if body is None else _line(collection, body, now)
+
+
+def raw_watch(
+    store: ViewStore,
+    name: str,
+    *,
+    timeout_s: float | None,
+    resume_after: dict[str, Any] | None,
+    poll_ms: int = 250,
+) -> Iterator[ChangeEvent]:
+    """A change stream on a collection the store does not list as watchable (the activation log)."""
+    deadline = None if timeout_s is None else time.monotonic() + timeout_s
+    with store.db[name].watch(
+        [], full_document="updateLookup", resume_after=resume_after, max_await_time_ms=poll_ms
+    ) as stream:
+        while deadline is None or time.monotonic() < deadline:
+            change = stream.try_next()
+            if change is None:
+                continue
+            yield ChangeEvent(
+                change["operationType"],
+                name,
+                change["documentKey"]["_id"],
+                change.get("fullDocument"),
+                change["_id"],
+            )
+
+
+def _watch(
+    store: ViewStore, name: str, timeout_s: float | None, resume_after: dict[str, Any] | None
+) -> Iterator[Any]:
+    if name in WATCHABLE:
+        return store.watch(name, timeout_s=timeout_s, resume_after=resume_after)
+    return raw_watch(store, name, timeout_s=timeout_s, resume_after=resume_after)
 
 
 def follow(
@@ -154,7 +205,7 @@ def follow(
             while not stop.is_set():
                 left = None if deadline is None else max(0.0, deadline - time.monotonic())
                 try:
-                    for ev in store.watch(name, timeout_s=left, resume_after=token):
+                    for ev in _watch(store, name, left, token):
                         token, failures = ev.token, 0
                         events.put((name, ev))
                     return

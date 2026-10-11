@@ -8,9 +8,17 @@ from rich.console import Console
 
 from ratchet.types import Event, Trace
 from ratchet.view.data import decision_info
-from ratchet.view.show import clip, decision_view, event_summary, evidence_line, run_view, trace_view
+from ratchet.view.show import (
+    clip,
+    decision_view,
+    event_summary,
+    evidence_line,
+    run_view,
+    trace_label,
+    trace_view,
+)
 
-from .fakes import decision_doc, make_trace, scenario
+from .fakes import STABLE, decision_doc, fresh_evidence, make_trace, replay_report, scenario
 
 
 def render(obj: object) -> str:
@@ -89,33 +97,99 @@ def test_decision_view_admitted_and_rejected() -> None:
 
 
 def test_evidence_lines_for_each_gate() -> None:
-    assert "fires on 1/2 target failures, 3 false fire(s)" in evidence_line(
-        {
-            "name": "replay",
-            "evidence": {"reports": [{"targets_hit": 1, "targets_total": 2, "false_positives": [1, 2, 3]}]},
-        }
+    reports = [replay_report("g1"), replay_report("g2", "INCOMPLETE", "3/9 traces checked")]
+    composed = replay_report("x", "REJECTED", "9/9 traces checked")
+    replay = {"name": "replay", "evidence": {"reports": reports, "composed": composed}}
+    line = evidence_line(replay)
+    assert "g1: 11/11 checked, CLEARED" in line
+    assert "g2: 3/9 checked, INCOMPLETE" in line
+    assert "(all guards composed): 9/9 checked, REJECTED" in line
+    assert "2 stable recoveries (need 2), 2 protected, 0 broken, parent discordance D=1" in evidence_line(
+        {"name": "fresh", "evidence": fresh_evidence(STABLE)}
     )
-    assert "confirming run pending" in evidence_line(
-        {"name": "heldout", "evidence": {"confirm_pending": True, "required": 5}}
+    assert "C2 pending" in evidence_line(
+        {"name": "fresh", "evidence": fresh_evidence({"a": ["fail", "fail", "pass"]}, pending=True)}
     )
-    assert "confirming run 4" in evidence_line({"name": "heldout", "evidence": {"confirm_fresh_passed": 4}})
+    assert evidence_line({"name": "fresh", "evidence": {}}) == ""
     assert "regressed 1" in evidence_line({"name": "no_regression", "evidence": {"regressed": ["a"]}})
     assert "2 intervention(s)" in evidence_line({"name": "benign_twins", "evidence": {"interventions": 2}})
     assert "1 copied literal(s)" in evidence_line(
         {"name": "overfit_lint", "evidence": {"hits": [{}], "screened": {}}}
     )
-    assert "authority grew: tools_granted" in evidence_line(
-        {"name": "authority", "evidence": {"tools_granted": ["x"]}}
+    assert "breaks: tools_granted" in evidence_line(
+        {"name": "structure", "evidence": {"violations": ["tools_granted"], "added_guards": 1}}
     )
-    assert "subset" in evidence_line({"name": "authority", "evidence": {}})
+    assert "additive only" in evidence_line({"name": "structure", "evidence": {}})
     assert "model calls 3 -> 4" in evidence_line(
         {"name": "cost", "evidence": {"parent": {"model_calls": 3}, "candidate": {"model_calls": 4}}}
     )
     assert evidence_line({"name": "other"}) == ""
 
 
+def test_decision_view_renders_the_four_runs_and_the_sets_not_a_net_count() -> None:
+    store, _, _ = scenario()
+    out = render(decision_view(decision_info(store.decision_docs[1])))
+    for part in ("P1", "P2", "C1", "C2", "held-out case"):
+        assert part in out
+    assert "inj.v3" in out
+    assert "STABLE RECOVERY" in out
+    assert "PROTECTED CASE BROKE" in out
+    assert "ord.v3" in out
+    assert "still failing" in out
+    assert "stable recoveries 1 (need 2)" in out
+    assert "broken 1" in out
+    assert "parent discordance D=1" in out
+    assert "(reported, not a threshold)" in out
+    ok = render(decision_view(decision_info(store.decision_docs[0])))
+    assert "stable recoveries 2 (need 2)" in ok
+    assert "protected 2" in ok
+    assert "broken 0" in ok
+
+
+def test_decision_view_marks_a_pending_confirmation_and_invalid_evidence() -> None:
+    ev = {**fresh_evidence({"a": ["fail", "fail", "pass"], "b": ["pass", "pass", "pass"]}, pending=True)}
+    ev["invalid_evidence"] = ["b"]
+    ev["same_manifest"] = False
+    doc = decision_doc("p", "c", False, checks=[{"name": "fresh", "passed": False, "evidence": ev}])
+    out = render(decision_view(decision_info(doc)))
+    assert "pending" in out
+    assert "C2 (the confirming run) has not run yet" in out
+    assert "lack valid FRESH evidence" in out
+    assert "did not share one case manifest" in out
+    assert "NO VALID EVIDENCE" in out
+
+
+def test_decision_view_renders_replay_coverage_per_guard() -> None:
+    reports = [
+        replay_report("g1"),
+        replay_report("g2", "REJECTED", false_fires=["a@1"], benign_twin_fires=1, errors=0),
+    ]
+    ev = {"reports": reports, "composed": replay_report("c", "INCOMPLETE", "5/9 traces checked", errors=1),
+          "procedures": {"p-1": "NOT APPLICABLE (natural-language trigger)"}}  # fmt: skip
+    doc = decision_doc("p", "c", False, checks=[{"name": "replay", "passed": False, "evidence": ev}])
+    out = render(decision_view(decision_info(doc)))
+    assert "11/11 checked" in out
+    assert "CLEARED" in out
+    assert "REJECTED" in out
+    assert "INCOMPLETE" in out
+    assert "5/9 checked" in out
+    assert "(all guards composed)" in out
+    assert "procedure p-1: replay NOT APPLICABLE" in out
+
+
+def test_traces_and_runs_are_labelled_fresh_recorded_or_cached() -> None:
+    t = make_trace("run-1", "refund.t1", True, [])
+    assert trace_label(t).startswith("RECORDED 1970-01-01T")
+    assert trace_label(t).endswith("(run was FRESH)")
+    cached = Trace(t.run_id, t.case_id, t.harness_version, t.model, [ev("model", cached=True)], t.outcome)
+    assert trace_label(cached).endswith("(run was CACHED)")
+    empty = Trace(t.run_id, t.case_id, t.harness_version, t.model, [], t.outcome)
+    assert "unknown" in trace_label(empty)
+    assert "RECORDED 1970" in render(trace_view(t))
+
+
 def test_run_view_summarises_cases() -> None:
-    payload = {
+    payload: dict[str, Any] = {
         "harness_version": "abc",
         "train": {"passed": 1, "total": 2},
         "heldout": {"passed": 0, "total": 1},
@@ -138,7 +212,10 @@ def test_run_view_summarises_cases() -> None:
     assert "held-out 0/1" in out
     assert "false interventions 2" in out
     assert "refunded twice" in out
-    clean = render(run_view({**payload, "results": [payload["results"][0]]}))  # type: ignore[index]
+    assert "FRESH" in out
+    cached = render(run_view({**payload, "results": [{**payload["results"][0], "mode": "CACHED"}]}))
+    assert "CACHED" in cached
+    clean = render(run_view({**payload, "results": [payload["results"][0]]}))
     assert "false interventions 0" in clean
 
 

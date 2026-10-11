@@ -83,7 +83,7 @@ def drive(store: TelemetryStore, *, gens: int = 2) -> list[dict[str, Any]]:
         )
         store.put_decision(decision_doc(parent, child, True, generation=g))
         store.put_decision(decision_doc(parent, loser, False, generation=g))
-        rec = {"type": "generation", "generation": g, "parent": parent, "promoted": child}
+        rec = {"type": "generation", "generation": g, "parent": parent, "level1": {"promoted": child}}
         store.put_eval(rec, eval_id=f"gen-{g}")
         written.append(rec)
         parent = child
@@ -123,14 +123,14 @@ def test_best_candidate_is_sent_when_nothing_was_promoted() -> None:
     store.put_eval({**eval_doc("v0", (1, 2), (1, 3), results("v0", ["r0"])), "role": "parent"})
     store.put_eval({**eval_doc("a", (1, 2), (1, 3), results("a", ["ra"])), "role": "candidate"})
     store.put_eval({**eval_doc("b", (1, 2), (2, 3), results("b", ["rb"])), "role": "composite"})
-    store.put_eval({"type": "generation", "generation": 1, "parent": "v0", "promoted": None})
+    store.put_eval({"type": "generation", "generation": 1, "parent": "v0", "level1": {}})
     assert [(e["version"], e["cohort"]) for e in sink.evaluations] == [("v0", "baseline"), ("b", "candidate")]
 
 
 def test_nothing_to_send_on_an_empty_generation() -> None:
     sink = FakeSink()
     store, _, _ = make(sink)
-    store.put_eval({"type": "generation", "generation": 1, "parent": "v0", "promoted": None})
+    store.put_eval({"type": "generation", "generation": 1, "parent": "v0", "level1": {}})
     assert sink.evaluations == []
     assert sink.decisions == []
 

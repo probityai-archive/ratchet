@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Literal
 
 from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
@@ -75,9 +76,13 @@ class Cell:
 
 @dataclass(frozen=True)
 class ColumnVerdict:
+    """`replay` is the replay gate in the words the contract uses: "37/37 checked, CLEARED", "k/N checked,
+    INCOMPLETE" or "37/37 checked, REJECTED"."""
+
     label: str
     ok: bool
     reasons: list[str]
+    replay: str = ""
 
 
 @dataclass
@@ -90,6 +95,8 @@ class Matrix:
     horizons: list[dict[int, int]]
     elapsed_s: float
     checks: int
+    unfaithful: set[int] = field(default_factory=set)
+    recorded_at: str = ""
     model_calls: int = field(default=0, init=False)
 
     def rows_of(self, kind: RowKind) -> list[int]:
@@ -126,15 +133,33 @@ class Matrix:
             out.append(f"fires on {fired} benign {'twin' if fired == 1 else 'twins'}")
         if self.errors(col):
             out.append(f"{self.errors(col)} guard error(s)")
+        if self.unfaithful:
+            out.append(f"{len(self.unfaithful)} trace(s) whose rebuilt world differs from the record")
         return out
+
+    def coverage(self, col: int) -> tuple[int, int]:
+        """(traces fully checked, traces). A trace where the guard errored, or whose rebuilt world differs
+        from the record, was not checked."""
+        total = len(self.rows)
+        unchecked = self.unfaithful | {r for r in range(total) if self.cells[(r, col)].error}
+        return total - len(unchecked), total
+
+    def replay_verdict(self, col: int) -> str:
+        checked, total = self.coverage(col)
+        if checked < total:
+            return "INCOMPLETE"
+        return "REJECTED" if self.replay_reasons(col) else "CLEARED"
 
     def verdict(self, col: int) -> ColumnVerdict:
         reasons = self.replay_reasons(col)
+        checked, total = self.coverage(col)
+        replay = f"{checked}/{total} checked, {self.replay_verdict(col)}"
         d = self.columns[col].decision
         if d is None:
-            return ColumnVerdict("REJECTED" if reasons else "REPLAY OK", not reasons, reasons)
+            label = self.replay_verdict(col)
+            return ColumnVerdict(label, label == "CLEARED", reasons, replay)
         extra = d.reasons(skip=("replay",)) if not d.admitted else []
-        return ColumnVerdict("ADMITTED" if d.admitted else "REJECTED", d.admitted, reasons + extra)
+        return ColumnVerdict("ADMITTED" if d.admitted else "REJECTED", d.admitted, reasons + extra, replay)
 
 
 def classify(trace: Trace, info: CaseInfo | None) -> RowKind:
@@ -222,7 +247,12 @@ def compute_matrix(
             if cell.fired and ri in horizon and cell.seq is not None and cell.seq > horizon[ri]:
                 cell = Cell(False, cell.seq, late=True)
             cells[(ri, ci)] = cell
-    m = Matrix(parent, rows, list(columns), cells, target_sets, horizons, 0.0, checks)
+    stamp = max((e.ts for t in picked for e in t.events), default=None)
+    m = Matrix(
+        parent, rows, list(columns), cells, target_sets, horizons, 0.0, checks,
+        {i for i, t in enumerate(picked) if not walks.walk(t).faithful},
+        "" if stamp is None else datetime.fromtimestamp(stamp, UTC).isoformat(timespec="seconds"),
+    )  # fmt: skip
     m.elapsed_s = time.perf_counter() - started
     return m
 
@@ -313,8 +343,10 @@ def _group_text(m: Matrix, g: RowKind, c: int) -> Text:
 def _verdict_cell(v: ColumnVerdict) -> Text:
     if v.label == "ADMITTED":
         return Text(" ADMITTED ", style="bold black on green")
-    if v.label == "REPLAY OK":
-        return Text(" REPLAY OK ", style="bold black on cyan")
+    if v.label == "CLEARED":
+        return Text(" CLEARED ", style="bold black on cyan")
+    if v.label == "INCOMPLETE":
+        return Text(" INCOMPLETE ", style="bold black on yellow")
     return Text(" REJECTED ", style="bold white on red")
 
 
@@ -363,7 +395,11 @@ def legend(m: Matrix) -> Table:
         why = "; ".join(v.reasons) if v.reasons else "fires on its targets and on nothing that worked"
         if col.decision and col.decision.receipt:
             why += f"  [{col.decision.receipt}]"
-        t.add_row(mark, head, Text(f"{v.label}: {why}", style="green" if v.ok else "red"))
+        body = Text.assemble(
+            (f"{v.label}: {why}", "green" if v.ok else ("yellow" if v.label == "INCOMPLETE" else "red")),
+            (f"   replay {v.replay}", "dim"),
+        )
+        t.add_row(mark, head, body)
     return t
 
 
@@ -378,11 +414,14 @@ def footer(m: Matrix) -> Text:
 
 def header(m: Matrix) -> Text:
     groups = "  ".join(f"{len(m.rows_of(g))} {GROUP_TITLE[g].lower()}" for g in GROUPS if m.rows_of(g))
+    stamp = f" RECORDED {m.recorded_at} " if m.recorded_at else " RECORDED "
     return Text.assemble(
         (" RATCHET ", "bold black on bright_cyan"),
         (" replay matrix ", "bold"),
         (f" parent {m.parent}  ", "dim"),
         (groups, "dim"),
+        ("  ", ""),
+        (stamp, "black on grey70"),
     )
 
 

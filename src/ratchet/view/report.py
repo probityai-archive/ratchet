@@ -10,6 +10,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from html import escape
 
+from ratchet.view.admission import (
+    RUNS,
+    FreshView,
+    ReplayRow,
+    fresh_view,
+    procedures_not_applicable,
+    replay_rows,
+)
 from ratchet.view.data import VersionNode
 from ratchet.view.matrix import GROUP_TITLE, Matrix, RowKind, layout
 
@@ -36,17 +44,25 @@ tr.grp td{background:var(--bg);font-weight:700;letter-spacing:.04em}
 .block{background:var(--bad);color:#fff;font-weight:700}.pass{color:var(--good)}.na,.dim{color:var(--dim)}
 .err{color:var(--warn);font-weight:700}
 .badge{display:inline-block;padding:1px 10px;border-radius:4px;font-weight:700;color:#fff}
-.admitted{background:var(--good)}.rejected{background:var(--bad)}.replay-ok{background:var(--cyan)}
+.incomplete{background:var(--warn)}.admitted{background:var(--good)}.rejected{background:var(--bad)}.replay-ok{background:var(--cyan)}
 .legend{margin:12px 0 0;padding:0;list-style:none}.legend li{padding:3px 0}
 .foot{margin-top:10px;font-weight:700}
 .scroll{overflow-x:auto}
+.stable{color:var(--good);font-weight:700}
+.broken{background:var(--bad);color:#fff;font-weight:700}
+h3{font-size:15px;margin:24px 0 8px}
 ul.tree,ul.tree ul{list-style:none;margin:0;padding-left:22px;border-left:1px solid var(--line)}
 ul.tree{border-left:0;padding-left:0}ul.tree li{padding:4px 0 4px 8px;position:relative}
 .v{color:var(--cyan);font-weight:700}.rcpt{color:var(--mag)}.why{color:var(--bad);display:block;padding-left:20px}
 .ok{color:var(--good);font-weight:700}.no{color:var(--bad);font-weight:700}.seed{color:var(--cyan);font-weight:700}
 """
 
-_VERDICT_CLASS = {"ADMITTED": "admitted", "REJECTED": "rejected", "REPLAY OK": "replay-ok"}
+_VERDICT_CLASS = {
+    "ADMITTED": "admitted",
+    "REJECTED": "rejected",
+    "CLEARED": "replay-ok",
+    "INCOMPLETE": "incomplete",
+}
 _MARK = {"seed": ("◆", "seed"), "promoted": ("✓", "ok"), "admitted": ("✓", "ok"), "rejected": ("✗", "no")}
 
 
@@ -132,7 +148,8 @@ def _legend_item(m: Matrix, c: int) -> str:
     return (
         f'<li><span class="{cls}">{"&#10003;" if v.ok else "&#10007;"}</span> <b>{_e(col.letter)}</b> '
         f'<span class="v">{_e(col.guard.id)}</span> &mdash; {_e(col.guard.description)}<br>'
-        f'<span class="{cls}">{_e(v.label)}</span>: {_e(why)}{rcpt}</li>'
+        f'<span class="{cls}">{_e(v.label)}</span>: {_e(why)}{rcpt} '
+        f'<span class="dim">replay {_e(v.replay)}</span></li>'
     )
 
 
@@ -141,8 +158,9 @@ def lineage_html(roots: Sequence[VersionNode]) -> str:
         mark, cls = _MARK[n.status]
         d = n.decision
         what = "seed" if n.status == "seed" else (d.what if d else "")
+        active = f' <span class="badge admitted">ACTIVE rev {n.active_revision}</span>' if n.active else ""
         out = (
-            f'<span class="{cls}">{mark}</span> <span class="v">{_e(n.version)}</span> '
+            f'<span class="{cls}">{mark}</span> <span class="v">{_e(n.version)}</span>{active} '
             f"{_e(what)} {_score(n, parent)}"
         )
         if d and d.receipt:
@@ -166,14 +184,25 @@ def _score(n: VersionNode, parent: VersionNode | None) -> str:
     return (
         f'<span class="dim">held-out</span> <b>{held}</b> <span class="dim">&middot; train</span> '
         f'{s.train_passed}/{s.train_total} <span class="dim">&middot; false interventions</span> '
-        f'<b class="{"pass" if s.false_interventions == 0 else "miss"}">{s.false_interventions}</b>'
+        f'<b class="{"pass" if s.false_interventions == 0 else "miss"}">{s.false_interventions}</b> '
+        f'<span class="rcpt">{_e(s.mode)}</span>'
     )
 
 
 def results_html(roots: Sequence[VersionNode]) -> str:
     head = "".join(
         f"<th>{h}</th>"
-        for h in ("version", "parent", "outcome", "change", "train", "held-out", "false int.", "receipt")
+        for h in (
+            "version",
+            "parent",
+            "outcome",
+            "change",
+            "train",
+            "held-out",
+            "false int.",
+            "evaluation",
+            "receipt",
+        )
     )
     rows = []
     for r in roots:
@@ -191,10 +220,85 @@ def results_html(roots: Sequence[VersionNode]) -> str:
                 f"<td>{s.train_passed}/{s.train_total}</td>" if s else '<td class="dim">-</td>',
                 f"<td>{s.heldout_passed}/{s.heldout_total}</td>" if s else '<td class="dim">-</td>',
                 f"<td>{s.false_interventions}</td>" if s else '<td class="dim">-</td>',
+                f"<td>{_e(s.mode)}</td>" if s else '<td class="dim">-</td>',
                 f'<td class="rcpt">{_e(d.receipt) if d and d.receipt else "-"}</td>',
             ]
             rows.append(f"<tr>{''.join(cells)}</tr>")
     return f'<div class="scroll"><table><tr>{head}</tr>{"".join(rows)}</table></div>'
+
+
+def admission_html(roots: Sequence[VersionNode]) -> str:
+    """For each decision: the replay gate per guard, and the four paired runs case by case."""
+    out: list[str] = []
+    for n in (n for r in roots for n in r.walk()):
+        d = n.decision
+        if d is None:
+            continue
+        mark = '<span class="ok">ADMITTED</span>' if d.admitted else '<span class="no">REJECTED</span>'
+        body = f"<h3>{_e(d.parent)} &rarr; {_e(d.candidate)} {mark} {_e(d.what)}</h3>"
+        for c in d.checks:
+            ev = c.get("evidence") or {}
+            if c["name"] == "replay" and (rows := replay_rows(ev)):
+                body += _replay_table_html(rows, procedures_not_applicable(ev))
+            if c["name"] == "fresh" and (v := fresh_view(ev)) is not None:
+                body += _fresh_table_html(v)
+        out.append(body)
+    return "".join(out)
+
+
+_ROLE_CLASS = {
+    "broken": "broken",
+    "stable": "stable",
+    "invalid": "err",
+    "protected": "dim",
+    "unrecovered": "na",
+}
+_ROLE_WORDS = {
+    "broken": "PROTECTED CASE BROKE",
+    "stable": "STABLE RECOVERY",
+    "invalid": "NO VALID EVIDENCE",
+    "protected": "protected",
+    "unrecovered": "still failing",
+}
+
+
+def _fresh_table_html(v: FreshView) -> str:
+    head = "".join(f'<th class="c">{r}</th>' for r in RUNS)
+    rows = []
+    for row in v.rows:
+        cells = "".join(
+            f'<td class="c {"pass" if o == "pass" else ("miss" if o == "fail" else "err")}">{_e(o)}</td>'
+            for o in row.outcomes
+        )
+        rows.append(
+            f"<tr><td>{_e(row.case_id)}</td>{cells}"
+            f'<td class="{_ROLE_CLASS[row.role]}">{_ROLE_WORDS[row.role]}</td></tr>'
+        )
+    pend = "; C2 (the confirming run) has not run yet" if v.confirm_pending else ""
+    return (
+        f'<div class="scroll"><table><tr><th>held-out case</th>{head}<th>role</th></tr>'
+        f"{''.join(rows)}</table></div>"
+        f'<div class="foot">stable recoveries {len(v.stable)} (need {v.needed}) &middot; protected '
+        f"{len(v.protected)} &middot; broken {len(v.broken)} &middot; parent discordance D={v.discordance} "
+        f'<span class="dim">(reported, not a threshold){pend}</span></div>'
+    )
+
+
+def _replay_table_html(rows: Sequence[ReplayRow], procedures: Sequence[str]) -> str:
+    cells = []
+    for r in rows:
+        cls = {"CLEARED": "ok", "INCOMPLETE": "err"}.get(r.verdict, "no")
+        hit = "-" if r.targets_total is None else f"{r.targets_hit}/{r.targets_total}"
+        cells.append(
+            f'<tr><td>{_e(r.guard_id)}</td><td>{_e(r.coverage)}</td><td class="{cls}">{_e(r.verdict)}</td>'
+            f"<td>{hit}</td><td>{r.false_fires}</td><td>{r.benign_fires}</td><td>{r.errors}</td></tr>"
+        )
+    notes = "".join(f'<div class="dim">procedure {_e(p)}: replay NOT APPLICABLE</div>' for p in procedures)
+    head = "".join(
+        f"<th>{h}</th>"
+        for h in ("guard", "coverage", "verdict", "targets hit", "false fires", "benign twin fires", "errors")
+    )
+    return f'<div class="scroll"><table><tr>{head}</tr>{"".join(cells)}</table></div>{notes}'
 
 
 def _stats(roots: Sequence[VersionNode]) -> str:
@@ -231,5 +335,6 @@ def render_html(data: ReportData) -> str:
         f'<h1>{_e(data.title)}</h1><p class="sub">Generated from MongoDB Atlas, {_e(data.generated)}</p>'
         f'<div class="stats">{_stats(data.roots)}</div>'
         f"{matrix}<h2>Lineage</h2>{lineage_html(data.roots)}"
-        f"<h2>Results</h2>{results_html(data.roots)}</main></body></html>\n"
+        f"<h2>Results</h2>{results_html(data.roots)}"
+        f"<h2>Admission screens</h2>{admission_html(data.roots)}</main></body></html>\n"
     )

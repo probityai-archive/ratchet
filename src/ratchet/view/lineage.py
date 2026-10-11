@@ -35,12 +35,15 @@ def score(stats: VersionStats | None, parent: VersionStats | None = None) -> Tex
         ("held-out ", "dim"), (held, "bold"), delta,
         ("  train ", "dim"), (f"{stats.train_passed}/{stats.train_total}", ""),
         ("  false interventions ", "dim"), (str(stats.false_interventions), fi_style),
+        ("  ", ""), (stats.mode, "magenta"),
     )  # fmt: skip
 
 
 def node_label(n: VersionNode, parent: VersionNode | None = None) -> Text:
     mark, style = STATUS_MARK[n.status]
     label = Text.assemble((f"{mark} ", style), (n.version, "bold cyan" if n.status != "rejected" else "red"))
+    if n.active:
+        label.append(f" ACTIVE rev {n.active_revision} ", style="bold black on bright_green")
     d = n.decision
     if n.status == "seed":
         label.append("  seed", style="dim")

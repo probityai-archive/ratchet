@@ -65,8 +65,8 @@ def test_decision_lines() -> None:
 def test_eval_and_generation_lines() -> None:
     gen = line(
         "evals",
-        {"type": "generation", "generation": 2, "parent": "p", "promoted": "c",
-         "parent_score": {"heldout_passed": 3}, "child_score": {"heldout_passed": 6, "heldout_total": 8}},
+        {"type": "generation", "generation": 2, "parent": "p", "level1": {"promoted": "c",
+         "parent_score": {"heldout_passed": 3}, "child_score": {"heldout_passed": 6, "heldout_total": 8}}},
     )  # fmt: skip
     assert "generation 2" in gen
     assert "promoted c" in gen
@@ -178,3 +178,33 @@ def test_follow_survives_ctrl_c(monkeypatch: pytest.MonkeyPatch) -> None:
     n, out = run(Scripted({"traces": [[]]}), collections=("traces",))
     assert n == 0
     assert "stopped" in out
+
+
+def test_activations_have_their_own_line() -> None:
+    out = line(
+        "activations",
+        {"_id": "k", "version": "v2", "previous": "v1", "revision": 4, "receipt_digest": "ab" * 32},
+    )
+    assert "ACTIVATED" in out
+    assert "v1 -> v2" in out
+    assert "revision 4" in out
+    assert "receipt abababababab" in out
+    first = line("activations", {"version": "v1", "previous": None, "revision": 1})
+    assert "- -> v1" in first
+    assert "receipt" not in first
+
+
+def test_follow_reads_the_activation_log_through_the_database_when_the_store_cannot_watch_it() -> None:
+    store = FakeStore()
+    store.raw_changes["activations"] = [
+        {
+            "operationType": "insert",
+            "documentKey": {"_id": "k"},
+            "fullDocument": {"_id": "k", "version": "v2", "previous": "v1", "revision": 2},
+            "_id": {"_data": "t1"},
+        }
+    ]
+    n, out = run(store, collections=("activations",), timeout_s=0.5)
+    assert n == 1
+    assert "ACTIVATED" in out
+    assert "v1 -> v2" in out

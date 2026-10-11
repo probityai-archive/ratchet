@@ -145,7 +145,7 @@ class TelemetryStore:
             self.warn(f"raindrop: {what} not sent: {refused}")
 
     def _emit_generation(self, rec: Mapping[str, Any]) -> None:
-        parent, promoted = str(rec["parent"]), rec.get("promoted")
+        parent, promoted = str(rec["parent"]), (rec.get("level1") or {}).get("promoted")
         base = self._depth.setdefault(parent, 0)
         chosen = self._chosen(promoted)
         decisions = self._decisions
