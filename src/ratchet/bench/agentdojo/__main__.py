@@ -1,4 +1,4 @@
-"""`python -m ratchet.bench.agentdojo {baseline,evolve} --suite banking --out private/bench/agentdojo/<run>`.
+"""`python -m ratchet.bench.agentdojo {baseline,evolve,summarize} --suite banking --out <run dir>`.
 
 The endpoint and key come from `RATCHET_BASE_URL` and `RATCHET_API_KEY`; models from the flags.
 """
@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from ratchet.bench.agentdojo.cases import DEFAULT_ATTACK, DEFAULT_VERSION, build_suite
+from ratchet.bench.agentdojo.cases import DEFAULT_ATTACK, DEFAULT_VERSION, DojoSuite, build_suite
 from ratchet.bench.agentdojo.experiment import (
     Settings,
     admitted_changes,
@@ -22,6 +22,8 @@ from ratchet.bench.agentdojo.experiment import (
     evolve_from,
     lineage,
     provenance,
+    read_jsonl,
+    suite_digest,
     version_metrics,
 )
 from ratchet.bench.agentdojo.report import render
@@ -32,7 +34,7 @@ REFERENCE_CLONE = Path.home() / "Documents" / "git-clones" / "agentdojo"
 
 def parse(argv: Sequence[str]) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog="python -m ratchet.bench.agentdojo")
-    ap.add_argument("command", choices=["baseline", "evolve"])
+    ap.add_argument("command", choices=["baseline", "evolve", "summarize"])
     ap.add_argument("--suite", default="banking")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--model", default="gpt-5.6-luna")
@@ -83,30 +85,67 @@ def run(command: str, s: Settings, log: Any = print) -> dict[str, Any]:
     if command == "evolve":
         result = evolve_from(dojo, runner, model, improver, store, v0, s, log)
     versions = lineage(v0, result)
+    return write_results(s.out, dojo, prov, versions, command, "complete")
+
+
+NOTES = [
+    "Metrics are on held-out cases only: held-out user tasks paired with held-out injection tasks "
+    "(attacked) or with none (utility).",
+    "Every evaluation the run made is listed, in order: the baseline, the loop's two fresh parent "
+    "runs per generation, and each promoted version's candidate, composite and confirmation runs.",
+]
+
+
+def write_results(
+    out: Path, dojo: DojoSuite, prov: dict[str, Any], versions: list[str], command: str, status: str
+) -> dict[str, Any]:
+    records = [e for e in read_jsonl(out / "evals.jsonl") if e.get("type") == "generation"]
     results = {
-        "run_id": s.out.name,
+        "run_id": out.name,
         "command": command,
+        "status": status,
         "provenance": prov,
         "versions": versions,
-        "metrics": version_metrics(dojo, s.out, versions),
-        "admitted": admitted_changes(s.out, versions[1:]),
-        "generations": [r.to_payload() for r in result.generations] if result else [],
-        "wall_s": round(time.perf_counter() - started, 1),
-        "notes": [
-            "Metrics are on held-out cases only: held-out user tasks paired with held-out injection tasks "
-            "(attacked) or with none (utility).",
-            "Every evaluation the run made is listed, in order: the baseline, the loop's two fresh parent "
-            "runs per generation, and each promoted version's candidate, composite and confirmation runs.",
-        ],
+        "metrics": version_metrics(dojo, out, versions),
+        "admitted": admitted_changes(out, versions[1:]),
+        "generations": records,
+        "notes": NOTES,
     }
-    (s.out / "results.json").write_text(json.dumps(results, indent=2, default=str))
-    (s.out / "summary.md").write_text(render(results))
+    (out / "results.json").write_text(json.dumps(results, indent=2, default=str))
+    (out / "summary.md").write_text(render(results))
     return results
+
+
+def summarize(out: Path) -> dict[str, Any]:
+    """Results of a run from its files alone, finished or still running. Refuses a mismatched suite."""
+    prov = json.loads((out / "provenance.json").read_text())
+    dojo = build_suite(
+        prov["suite"],
+        benchmark_version=prov["benchmark_version"],
+        attack=prov["attack"],
+        seed=prov["seed"],
+        max_users=prov.get("max_users"),
+    )
+    if suite_digest(dojo) != prov["suite_digest"]:
+        raise SystemExit(f"{out}: the rebuilt suite does not match the run's suite digest")
+    harnesses = read_jsonl(out / "harnesses.jsonl")
+    versions = [harnesses[0]["version"]] if harnesses else []
+    for rec in read_jsonl(out / "evals.jsonl"):
+        promoted = (rec.get("level1") or {}).get("promoted") if rec.get("type") == "generation" else None
+        if promoted and promoted not in versions:
+            versions.append(str(promoted))
+    done = (out / "results.json").is_file() and json.loads((out / "results.json").read_text()).get(
+        "status"
+    ) == "complete"
+    return write_results(out, dojo, prov, versions, "summarize", "complete" if done else "in progress")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(sys.argv[1:] if argv is None else argv)
-    results = run(args.command, settings_from(args, dict(os.environ)))
+    if args.command == "summarize":
+        results = summarize(args.out)
+    else:
+        results = run(args.command, settings_from(args, dict(os.environ)))
     print(render(results))
     return 0
 

@@ -23,7 +23,8 @@ def _guard_lines(changes: dict[str, Any], parent_guards: set[str]) -> list[str]:
 def render(results: dict[str, Any]) -> str:
     p = results["provenance"]
     lines = [
-        f"### {p['suite']} ({p['benchmark_version']}), run `{results['run_id']}`",
+        f"### {p['suite']} ({p['benchmark_version']}), run `{results['run_id']}`"
+        + (f", {results['status']}" if results.get("status") else ""),
         "",
         f"- Agent model `{p['model']}`, improver model `{p['improver_model']}`, endpoint `{p['endpoint']}`",
         f"- AgentDojo package {p['agentdojo_package_version']}"

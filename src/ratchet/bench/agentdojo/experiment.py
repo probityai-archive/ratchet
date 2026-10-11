@@ -101,6 +101,7 @@ def provenance(s: Settings, dojo: DojoSuite, reference_clone: Path | None) -> di
         "workers": s.workers,
         "generations": s.generations,
         "suite_digest": suite_digest(dojo),
+        "max_users": s.max_users,
         **dojo.to_payload(),
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
@@ -166,7 +167,7 @@ def evolve_from(
         )
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -178,7 +179,7 @@ def version_metrics(dojo: DojoSuite, out: Path, versions: list[str]) -> list[dic
     Every evaluation is listed (baseline, the loop's two parent runs per generation, candidate, composite
     and confirmation runs), so no favourable run can be picked and an unfavourable one dropped.
     """
-    evals = [e for e in _read_jsonl(out / "evals.jsonl") if e.get("type") == "eval"]
+    evals = [e for e in read_jsonl(out / "evals.jsonl") if e.get("type") == "eval"]
     rows: list[dict[str, Any]] = []
     for e in evals:
         if e.get("harness_version") not in versions:
@@ -199,7 +200,7 @@ def version_metrics(dojo: DojoSuite, out: Path, versions: list[str]) -> list[dic
 
 def admitted_changes(out: Path, versions: list[str]) -> dict[str, dict[str, Any]]:
     """Each promoted version's guards, procedures and prompt, from the stored harness records."""
-    by_version = {h["version"]: h for h in _read_jsonl(out / "harnesses.jsonl")}
+    by_version = {h["version"]: h for h in read_jsonl(out / "harnesses.jsonl")}
     return {
         v: {
             "parent": by_version[v]["parent"],

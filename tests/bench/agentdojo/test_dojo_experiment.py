@@ -103,6 +103,30 @@ def test_cli_run_writes_results_and_summary(tmp_path: Path, monkeypatch: pytest.
     assert cli.main(["baseline", "--out", str(tmp_path / "other")]) == 0
 
 
+def test_summarize_rebuilds_results_from_the_run_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Settings, "client", lambda self, model: GroundTruthModel(PLAN))
+    monkeypatch.setattr(cli, "REFERENCE_CLONE", tmp_path / "no-clone")
+    s = _settings(tmp_path, max_users=1, workers=4)
+    first = cli.run("baseline", s, log=lambda _m: None)
+    assert first["status"] == "complete"
+    with (s.out / "evals.jsonl").open("a") as f:
+        f.write(json.dumps({"type": "generation", "level1": {"promoted": "v-next"}}) + "\n")
+        f.write(json.dumps({"type": "generation", "level1": {}}) + "\n")
+    again = cli.main(["summarize", "--out", str(s.out)])
+    assert again == 0
+    results = json.loads((s.out / "results.json").read_text())
+    assert results["versions"] == [first["versions"][0], "v-next"] and results["status"] == "complete"
+    assert results["metrics"] == first["metrics"] and len(results["generations"]) == 2
+    (s.out / "results.json").unlink()
+    assert cli.summarize(s.out)["status"] == "in progress"
+    prov = json.loads((s.out / "provenance.json").read_text())
+    (s.out / "provenance.json").write_text(json.dumps({**prov, "seed": 7}))
+    with pytest.raises(SystemExit, match="suite digest"):
+        cli.summarize(s.out)
+
+
 def seed_harness_version(results: dict[str, object]) -> str:
     versions = results["versions"]
     assert isinstance(versions, list)
