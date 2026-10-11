@@ -169,6 +169,14 @@ def check_fresh(
     initial_ok = same and not invalid and len(stable_c1) >= 2 and not broken_c1
     passed = initial_ok and confirm_eval is not None and len(stable) >= 2 and not broken
     label = {True: "pass", False: "fail", None: "invalid"}
+
+    def show(v: list[bool | None]) -> list[str]:
+        """C2 runs only when C1 alone clears every gate; otherwise it is reported as not run, not invalid."""
+        cells = [label[x] for x in v]
+        if confirm_eval is None:
+            cells[3] = "not run: rejected after C1" if not initial_ok else "not run: pending"
+        return cells
+
     return Check(
         "heldout",
         passed,
@@ -176,7 +184,7 @@ def check_fresh(
             "manifest": len(manifest),
             "same_manifest": same,
             "order": ["P1", "P2", "C1", "C2"],
-            "outcomes": {k: [label[x] for x in v] for k, v in vectors.items()},
+            "outcomes": {k: show(v) for k, v in vectors.items()},
             "stable_recoveries": stable,
             "stable_recoveries_c1": stable_c1,
             "protected": protected,

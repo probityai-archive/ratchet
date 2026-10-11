@@ -18,6 +18,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import httpx
 from pymongo import MongoClient
 
 from ratchet.agent.guards import GuardRuntime
@@ -43,6 +44,7 @@ def _args(argv: Sequence[str] | None) -> argparse.Namespace:
     p.add_argument("--improver-model", default=env.get("RATCHET_IMPROVER_MODEL", "gpt-5.6-terra"))
     p.add_argument("--improver-base-url", default=env.get("RATCHET_IMPROVER_BASE_URL", ""))
     p.add_argument("--temperature", type=float, default=0.0)
+    p.add_argument("--seed", type=int, default=None, help="fixed sampling seed sent with every agent request")
     p.add_argument("--uri", default=env.get("RATCHET_MONGODB_URI", ""))
     p.add_argument("--db", default=env.get("RATCHET_DB", "ratchet"))
     p.add_argument("--workers", type=int, default=12)
@@ -52,6 +54,25 @@ def _args(argv: Sequence[str] | None) -> argparse.Namespace:
     p.add_argument("--family", action="append", default=[], help="limit to these case families")
     p.add_argument("--out", type=Path, required=True)
     return p.parse_args(argv)
+
+
+class SeededTransport(httpx.HTTPTransport):
+    """Adds a fixed sampling seed to every chat-completions request body, so an endpoint that honours seeds
+    (vLLM does) answers a repeated request the same way. Nothing else in the request changes."""
+
+    def __init__(self, seed: int) -> None:
+        super().__init__()
+        self.seed = seed
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/chat/completions"):
+            body = json.loads(request.content)
+            body["seed"] = self.seed
+            content = json.dumps(body).encode("utf-8")
+            headers = [(k, v) for k, v in request.headers.raw if k.lower() != b"content-length"]
+            headers.append((b"content-length", str(len(content)).encode()))
+            request = httpx.Request(request.method, request.url, headers=headers, content=content)
+        return super().handle_request(request)
 
 
 def _mongo(uri: str) -> MongoClient[dict[str, Any]]:
@@ -90,6 +111,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "temperature": a.temperature,
         "improver_model": a.improver_model,
         "improver_base_url": improver_url,
+        "seed": a.seed,
     }
     config = {
         **model_config,
@@ -104,7 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     started = time.perf_counter()
     with (
         Store(a.uri, a.db) as store,
-        ModelClient(agent_cfg) as model,
+        ModelClient(agent_cfg, transport=None if a.seed is None else SeededTransport(a.seed)) as model,
         ModelClient(improver_cfg) as improver,
         GuardRuntime() as runtime,
         _mongo(a.uri) as client,
