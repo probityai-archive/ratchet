@@ -277,3 +277,18 @@ def test_a_signed_decision_verifies_end_to_end_with_the_receipt_verifier() -> No
     assert good.ok and good.admitted is True and good.candidate == cand.version, good
     other = Signer.generate()
     assert not verify_decision(receipt(d, signer), other.public_key).ok
+
+
+def test_a_ruling_2_decision_with_a_deterministic_evaluator_policy_verifies() -> None:
+    from ratchet.verify import verify_decision
+
+    cand = PARENT.child(guards=[OLD, Guard("g-new", "d", NO_DUP_GUARD)], created_by="improver")
+    pe = evaluate(PARENT, fake_cases(), FakeRunCase(), None)
+    evaluator = {"version": "ev1", "components": {"suite_file": "7d4c38e0" * 8}}
+    d = _admit(cand, pe=pe, composed=_composed(cand, pe), evaluator=evaluator)
+    d = replace(
+        d, policy={"name": "ruling-2", "evaluator": "deterministic", "endpoint_config_digest": "e" * 64}
+    )
+    signer = Signer.generate()
+    report = verify_decision(receipt(d, signer), signer.public_key)
+    assert report.ok and report.admitted is True and d.to_payload()["policy"]["name"] == "ruling-2"

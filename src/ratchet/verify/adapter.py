@@ -379,7 +379,9 @@ def adjudicate(case: Any, policy: Any, artifact_root: Path) -> dict[str, Any]:
     )
 
     policy = payload.get("policy")
-    if policy is not None:
+    if isinstance(policy, dict) and policy.get("name") == "ruling-2":
+        scope["policy"] = "ruling-2"  # the default gates; the evaluator detail rides in the policy record
+    elif policy is not None:
         if policy != V3_POLICY:
             return v.finish("not_established", "unsupported_policy", "policy")
         if any(c["name"] == "no_regression" for c in payload["checks"]):
