@@ -348,6 +348,7 @@ def _bare_ref(store: ViewStore, version: str) -> CandidateRef:
 class RunStore(Protocol):
     """The write side the improvement loop needs (structurally the loop's own `ImproveStore`)."""
 
+    def get_harness(self, version: str) -> Harness | None: ...
     def put_harness(self, harness: Harness) -> bool: ...
     def put_trace(self, trace: Trace) -> bool: ...
     def put_eval(self, report: Any, *, eval_id: str | None = None) -> str: ...
@@ -355,7 +356,11 @@ class RunStore(Protocol):
 
 
 class WriteStore(ViewStore, RunStore, Protocol):
-    """What `run` and `evolve` need from the store: everything the views read, and the write side."""
+    """What `run`, `evolve` and `resume` need from the store: everything the views read, the write side, and
+    the run checkpoints."""
+
+    def checkpoint(self, run_id: str, state: Mapping[str, Any]) -> int: ...
+    def resume(self, run_id: str) -> Doc | None: ...
 
 
 def find_decision_doc(store: ViewStore, ref: str) -> Doc | None:

@@ -106,9 +106,10 @@ def test_lineage_trace_decision_and_verify_read_the_real_store(atlas_db: tuple[s
     assert "ADMITTED" in out
     pub = SIGNER.public_key.public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
     code, out = run(["verify", good.version, "--pubkey", pub], uri, db)
-    assert code == 0
-    assert "VERIFIED" in out
+    assert code == 1  # signed correctly, but a hand-built body is not a full admission predicate
+    assert "✓ DSSE envelope signature valid" in out
     assert "independent verifier" in out
+    assert "NOT ESTABLISHED" in out
 
 
 def test_replay_and_report_run_over_real_traces(atlas_db: tuple[str, str, Store], tmp_path: Path) -> None:

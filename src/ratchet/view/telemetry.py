@@ -97,6 +97,9 @@ class TelemetryStore:
 
     # -- the store the loop writes to: forward first, observe after ------------------------------------------
 
+    def get_harness(self, version: str) -> Harness | None:
+        return self.inner.get_harness(version)
+
     def put_harness(self, harness: Harness) -> bool:
         return self.inner.put_harness(harness)
 

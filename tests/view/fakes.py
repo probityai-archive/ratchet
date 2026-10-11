@@ -230,6 +230,7 @@ class FakeDb:
 
 class FakeStore:
     def __init__(self) -> None:
+        self.checkpoints: dict[str, dict[str, Any]] = {}
         self.collections: dict[str, list[dict[str, Any]]] = {}
         self.raw_changes: dict[str, list[dict[str, Any]]] = {}
         self.harnesses: dict[str, Harness] = {}
@@ -285,6 +286,13 @@ class FakeStore:
 
     def close(self) -> None:
         self.closed = True
+
+    def checkpoint(self, run_id: str, state: Mapping[str, Any]) -> int:
+        self.checkpoints[run_id] = dict(state)
+        return len(self.checkpoints)
+
+    def resume(self, run_id: str) -> dict[str, Any] | None:
+        return self.checkpoints.get(run_id)
 
     def put_harness(self, harness: Harness) -> bool:
         new = harness.version not in self.harnesses

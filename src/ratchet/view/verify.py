@@ -19,6 +19,9 @@ from ratchet.improve.receipt import SIGNING_KEY_ENV, ReceiptError, Signer, key_i
 from ratchet.types import canonical_json
 from ratchet.verify import dsse
 from ratchet.verify.keys import DEFAULT_KEY_PATH, TrustedKeyError, load_trusted_key
+from ratchet.verify.receipt import Options, VerifyReport
+from ratchet.verify.receipt import verify_decision as recompute_receipt
+from ratchet.view.evidence import Evidence
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,7 @@ class VerifyResult:
     detail: list[str]
     keyid: str | None = None
     payload: Mapping[str, Any] | None = None
+    recompute: VerifyReport | None = None
 
 
 def trusted_keys(
@@ -106,7 +110,34 @@ def verify_envelope(
     return VerifyResult(True, "VERIFIED", detail, payload=payload)
 
 
-def verify_decision(doc: Mapping[str, Any], trusted: Mapping[str, Ed25519PublicKey]) -> VerifyResult:
+def verify_decision(
+    doc: Mapping[str, Any],
+    trusted: Mapping[str, Ed25519PublicKey],
+    evidence: Evidence | None = None,
+    options: Options = Options(),  # noqa: B008 - frozen dataclass, safe as a default
+) -> VerifyResult:
+    """Check the stored receipt. With `evidence`, the pinned verifier also recomputes what it can from it
+    (`ratchet.verify.verify_decision`). The signature double-check runs first and both must pass."""
+    res = _signature_check(doc, trusted)
+    if evidence is None or not res.ok:
+        return res
+    envelope = base64.b64decode(str(doc["envelope"]))
+    report = recompute_receipt(
+        envelope,
+        list(trusted.values()),
+        reports=evidence.reports,
+        harnesses=evidence.harnesses,
+        recomputed=evidence.recomputed,
+        options=options,
+    )
+    detail = [*res.detail, f"recomputation verdict: {report.decision} {report.reason}"]
+    if not report.ok:
+        return VerifyResult(False, "CONTRADICTED" if report.decision == "contradicted" else "NOT ESTABLISHED",
+                            detail, res.keyid, res.payload, report)  # fmt: skip
+    return VerifyResult(True, "VERIFIED", detail, res.keyid, res.payload, report)
+
+
+def _signature_check(doc: Mapping[str, Any], trusted: Mapping[str, Ed25519PublicKey]) -> VerifyResult:
     raw = doc.get("envelope")
     if not raw:
         return VerifyResult(False, "NO RECEIPT", ["the decision carries no signed envelope"])
@@ -118,10 +149,44 @@ def verify_decision(doc: Mapping[str, Any], trusted: Mapping[str, Ed25519PublicK
     return VerifyResult(res.ok, res.summary, res.detail, doc.get("keyid"), res.payload)
 
 
+def recompute_lines(r: VerifyReport) -> list[Text]:
+    """RECOMPUTED apart from AUTHENTICATED ONLY, then anything not supplied, then the reason code."""
+    done = [i for i in r.recomputed if i["status"] == "recomputed"]
+    partial = [i["id"] for i in r.recomputed if i["status"] == "partial"]
+    missing = [i["id"] for i in r.recomputed if i["status"] == "not_supplied"]
+    good = r.ok
+    lines = [
+        Text(""),
+        Text.assemble(
+            ("  reason code ", "dim"), (f"{r.decision}: {r.reason}", "bold green" if good else "bold red")
+        ),
+        Text.assemble(
+            (f"  RECOMPUTED ({len(done)} of {len(r.recomputed)})  ", "bold green"),
+            (", ".join(str(i["id"]) for i in done) or "none", "green"),
+        ),
+    ]
+    if partial:
+        lines.append(Text(f"  PARTIAL  {', '.join(partial)}", style="yellow"))
+    if missing:
+        lines.append(Text(f"  NOT SUPPLIED  {', '.join(missing)}", style="yellow"))
+    lines.append(
+        Text.assemble(
+            ("  AUTHENTICATED ONLY (signed, not re-derived)  ", "bold yellow"),
+            (", ".join(r.authenticated_only) or "none", "yellow"),
+        )
+    )
+    level = "every recomputable item recomputed" if r.recomputation_complete else "recomputation INCOMPLETE"
+    lines.append(Text(f"  {r.reports_summary}; {level}", style="dim"))
+    return lines
+
+
 def render_verify(res: VerifyResult, decision_id: str) -> RenderableType:
     style = "green" if res.ok else "red"
     lines = [Text.assemble((f" {res.summary} ", f"bold white on {style}"), f"  {decision_id}")]
-    lines += [Text(f"  {'✓' if res.ok else '✗'} {d}", style=style) for d in res.detail]
+    for i, d in enumerate(res.detail):
+        # the signature checks passed whenever a recomputation ran; only its own verdict can be the failure
+        good = res.ok or (res.recompute is not None and i < len(res.detail) - 1)
+        lines.append(Text(f"  {'✓' if good else '✗'} {d}", style="green" if good else "red"))
     if res.payload is not None:
         lines.append(
             Text(
@@ -133,5 +198,7 @@ def render_verify(res: VerifyResult, decision_id: str) -> RenderableType:
         lines.append(Text(f"  candidate digest {res.payload.get('candidate_digest')}", style="dim"))
     if res.keyid:
         lines.append(Text(f"  key {res.keyid}", style="dim"))
+    if res.recompute is not None:
+        lines += recompute_lines(res.recompute)
     out = Text("\n").join(lines)
     return Panel(out, border_style=style)
