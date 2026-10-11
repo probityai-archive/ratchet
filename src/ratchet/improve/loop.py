@@ -278,9 +278,10 @@ def lanes_for(frozen_ids: set[str] | None, budget: int) -> list[Lane]:
 
 
 def _shortlist(tried: list[_Tried], lanes: list[Lane]) -> list[_Tried]:
-    """Fill each lane: proven guards first (most targets), then procedures, then prompts, round-robin over
-    clusters so one big cluster does not take every slot."""
-    rank = {"guard": 0, "procedure": 1, "prompt_edit": 2}
+    """Fill each lane round-robin over (kind, cluster) queues, so guards, procedures and prompt edits all get
+    evaluated and one big cluster does not take every slot. Within a queue, guards that cleared training
+    replay with the most targets come first."""
+    kinds = ("guard", "procedure", "prompt_edit")
     chosen: list[_Tried] = []
     for arm, ids, exclude, slots in lanes:
         pool = [
@@ -288,17 +289,27 @@ def _shortlist(tried: list[_Tried], lanes: list[Lane]) -> list[_Tried]:
             if t.arm == arm and t.status in ("proposed", "replay_passed") and t not in chosen
             and (ids is None or (t.candidate.cluster_id in ids) != exclude)
         ]  # fmt: skip
-        pool.sort(key=lambda t: (rank[t.candidate.kind], -len(t.candidate.targets)))
-        by_cluster: dict[str, list[_Tried]] = {}
-        for t in pool:
-            by_cluster.setdefault(t.candidate.cluster_id, []).append(t)
+        pool.sort(key=lambda t: -len(t.candidate.targets))
+        queues: dict[tuple[str, str], list[_Tried]] = {}
+        for kind in kinds:
+            for t in pool:
+                if t.candidate.kind == kind:
+                    queues.setdefault((kind, t.candidate.cluster_id), []).append(t)
+        order = sorted(queues, key=lambda k: kinds.index(k[0]))
+        by_kind = {kind: [k for k in order if k[0] == kind] for kind in kinds}
+        interleaved = [k for group in _zip_longest(*by_kind.values()) for k in group if k is not None]
         taken = 0
-        while taken < slots and any(by_cluster.values()):
-            for queue in by_cluster.values():
-                if queue and taken < slots:
-                    chosen.append(queue.pop(0))
+        while taken < slots and any(queues.values()):
+            for key in interleaved:
+                if queues[key] and taken < slots:
+                    chosen.append(queues[key].pop(0))
                     taken += 1
     return chosen
+
+
+def _zip_longest(*groups: list[tuple[str, str]]) -> list[tuple[tuple[str, str] | None, ...]]:
+    width = max((len(g) for g in groups), default=0)
+    return [tuple(g[i] if i < len(g) else None for g in groups) for i in range(width)]
 
 
 def compose(parent: Harness, picks: Sequence[Candidate]) -> Harness:

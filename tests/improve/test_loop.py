@@ -321,3 +321,20 @@ def test_an_archive_choice_inspires_the_proposer_but_never_changes_the_compariso
     assert "OLD IDEA: read refunds first." in chat.prompts() and "for ideas only" in chat.prompts()
     assert all(d["parent"] == SEED.version for d in store.decisions)
     assert all(d["context"]["archive"]["source"] == old.version for d in store.decisions)
+
+
+def test_the_shortlist_gives_every_kind_a_slot() -> None:
+    from ratchet.improve.loop import _shortlist, _Tried
+    from ratchet.improve.propose import Candidate
+
+    def cand(kind: str, cluster: str, n: int) -> _Tried:
+        c = Candidate(f"{kind}-{cluster}-{n}", kind, cluster, "v", SEED, {}, "")  # type: ignore[arg-type]
+        return _Tried(c, "champion", status="replay_passed" if kind == "guard" else "proposed")
+
+    tried = [cand("guard", "a", i) for i in range(4)] + [
+        cand("procedure", "a", 0),
+        cand("prompt_edit", "b", 0),
+    ]
+    picked = _shortlist(tried, [("champion", None, False, 3)])
+    assert sorted(t.candidate.kind for t in picked) == ["guard", "procedure", "prompt_edit"]
+    assert len(_shortlist(tried, [("champion", None, False, 6)])) == 6
