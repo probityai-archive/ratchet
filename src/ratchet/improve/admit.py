@@ -162,7 +162,8 @@ def check_fresh(
 
     protected = sorted(k for k, v in vectors.items() if v[0] is True or v[1] is True)
     broken_c1 = sorted(k for k in protected if vectors[k][2] is not True)
-    broken = sorted(k for k in protected if vectors[k][2] is not True or vectors[k][3] is not True)
+    broken_c2 = [k for k in protected if vectors[k][3] is not True] if confirm_eval is not None else []
+    broken = sorted(set(broken_c1) | set(broken_c2))
     discordant = sorted(k for k, v in vectors.items() if None not in v[:2] and v[0] != v[1])
     stable, stable_c1 = stable_in((2, 3)), stable_in((2,))
     initial_ok = same and not invalid and len(stable_c1) >= 2 and not broken_c1

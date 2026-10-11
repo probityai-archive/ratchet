@@ -161,6 +161,8 @@ def test_fresh_gate_needs_stable_recoveries_and_keeps_every_protected_case() -> 
         and "timeout-4" in f["protected"]
     )
     assert not check_fresh((pe, lucky), ce, c2).passed
+    # Before C2 runs, only C1 can break a protected case.
+    assert check_fresh((pe, pe), ce, None).evidence["protected_broken"] == []
     # A protected case failing in either candidate run fails the gate.
     assert not check_fresh((pe, pe), ce, flip(c2, "plain-6", False)).passed
     # A recovery must hold in both candidate runs.
