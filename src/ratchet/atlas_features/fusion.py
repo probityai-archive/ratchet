@@ -2,8 +2,8 @@
 
     uv run python -m ratchet.atlas_features.fusion
 
-Builds `fusion_probe` in `ratchet_probes` from the labelled set in `dataset.py`, runs the vector-only, the
-text-only, both fusion operators and a hand-built reciprocal-rank-fusion baseline over every query, and
+Builds `fusion_probe` in `ratchet_featureprobe` from the labelled set in `dataset.py`, runs the vector-only,
+the text-only, both fusion operators and a hand-built rank-fusion baseline over every query, and
 reports recall@3 (the gold document in the top 3) with the median latency of each.
 """
 
@@ -110,38 +110,46 @@ def rank_fusion_with(weights: dict[str, float]) -> Callable[[str, list[float]], 
 pipeline_rank_fusion = rank_fusion_with(WEIGHTS)
 
 
-def pipeline_score_fusion(text: str, vector: list[float]) -> Pipeline:
-    return [
-        {
-            "$scoreFusion": {
-                "input": {
-                    "pipelines": {"vec": vector_leg(vector), "txt": text_leg(text)},
-                    "normalization": "sigmoid",
-                },
-                "combination": {"weights": dict(WEIGHTS)},
-                "scoreDetails": False,
-            }
-        },
-        {"$limit": TOP_K},
-        project_id(),
-    ]
+def score_fusion_with(
+    weights: dict[str, float], normalization: str = "sigmoid"
+) -> Callable[[str, list[float]], Pipeline]:
+    def build(text: str, vector: list[float]) -> Pipeline:
+        return [
+            {
+                "$scoreFusion": {
+                    "input": {
+                        "pipelines": {"vec": vector_leg(vector), "txt": text_leg(text)},
+                        "normalization": normalization,
+                    },
+                    "combination": {"weights": dict(weights)},
+                    "scoreDetails": False,
+                }
+            },
+            {"$limit": TOP_K},
+            project_id(),
+        ]
+
+    return build
 
 
-def pipeline_manual_rrf(text: str, vector: list[float]) -> Pipeline:
-    """Reciprocal rank fusion built by hand with `$unionWith`, k=60: the portable fallback."""
+pipeline_score_fusion = score_fusion_with(WEIGHTS)
+
+
+def pipeline_manual_rank_fusion(text: str, vector: list[float]) -> Pipeline:
+    """Rank fusion by hand with `$unionWith`, the formula `$rankFusion` documents (weight / (60 + rank))."""
 
     def leg(pipeline: Pipeline) -> Pipeline:
         return [
             *pipeline,
             {"$group": {"_id": None, "docs": {"$push": "$_id"}}},
             {"$unwind": {"path": "$docs", "includeArrayIndex": "rank"}},
-            {"$project": {"_id": "$docs", "rrf": {"$divide": [1.0, {"$add": [60, "$rank", 1]}]}}},
+            {"$project": {"_id": "$docs", "fused": {"$divide": [1.0, {"$add": [60, "$rank", 1]}]}}},
         ]
 
     return [
         *leg(vector_leg(vector)),
         {"$unionWith": {"coll": COLLECTION, "pipeline": leg(text_leg(text))}},
-        {"$group": {"_id": "$_id", "score": {"$sum": "$rrf"}}},
+        {"$group": {"_id": "$_id", "score": {"$sum": "$fused"}}},
         {"$sort": {"score": -1}},
         {"$limit": TOP_K},
     ]
@@ -154,7 +162,9 @@ MODES: dict[str, Callable[[str, list[float]], Pipeline]] = {
     "rank_fusion_vec2": rank_fusion_with({"vec": 2.0, "txt": 1.0}),
     "rank_fusion_txt2": rank_fusion_with({"vec": 1.0, "txt": 2.0}),
     "score_fusion": pipeline_score_fusion,
-    "manual_rrf": pipeline_manual_rrf,
+    "score_fusion_vec2": score_fusion_with({"vec": 2.0, "txt": 1.0}),
+    "score_fusion_minmax_vec2": score_fusion_with({"vec": 2.0, "txt": 1.0}, "minMaxScaler"),
+    "manual_rank_fusion": pipeline_manual_rank_fusion,
 }
 
 
@@ -238,6 +248,32 @@ def run_mode(
     )
 
 
+def rank_fusion_sample(
+    coll: Collection[dict[str, Any]], vectors: dict[str, list[float]]
+) -> list[dict[str, Any]]:
+    """One `$rankFusion` result with `scoreDetails`, as the server returned it."""
+    q = QUERIES[0]
+    pipeline = pipeline_rank_fusion(q.text, vectors[q.id])
+    pipeline[0]["$rankFusion"]["scoreDetails"] = True
+    pipeline[-1] = {"$project": {"_id": 1, "details": {"$meta": "scoreDetails"}}}
+    return [dict(r) for r in coll.aggregate(pipeline)]
+
+
+def score_fusion_response(
+    coll: Collection[dict[str, Any]], vectors: dict[str, list[float]]
+) -> dict[str, Any]:
+    """The exact server answer to a minimal `$scoreFusion`: result ids, or code, codeName and errmsg."""
+    q = QUERIES[0]
+    try:
+        return {
+            "ok": True,
+            "ids": [str(r["_id"]) for r in coll.aggregate(pipeline_score_fusion(q.text, vectors[q.id]))],
+        }
+    except OperationFailure as exc:
+        d = exc.details or {}
+        return {"ok": False, "code": exc.code, "codeName": d.get("codeName"), "errmsg": d.get("errmsg")}
+
+
 def run() -> ProbeResult:
     client = connect()
     try:
@@ -255,6 +291,9 @@ def run() -> ProbeResult:
                     next(iter(coll.aggregate(MODES[mode](QUERIES[0].text, vectors[QUERIES[0].id]))), None)
             scores = [run_mode(coll, m, QUERIES, vectors) for m in MODES]
         data = {
+            "server_version": client.admin.command("buildInfo")["version"],
+            "rank_fusion_sample": rank_fusion_sample(coll, vectors),
+            "score_fusion_response": score_fusion_response(coll, vectors),
             "docs": len(DOCS),
             "queries": len(QUERIES),
             "index_wait_s": round(index_wait, 1),
@@ -278,7 +317,8 @@ def run() -> ProbeResult:
 def main() -> int:
     start = time.perf_counter()
     result = run()
-    path = result.save()
+    path = result.save(suffix=f"-{result.data['server_version']}")
+    result.save()
     took = time.perf_counter() - start
     print(f"{result.probe}: works={result.works} {result.summary} ({took:.1f}s) -> {path}")
     for s in result.data["scores"]:

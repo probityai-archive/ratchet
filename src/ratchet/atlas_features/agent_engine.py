@@ -1,10 +1,16 @@
-"""Probe 4: the Atlas Agent Engine Policy Engine as the platform-enforced "authority never grows" gate.
+"""Probe 4: the Atlas Agent Engine Policy Engine as a policy integration demonstration.
 
     uv run python -m ratchet.atlas_features.agent_engine
 
 A harness's `tool_allowlist` becomes a project `AUTHORIZED_TOOLS` policy. The platform merges it with the
 organization policy by intersection and rejects a project policy that is less restrictive than the
-organization's, so a candidate that widens authority is refused by MongoDB, not only by Ratchet.
+organization's, so MongoDB itself refuses a widening past the organization.
+
+Scope of the claim: the platform enforces policies on executions that run on its Orchestration Engine.
+Ratchet's worker runs outside it, so this proves the platform refuses a widening and mirrors an admitted
+allowlist; it does not enforce Ratchet's own worker. The probe also tests temporal monotonicity: whether a
+revision of a project policy must be stricter than its predecessor, which is a different rule from
+stricter-than-organization.
 
 The gateway accepts only a bearer token: a service account access token (`ae_sa_id_...` / `ae_sa_sk_...`
 exchanged at `/api/v1/oauth/token`) or a user session token. Neither can be minted from the Atlas Admin API
@@ -95,6 +101,15 @@ class AgentEngine:
     def delete_policy(self, scope: str, scope_id: str, policy_id: str) -> Any:
         return self._call("DELETE", f"/api/v1/{scope}/{scope_id}/policies/{policy_id}")
 
+    def mcp(self, project_id: str, method: str, params: dict[str, Any] | None = None) -> Any:
+        """One JSON-RPC message to the project's memory tool server (`POST /api/v1/projects/{id}/mcp`)."""
+        body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
+        return self._call("POST", f"/api/v1/projects/{project_id}/mcp", body)
+
+    def memory_search(self, project_id: str, body: dict[str, Any]) -> Any:
+        """Search by `type` (semantic, episodic, procedural, taxonomic); needs `user_id` and `query`."""
+        return self._call("POST", f"/api/v1/projects/{project_id}/memory/search", body)
+
     def preview_org_allowlist(self, org_id: str, tools: Iterable[str]) -> Any:
         body = {"type": AUTHORIZED_TOOLS, "string_list": sorted(set(tools))}
         return self._call("POST", f"/api/v1/organizations/{org_id}/policies/preview", body)
@@ -135,7 +150,89 @@ def prove_authority_cannot_grow(
         steps["widen_status"] = exc.status
         steps["widen_body"] = exc.body
     steps["effective_after_widen_attempt"] = engine.effective(project_id)
+    steps.update(probe_revision_monotonicity(engine, project_id, org_tools, harness_tools))
     return steps
+
+
+def probe_revision_monotonicity(
+    engine: AgentEngine, project_id: str, org_tools: list[str], harness_tools: list[str]
+) -> dict[str, Any]:
+    """Revise the project policy to a superset that is still inside the org list, then back.
+
+    Accepted means the platform checks a revision only against the organization, not against the previous
+    revision, so Ratchet's own parent-to-candidate subset check is the only temporal guard.
+    """
+    wider_within_org = sorted(set(org_tools))
+    out: dict[str, Any] = {"revision_attempt": wider_within_org, "prior_revision": sorted(set(harness_tools))}
+    try:
+        install_tool_allowlist(engine, project_id, wider_within_org)
+        out["revision_wider_within_org_accepted"] = True
+    except AgentEngineError as exc:
+        out["revision_wider_within_org_accepted"] = False
+        out["revision_status"] = exc.status
+        out["revision_body"] = exc.body
+    install_tool_allowlist(engine, project_id, harness_tools)
+    return out
+
+
+_WRITE_HINTS = ("save", "write", "store", "create", "add", "put", "upsert")
+
+
+def procedure_write_tool(tools: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The memory tool whose name says it writes a procedure, found from `tools/list`, or None."""
+    for tool in tools:
+        name = str(tool.get("name", "")).lower()
+        if "procedur" in name and any(h in name for h in _WRITE_HINTS):
+            return tool
+    return None
+
+
+def procedure_arguments(
+    tool: dict[str, Any], procedure: dict[str, Any], user_id: str, session_id: str
+) -> dict[str, Any]:
+    """Fill a tool's input schema from a procedure by property name; ids come from the explicit identity."""
+    values = {
+        "name": procedure["name"],
+        "title": procedure["name"],
+        "description": procedure["when"],
+        "when": procedure["when"],
+        "trigger": procedure["when"],
+        "steps": procedure["steps"],
+        "content": "\n".join(procedure["steps"]),
+        "user_id": user_id,
+        "session_id": session_id,
+        "metadata": procedure.get("metadata", {}),
+    }
+    props = dict(tool.get("inputSchema", {}).get("properties", {}))
+    return {k: values[k] for k in props if k in values}
+
+
+def procedural_roundtrip(
+    engine: AgentEngine, project_id: str, procedure: dict[str, Any], user_id: str, session_id: str
+) -> dict[str, Any]:
+    """Write one admitted procedure through the memory tool server, then read it back by search."""
+    listed = engine.mcp(project_id, "tools/list")
+    tools = list(listed.get("result", {}).get("tools", []))
+    tool = procedure_write_tool(tools)
+    out: dict[str, Any] = {"tools": [t.get("name") for t in tools]}
+    if tool is None:
+        out["write"] = "no procedure-writing tool in tools/list"
+        return out
+    args = procedure_arguments(tool, procedure, user_id, session_id)
+    out["write_tool"] = tool["name"]
+    out["write_arguments"] = args
+    out["write_response"] = engine.mcp(project_id, "tools/call", {"name": tool["name"], "arguments": args})
+    out["search_response"] = engine.memory_search(
+        project_id,
+        {
+            "type": "procedural",
+            "query": procedure["when"],
+            "user_id": user_id,
+            "session_id": session_id,
+            "top_k": 5,
+        },
+    )
+    return out
 
 
 def configured_engine() -> AgentEngine | None:
@@ -161,6 +258,12 @@ def gateway_evidence() -> dict[str, Any]:
         out["POST /api/v1/oauth/token (no client)"] = {"status": resp.status_code, "body": resp.text[:200]}
     return out
 
+
+PROBE_PROCEDURE: dict[str, Any] = {
+    "name": "verify_refund_before_retry",
+    "when": "a refund call times out or its reply is lost",
+    "steps": ["read the provider ledger for the charge", "retry only if no refund is recorded"],
+}
 
 BLOCKER = (
     "No Agent Engine credential. The gateway accepts only a bearer token: a service account access token "
@@ -201,6 +304,12 @@ def run() -> ProbeResult:
             )
         harness = org_tools[:-1] or org_tools
         steps = prove_authority_cannot_grow(engine, project_id, org_tools, harness)
+        try:
+            steps["procedural_memory"] = procedural_roundtrip(
+                engine, project_id, PROBE_PROCEDURE, "ratchet-probe", "ratchet-probe-session"
+            )
+        except AgentEngineError as exc:
+            steps["procedural_memory"] = {"error": str(exc)}
         return ProbeResult(
             probe="agent_engine_policy",
             works=bool(steps["widen_refused"]),

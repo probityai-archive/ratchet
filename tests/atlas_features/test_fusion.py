@@ -1,4 +1,4 @@
-"""Fusion probe: pipeline shapes and dataset integrity (unit), and the live operators (integration)."""
+"""Fusion probe: pipeline shapes and dataset integrity (unit), and the live operators (sandbox)."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def test_score_fusion_pipeline_normalizes_scores() -> None:
     assert set(stage["input"]["pipelines"]) == {"vec", "txt"}
 
 
-@pytest.mark.integration
+@pytest.mark.sandbox
 def test_rank_fusion_runs_on_the_sandbox_and_finds_gold(sandbox_db: Database[dict[str, Any]]) -> None:
     coll = sandbox_db[fusion.COLLECTION]
     with embedder(sandbox_db) as emb:
@@ -50,14 +50,22 @@ def test_rank_fusion_runs_on_the_sandbox_and_finds_gold(sandbox_db: Database[dic
     assert score.family_hit_at_3 >= 0.95
 
 
-@pytest.mark.integration
-def test_score_fusion_is_either_supported_or_refused_with_the_known_error(
-    sandbox_db: Database[dict[str, Any]],
-) -> None:
-    """On MongoDB 8.0.34 the stage does not exist (code 40324). A newer server must pass the same check."""
+@pytest.mark.sandbox
+def test_score_fusion_matches_the_server_version(sandbox_db: Database[dict[str, Any]]) -> None:
+    """Documented to need 8.3 or later: code 40324 before that, a working stage with good recall after."""
     coll = sandbox_db[fusion.COLLECTION]
-    pipeline = fusion.pipeline_score_fusion("refund timeout", [0.0] * EMBEDDING_DIMS)
+    version = tuple(int(p) for p in sandbox_db.client.admin.command("buildInfo")["version"].split(".")[:2])
+    unit = [1.0] + [0.0] * (EMBEDDING_DIMS - 1)
     try:
-        list(coll.aggregate(pipeline))
+        list(coll.aggregate(fusion.pipeline_score_fusion("refund timeout", unit)))
     except OperationFailure as exc:
-        assert exc.code == 40324, f"unexpected failure: {exc.code} {exc}"
+        assert version < (8, 3), f"$scoreFusion failed on a server that should support it: {exc.code}"
+        assert exc.code == 40324
+        return
+    assert version >= (8, 3), "$scoreFusion ran on a server older than 8.3"
+    with embedder(sandbox_db) as emb:
+        qvecs = emb.embed([q.text for q in QUERIES], "query")
+    vectors = dict(zip([q.id for q in QUERIES], qvecs, strict=True))
+    score = fusion.run_mode(coll, "score_fusion", QUERIES, vectors)
+    assert score.ok, score.error
+    assert score.recall_at_3 >= 0.85

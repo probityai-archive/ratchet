@@ -1,7 +1,8 @@
 """Shared plumbing for the Atlas probes: connection, secrets, Voyage embeddings, timing, result records.
 
 Secrets come from the environment or the system keyring and are never printed, logged or stored in a result.
-Every probe works in the `ratchet_probes` database so it never collides with the store lane.
+Every probe works in the `ratchet_featureprobe` database. The name matches no `ratchet_probe*` cleanup pattern
+the store lane uses (a cleanup of `ratchet_probes` once emptied this lane's data).
 """
 
 from __future__ import annotations
@@ -23,14 +24,14 @@ from pymongo.database import Database
 
 from ratchet.store.embed import CachedEmbedder, Embedder, VoyageEmbedder
 
-PROBE_DB = "ratchet_probes"
+PROBE_DB = "ratchet_featureprobe"
 GROUP_ID = "6acbd00b1b25c55279b6511b"
 CLUSTER = "Cluster0"
 ATLAS_API = "https://cloud.mongodb.com/api/atlas/v2"
 ATLAS_ACCEPT = "application/vnd.atlas.2024-08-05+json"
 ROOT = Path(__file__).resolve().parents[3]
 RESULTS_DIR = ROOT / "research" / "_raw" / "atlas-probes" / "results"
-FAST_FAIL_MS = 2000
+FAST_FAIL_MS = 5000  # measured: first connect to the sandbox takes 1.6 s, and a 2 s limit failed once
 
 
 class ProbeUnavailableError(RuntimeError):
@@ -146,9 +147,10 @@ class ProbeResult:
     data: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
 
-    def save(self, directory: Path = RESULTS_DIR) -> Path:
+    def save(self, directory: Path = RESULTS_DIR, suffix: str = "") -> Path:
+        """Write the result as JSON; `suffix` keeps one file per server version, for example `-9.0.4`."""
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{self.probe}.json"
+        path = directory / f"{self.probe}{suffix}.json"
         path.write_text(json.dumps(asdict(self), indent=2, default=str, sort_keys=True) + "\n")
         return path
 

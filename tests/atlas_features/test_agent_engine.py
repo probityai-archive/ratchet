@@ -121,3 +121,29 @@ def test_run_without_credentials_records_the_exact_blocker(monkeypatch: pytest.M
     assert result.error is not None
     assert "PROJECT_OWNER" in result.error
     assert result.pipeline["project_policy_body"]["type"] == "AUTHORIZED_TOOLS"
+
+
+def test_revision_within_org_is_recorded_and_the_harness_list_is_restored() -> None:
+    gw = FakeGateway(["a", "b", "c"])
+    steps = ae.prove_authority_cannot_grow(engine_for(gw), "p1", ["a", "b", "c"], ["a", "b"])
+    assert steps["revision_wider_within_org_accepted"] is True
+    assert gw.project["pol1"]["string_list"] == ["a", "b"]
+
+
+def test_procedure_write_tool_is_found_by_name_and_arguments_follow_the_schema() -> None:
+    tools: list[dict[str, Any]] = [
+        {"name": "search_semantic"},
+        {
+            "name": "save_procedure",
+            "inputSchema": {"properties": {"name": {}, "steps": {}, "user_id": {}, "unrelated": {}}},
+        },
+    ]
+    tool = ae.procedure_write_tool(tools)
+    assert tool is not None
+    args = ae.procedure_arguments(tool, ae.PROBE_PROCEDURE, "u1", "s1")
+    assert args == {
+        "name": "verify_refund_before_retry",
+        "steps": ae.PROBE_PROCEDURE["steps"],
+        "user_id": "u1",
+    }
+    assert ae.procedure_write_tool([{"name": "search_semantic"}]) is None

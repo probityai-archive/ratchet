@@ -13,13 +13,23 @@ from ratchet.atlas_features.common import ProbeUnavailableError, connect, probe_
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line("markers", "integration: needs the hackathon Atlas sandbox")
+    config.addinivalue_line(
+        "markers", "sandbox: runs against the hackathon Atlas cluster; opt in with -m sandbox"
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Sandbox tests need live secrets: they run only on request (`-m sandbox`), never error otherwise."""
+    selected = config.getoption("-m") or ""
+    opted_out = [i for i in items if "sandbox" in i.keywords and "sandbox" not in selected]
+    config.hook.pytest_deselected(items=opted_out)
+    items[:] = [i for i in items if i not in opted_out]
 
 
 @pytest.fixture(scope="session")
 def sandbox_client() -> Iterator[MongoClient[dict[str, Any]]]:
     try:
-        client = connect(timeout_ms=2000)
+        client = connect()
     except ProbeUnavailableError as exc:
         pytest.fail(f"Atlas sandbox is required for this test: {exc}")
     yield client
