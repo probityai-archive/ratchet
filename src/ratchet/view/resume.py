@@ -11,7 +11,7 @@ This module reads the checkpoint and the finished trace and says so in plain wor
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,7 +20,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from ratchet.types import Trace
+from ratchet.types import ToolCall, Trace
+from ratchet.world import AGENT, World
 
 READ_MARKS = ("_get", "_list")
 
@@ -33,7 +34,8 @@ class Effect:
     name: str
     args: dict[str, Any]
     reads: bool
-    outcome: str  # "ok", "reply lost (timeout)" or the tool's error
+    outcome: str  # "ok", "reply lost (timeout)", "timed out, not committed" or the tool's error
+    committed: bool | None = None  # what the system's audit log shows; None when it could not be checked
 
     @property
     def committed_but_unconfirmed(self) -> bool:
@@ -64,7 +66,13 @@ class ResumeReport:
 
     @property
     def carried_writes(self) -> list[Effect]:
-        return [e for e in self.carried if not e.reads]
+        """State-changing calls that were committed, or whose commit could not be checked."""
+        return [e for e in self.carried if not e.reads and e.committed is not False]
+
+    @property
+    def uncommitted(self) -> list[Effect]:
+        """Writes the audit log shows changed nothing (a timeout before commit, or a refused call)."""
+        return [e for e in self.carried if not e.reads and e.committed is False]
 
 
 def _is_read(name: str) -> bool:
@@ -83,18 +91,56 @@ def _result_of(events: Sequence[Mapping[str, Any]], call_id: str) -> str:
     return "no result recorded"
 
 
-def carried_effects(saved: Mapping[str, Any]) -> list[Effect]:
+def audit_commits(
+    saved: Mapping[str, Any], fresh_world: Callable[[], World], actor: str = AGENT
+) -> dict[str, bool] | None:
+    """For each executed call, whether the system's audit log shows the call changed anything.
+
+    The executed calls are re-applied, in order, to a fresh copy of the company; a call committed when the
+    audit log of some system gained an entry by the agent while it ran. A timeout is not evidence either
+    way: only the audit log is. None when the rebuilt world does not match the checkpoint's world digest,
+    since then the rebuilt ledger proves nothing about the run that was interrupted."""
+    world = fresh_world()
+    found: dict[str, bool] = {}
+    for raw in saved.get("executed") or []:
+        before = _agent_entries(world, actor)
+        world.call(ToolCall(str(raw["name"]), dict(raw.get("args") or {}), str(raw["call_id"])))
+        found[str(raw["call_id"])] = _agent_entries(world, actor) > before
+    return found if world.digest() == saved.get("world_digest") else None
+
+
+def _agent_entries(world: World, actor: str) -> int:
+    audit = world.view().to_json()["audit"]
+    return sum(1 for system, log in audit.items() if system != "world" for e in log if e["actor"] == actor)
+
+
+def _outcome(raw: str, reads: bool, committed: bool | None) -> str:
+    if raw != "reply lost (timeout)" or reads:
+        return raw
+    if committed is None:
+        return "timeout, commit not checked"
+    return "reply lost (timeout)" if committed else "timed out, not committed"
+
+
+def carried_effects(saved: Mapping[str, Any], commits: Mapping[str, bool] | None = None) -> list[Effect]:
+    """The calls the run had executed. `commits` (from `audit_commits`) decides what a timeout means."""
     events = saved.get("events") or []
-    return [
-        Effect(
-            str(c.get("call_id")),
-            str(c.get("name")),
-            dict(c.get("args") or {}),
-            _is_read(str(c.get("name"))),
-            _result_of(events, str(c.get("call_id"))),
+    out = []
+    for c in saved.get("executed") or []:
+        call_id, name = str(c.get("call_id")), str(c.get("name"))
+        reads = _is_read(name)
+        committed = None if commits is None else commits.get(call_id)
+        out.append(
+            Effect(
+                call_id,
+                name,
+                dict(c.get("args") or {}),
+                reads,
+                _outcome(_result_of(events, call_id), reads, committed),
+                committed,
+            )
         )
-        for c in saved.get("executed") or []
-    ]
+    return out
 
 
 def _calls(trace: Trace, after_seq: int) -> list[tuple[str, str, dict[str, Any]]]:
@@ -132,8 +178,10 @@ def canon(args: Mapping[str, Any]) -> str:
     return json.dumps(args, sort_keys=True, separators=(",", ":"), default=str)
 
 
-def build_report(saved: Mapping[str, Any], trace: Trace | None = None) -> ResumeReport:
-    carried = carried_effects(saved)
+def build_report(
+    saved: Mapping[str, Any], trace: Trace | None = None, commits: Mapping[str, bool] | None = None
+) -> ResumeReport:
+    carried = carried_effects(saved, commits)
     after = len(saved.get("events") or [])
     return ResumeReport(
         run_id=str(saved.get("run_id")),
@@ -182,7 +230,7 @@ def after(report: ResumeReport) -> RenderableType:
     writes = report.carried_writes
     again = {r.effect.call_id: r for r in report.reissued}
     lines: list[RenderableType] = []
-    if not writes:
+    if not writes and not report.uncommitted:
         lines.append(Text("The run had committed no state-changing call before it stopped.", style="dim"))
     for e in writes:
         r = again.get(e.call_id)
@@ -206,6 +254,17 @@ def after(report: ResumeReport) -> RenderableType:
                     (f"  the model asked for it again {how}: {r.outcome}", "red" if r.executed else "yellow"),
                 )
             )
+    retried = {r.effect.call_id: r for r in report.reissued}
+    for e in report.uncommitted:
+        r = retried.get(e.call_id)
+        tail = "it has not been retried" if r is None else f"the model retried it: {r.outcome}"
+        lines.append(
+            Text.assemble(
+                ("  NOT COMMITTED  ", "bold black on cyan"),
+                f"  {e.name}({_args_text(e.args)})",
+                (f"  {e.outcome}; the audit log shows no change, so a retry is not a repeat; {tail}", "cyan"),
+            )
+        )
     verdict = (
         Text("")
         if report.passed is None

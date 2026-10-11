@@ -12,7 +12,7 @@ import base64
 import os
 import sys
 import traceback
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -75,6 +75,7 @@ class Backend(Protocol):
     def cases(self, split: str, family: str | None, ids: Sequence[str]) -> list[Any]: ...
     def case_info(self, case_id: str) -> CaseInfo | None: ...
     def get_case(self, case_id: str) -> Any: ...
+    def committed_calls(self, case: Any, saved: Mapping[str, Any]) -> dict[str, bool] | None: ...
     def resume_case(
         self, harness: Harness, case: Any, model: Any, store: WriteStore, run_id: str
     ) -> Trace: ...
@@ -151,6 +152,11 @@ class LiveBackend:
             return get(case_id)
         except KeyError as exc:
             raise CliError(f"unknown case {case_id!r}") from exc
+
+    def committed_calls(self, case: Any, saved: Mapping[str, Any]) -> dict[str, bool] | None:
+        from ratchet.world import World
+
+        return resume_view.audit_commits(saved, lambda: World.from_case(case))
 
     def resume_case(self, harness: Harness, case: Any, model: Any, store: WriteStore, run_id: str) -> Trace:
         from ratchet.agent.worker import run_case
@@ -324,11 +330,12 @@ def cmd_resume(args: argparse.Namespace, backend: Backend, console: Console) -> 
         if harness.version != version:
             raise CliError(f"the harness {version} of this run is not in the store")
         case = backend.get_case(str(saved["case_id"]))
-        console.print(resume_view.before(resume_view.build_report(saved)))
+        commits = backend.committed_calls(case, saved)
+        console.print(resume_view.before(resume_view.build_report(saved, commits=commits)))
         trace = backend.resume_case(harness, case, backend.model(), store, args.run_id)
         store.put_trace(trace)
         console.print()
-        console.print(resume_view.after(resume_view.build_report(saved, trace)))
+        console.print(resume_view.after(resume_view.build_report(saved, trace, commits)))
     return 0
 
 

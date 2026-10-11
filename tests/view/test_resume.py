@@ -17,6 +17,9 @@ def render(obj: object) -> str:
     return " ".join(c.export_text().replace("│", " ").split())
 
 
+ALL = {"w1": True, "w2": True, "w3": True}
+
+
 def saved(**over: Any) -> dict[str, Any]:
     ok = {"result": {"call_id": "r1", "ok": True, "data": {}}}
     lost = {"result": {"call_id": "w1", "ok": False, "error": "timeout"}}
@@ -36,7 +39,7 @@ def saved(**over: Any) -> dict[str, Any]:
 
 
 def test_carried_effects_classify_reads_writes_and_lost_replies() -> None:
-    effects = resume.carried_effects(saved())
+    effects = resume.carried_effects(saved(), {"w1": True})
     assert [e.reads for e in effects] == [True, False, False, False]
     assert [e.outcome for e in effects] == [
         "ok",
@@ -75,12 +78,12 @@ def test_a_blocked_reissue_is_reported_as_blocked() -> None:
 
 def test_reports_before_and_after() -> None:
     s = saved(pending=[{"name": "tickets_set_status", "args": {}, "call_id": "p"}])
-    before = render(resume.before(resume.build_report(s)))
+    before = render(resume.before(resume.build_report(s, commits=ALL)))
     assert "RESUMING" in before
     assert "reply lost (timeout)" in before
     assert "asked for but not yet run when it stopped: tickets_set_status" in before
     trace = make_trace("run-1", "c", False, [("tickets_get", {})], reasons=["no mail sent"])
-    after = render(resume.after(resume.build_report(s, trace)))
+    after = render(resume.after(resume.build_report(s, trace, ALL)))
     assert after.count("NOT REPEATED") == 3
     assert "case graded FAIL no mail sent" in after
 
@@ -89,3 +92,69 @@ def test_a_run_that_had_committed_nothing() -> None:
     s = saved(executed=[{"name": "tickets_get", "args": {}, "call_id": "r1"}])
     assert "committed no state-changing call" in render(resume.after(resume.build_report(s)))
     assert resume.build_report(s).passed is None
+
+
+def lost_reply_checkpoint(case_id: str) -> tuple[Any, dict[str, Any]]:
+    """A checkpoint built as the worker builds one: the calls run on a real world, its digest recorded."""
+    from ratchet.cases import get
+    from ratchet.types import ToolCall
+    from ratchet.world import World
+
+    case = get(case_id)
+    world = World.from_case(case)
+    charge = "ch_3MoK8" if case_id.endswith("v1") else "ch_7LbQ2"
+    calls = [
+        ToolCall("tickets_get", {"ticket_id": case.ticket_id}, "a0"),
+        ToolCall(
+            "payments_refund",
+            {"charge_id": charge, "amount_cents": 100, "idempotency_key": "k", "reason": "r"},
+            "b0",
+        ),
+    ]
+    results = [world.call(c) for c in calls]
+    events = [
+        {"kind": "tool_result", "payload": {"result": {"call_id": r.call_id, "ok": r.ok, "error": r.error}}}
+        for r in results
+    ]
+    saved = {"run_id": "r", "case_id": case_id, "harness_version": "h", "events": events, "pending": [],
+             "executed": [{"name": c.name, "args": c.args, "call_id": c.call_id} for c in calls],
+             "world_digest": world.digest()}  # fmt: skip
+    return case, saved
+
+
+def test_the_audit_log_decides_whether_a_timeout_committed() -> None:
+    from ratchet.world import World
+
+    case, committed = lost_reply_checkpoint("refund_lost_reply.v1")
+    commits = resume.audit_commits(committed, lambda: World.from_case(case))
+    assert commits == {"a0": False, "b0": True}
+    (read, refund) = resume.carried_effects(committed, commits)
+    assert refund.outcome == "reply lost (timeout)"
+    assert refund.committed is True
+    assert refund.committed_but_unconfirmed
+    assert read.outcome == "ok"
+
+    case, uncommitted = lost_reply_checkpoint("refund_lost_reply.v2")
+    commits = resume.audit_commits(uncommitted, lambda: World.from_case(case))
+    assert commits == {"a0": False, "b0": False}
+    (_, refund) = resume.carried_effects(uncommitted, commits)
+    assert refund.outcome == "timed out, not committed"
+    assert refund.committed is False
+    assert not refund.committed_but_unconfirmed
+    report = resume.build_report(uncommitted, commits=commits)
+    assert report.uncommitted == [refund]
+    assert report.carried_writes == []
+    assert "committed no state-changing call" not in render(resume.after(report))
+    assert "NOT COMMITTED" in render(resume.after(report))
+
+
+def test_a_world_that_does_not_match_the_checkpoint_proves_nothing() -> None:
+    from ratchet.world import World
+
+    case, saved = lost_reply_checkpoint("refund_lost_reply.v1")
+    saved["world_digest"] = "0" * 64
+    assert resume.audit_commits(saved, lambda: World.from_case(case)) is None
+    (_, refund) = resume.carried_effects(saved, None)
+    assert refund.outcome == "timeout, commit not checked"
+    assert refund.committed is None
+    assert refund in resume.build_report(saved).carried_writes

@@ -78,6 +78,9 @@ class FakeBackend:
     def get_case(self, case_id: str) -> Any:
         return SimpleNamespace(id=case_id)
 
+    def committed_calls(self, case: Any, saved: Any) -> dict[str, bool] | None:
+        return {"c1": True}
+
     def resume_case(self, harness: Harness, case: Any, model: Any, store: Any, run_id: str) -> Any:
         self.resumed = (harness.version, case.id, run_id)
         return make_trace(
