@@ -4,7 +4,8 @@ import pytest
 
 from ratchet.types import ToolCall
 from ratchet.world import Fault, StateView, World
-from tests.world.helpers import Caller, company, world
+
+from .helpers import Caller, company, world
 
 
 def test_tools_are_openai_function_schemas() -> None:
