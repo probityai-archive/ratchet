@@ -306,6 +306,7 @@ def test_evolve_with_nothing_to_fix_freezes_the_seed(
     assert result["active"] == frozen["harness"]["version"] and result["frozen_decision"] is None
     config = json.loads((root / "config.json").read_text(encoding="utf-8"))
     assert (config["train"], config["heldout"]) == (1, 1)
+    assert (root / "signer.pub").read_bytes().startswith(b"-----BEGIN PUBLIC KEY-----")
     assert len(list((root / "simulations").glob("*.json"))) >= 2
     assert cli.load_harness(str(root / "frozen.json"), "airline").version == frozen["harness"]["version"]
     with pytest.raises(SystemExit, match="already has a run"):

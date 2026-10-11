@@ -24,6 +24,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from cryptography.hazmat.primitives import serialization
+
 import ratchet.bench.tau2  # noqa: F401  # sets TAU2_DATA_DIR before tau2-bench is imported
 from ratchet.agent.guards import GuardRuntime
 from ratchet.bench.tau.store import JsonlStore
@@ -106,6 +108,11 @@ def run_evolve(
     log: Log,
 ) -> dict[str, Any]:
     store = JsonlStore(root)
+    # The public half of the key that signs this run's decisions, so its receipts verify on their own.
+    pem = signer.public_key.public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    (root / "signer.pub").write_bytes(pem)
     recording = RecordingRunner(runner, store, RunWriter(root), log)
     activator = MemoryActivator(store.decision)
     started = time.perf_counter()
