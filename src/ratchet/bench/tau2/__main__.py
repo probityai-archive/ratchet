@@ -53,6 +53,7 @@ from ratchet.bench.tau2.results import (
 from ratchet.bench.tau2.runner import (
     MAX_ERRORS,
     MAX_STEPS,
+    EndpointPool,
     Tau2Runner,
     configure_user_endpoint,
     litellm_model,
@@ -178,7 +179,7 @@ class TraceSink:
 
 
 def run_unit(
-    runner: Tau2Runner, harness: Harness, unit: Tau2Case, model: Any, writer: RunWriter
+    runner: Tau2Runner | EndpointPool, harness: Harness, unit: Tau2Case, model: Any, writer: RunWriter
 ) -> tuple[dict[str, Any], Trace | None]:
     """One trial unit under the predeclared retry rule: a conversation lost to the model endpoint (an
     exception, or a run cut by a model error) is re-run at most `INFRA_RETRIES` times; a completed one,
@@ -209,7 +210,7 @@ def run_unit(
         )
         if not lost:
             break
-    sim = runner.simulations.pop(trace.run_id, None) if trace is not None else None
+    sim = runner.pop_simulation(trace.run_id) if trace is not None else None
     lost = trace is None or is_infra_failure(trace)
     if sim is not None and not lost:
         writer.put_simulation(sim)
@@ -232,6 +233,30 @@ def run_unit(
         "cost": asdict(trace.outcome.cost) if trace is not None else None,
     }
     return row, trace
+
+
+def endpoints(
+    tconfig: Any,
+    base_urls: str,
+    agent_model: str,
+    api_key: str,
+    temperature: float | None,
+    *,
+    own_user_endpoint: bool = False,
+) -> tuple[Tau2Runner | EndpointPool, list[ModelClient]]:
+    """One runner and agent client per endpoint in the comma-separated `base_urls` (all serving one model);
+    several endpoints are pooled so each conversation goes whole to the least busy one. The user simulator
+    of a pooled conversation calls that conversation's endpoint, unless it has an endpoint of its own
+    (`own_user_endpoint`, set by --user-base-url), which every conversation then shares."""
+    urls = [u.strip() for u in base_urls.split(",") if u.strip()]
+    models = [
+        ModelClient(ModelConfig(base_url=u, model=agent_model, api_key=api_key, temperature=temperature))
+        for u in urls
+    ]
+    if len(urls) == 1:
+        return Tau2Runner(tconfig), models
+    users = [None] * len(urls) if own_user_endpoint else urls
+    return EndpointPool([Tau2Runner(tconfig, user_api_base=u) for u in users], list(models)), models
 
 
 def _run_dir(args: argparse.Namespace, harness: Harness) -> Path:
@@ -295,7 +320,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not (root / "config.json").exists():
         (root / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
         (root / "harness.json").write_text(json.dumps(asdict(harness), indent=2), encoding="utf-8")
-    configure_user_endpoint(user_url, api_key)
+    configure_user_endpoint(user_url.split(",")[0].strip(), api_key)
     set_judge(judge)
     tconfig = run_config(
         args.domain,
@@ -305,11 +330,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         trials=args.trials,
         seed=args.seed,
     )
-    runner = Tau2Runner(tconfig)
-    todo = [u for u in units if (u.id, u.trial) not in done_units]
-    model = ModelClient(
-        ModelConfig(base_url=base_url, model=args.agent_model, api_key=api_key, temperature=args.temperature)
+    runner, models = endpoints(
+        tconfig,
+        base_url,
+        args.agent_model,
+        api_key,
+        args.temperature,
+        own_user_endpoint=bool(args.user_base_url),
     )
+    model = models[0]
+    todo = [u for u in units if (u.id, u.trial) not in done_units]
     sink = None
     uri = os.environ.get("RATCHET_MONGODB_URI")
     if uri and args.trace_db:
@@ -333,7 +363,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
         list(pool.map(one, todo))
-    model.close()
+    for m in models:
+        m.close()
     if sink is not None:
         _log(f"stored {sink.written} traces in {args.trace_db}.tau2_traces")
         sink.close()
@@ -409,13 +440,19 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
     (root / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
-    configure_user_endpoint(user_url, api_key)
+    configure_user_endpoint(user_url.split(",")[0].strip(), api_key)
     set_judge(judge)
     tconfig = run_config(args.domain, agent_model=args.agent_model, user_model=args.user_model,
                          temperature=args.temperature)  # fmt: skip
-    model = ModelClient(
-        ModelConfig(base_url=base_url, model=args.agent_model, api_key=api_key, temperature=args.temperature)
+    runner, models = endpoints(
+        tconfig,
+        base_url,
+        args.agent_model,
+        api_key,
+        args.temperature,
+        own_user_endpoint=bool(args.user_base_url),
     )
+    model = models[0]
     improver_key = os.environ.get("RATCHET_IMPROVER_API_KEY", api_key)
     improver = ModelClient(
         ModelConfig(
@@ -433,7 +470,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     out = run_evolve(
         root,
         cases=cases,
-        runner=Tau2Runner(tconfig),
+        runner=runner,
         model=model,
         improver=improver,
         seed=seed_harness(args.domain),

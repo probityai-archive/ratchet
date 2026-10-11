@@ -307,3 +307,25 @@ def test_evolve_with_nothing_to_fix_freezes_the_seed(
     assert cli.load_harness(str(root / "frozen.json"), "airline").version == frozen["harness"]["version"]
     with pytest.raises(SystemExit, match="already has a run"):
         cli.main(args)
+
+
+def test_a_run_over_several_endpoints_records_each_and_finishes(
+    monkeypatch: pytest.MonkeyPatch, scripted: SayDone, tmp_path: Path
+) -> None:
+    users: list[Any] = []
+
+    def factory(cfg: Any, t: Any, seed: int | None, sim_id: str) -> Any:
+        orch = fresh_factory()(cfg, t, seed, sim_id)
+        orch.user.llm_args = {}
+        users.append(orch.user)
+        return orch
+
+    monkeypatch.setattr(cli, "Tau2Runner", lambda cfg, **kw: Tau2Runner(cfg, factory=factory, **kw))
+    root = _run(tmp_path, "--base-url", "http://a/v1,http://b/v1")
+    config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+    assert config["agent_base_url"] == config["user_base_url"] == "http://a/v1,http://b/v1"
+    assert len(read_jsonl(root / "runs.jsonl")) == 4 and summarize_run(root)["simulations"] == 4
+    assert {u.llm_args["api_base"] for u in users} <= {"http://a/v1", "http://b/v1"} and len(users) == 4
+    users.clear()
+    _run(tmp_path / "own", "--base-url", "http://a/v1,http://b/v1", "--user-base-url", "http://u/v1")
+    assert len(users) == 4 and all(u.llm_args == {} for u in users)

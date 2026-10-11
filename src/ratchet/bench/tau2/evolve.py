@@ -28,7 +28,7 @@ import ratchet.bench.tau2  # noqa: F401  # sets TAU2_DATA_DIR before tau2-bench 
 from ratchet.agent.guards import GuardRuntime
 from ratchet.bench.tau.store import JsonlStore
 from ratchet.bench.tau2.results import RunWriter
-from ratchet.bench.tau2.runner import Tau2Runner
+from ratchet.bench.tau2.runner import EndpointPool, Tau2Runner
 from ratchet.bench.tau2.tasks import Tau2Case
 from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.loop import Lab, evolve
@@ -43,7 +43,9 @@ Log = Callable[[str], None]
 class RecordingRunner:
     """A `RunCase` that keeps every conversation: the trace in the store, the simulation on disk."""
 
-    def __init__(self, runner: Tau2Runner, store: JsonlStore, writer: RunWriter, log: Log) -> None:
+    def __init__(
+        self, runner: Tau2Runner | EndpointPool, store: JsonlStore, writer: RunWriter, log: Log
+    ) -> None:
         self.runner, self.store, self.writer, self.log = runner, store, writer, log
         self.done = 0
         self._lock = threading.Lock()
@@ -55,7 +57,7 @@ class RecordingRunner:
             self._tick(f"{harness.version} {case.id} ERROR {type(exc).__name__}: {str(exc)[:200]}")
             raise
         self.store.put_trace(trace)
-        sim = self.runner.simulations.pop(run_id, None)
+        sim = self.runner.pop_simulation(run_id)
         if sim is not None:
             self.writer.put_simulation(sim)
         verdict = "PASS" if trace.outcome.passed else "fail"
@@ -90,7 +92,7 @@ def run_evolve(
     root: Path,
     *,
     cases: list[Tau2Case],
-    runner: Tau2Runner,
+    runner: Tau2Runner | EndpointPool,
     model: Any,
     improver: Any,
     seed: Harness,

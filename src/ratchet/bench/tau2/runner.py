@@ -160,9 +160,14 @@ class Tau2Runner:
     config: Any
     runtime: GuardRuntime | None = None
     factory: OrchestratorFactory = build_orchestrator
+    user_api_base: str | None = None
     simulations: dict[str, Any] = field(default_factory=dict)
     _tasks: dict[str, Any] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def pop_simulation(self, run_id: str) -> Any:
+        with self._lock:
+            return self.simulations.pop(run_id, None)
 
     def task(self, task_id: str) -> Any:
         with self._lock:
@@ -173,6 +178,10 @@ class Tau2Runner:
     def __call__(self, harness: Harness, case: Any, model: Any, store: Any, *, run_id: str) -> Trace:
         tcase = cast(Tau2Case, case)
         orch = self.factory(self.config, self.task(tcase.task_id), tcase.seed, run_id)
+        if self.user_api_base is not None:
+            # This conversation's user simulator calls the same endpoint as its agent; the run's recorded
+            # user configuration (model and sampling arguments) is unchanged.
+            orch.user.llm_args["api_base"] = self.user_api_base
         world = Tau2World.start(orch, VIEWS[tcase.domain])
         ratchet_case = Case(
             id=tcase.id,
@@ -214,3 +223,46 @@ class Tau2Runner:
         with self._lock:
             self.simulations[run_id] = simulation
         return trace
+
+
+@dataclass
+class EndpointPool:
+    """A `RunCase` that spreads conversations over endpoints serving the same model. Each conversation goes
+    whole (agent and user simulator) to the endpoint with the fewest conversations in flight; the `model`
+    argument is ignored in favour of that endpoint's client."""
+
+    runners: list[Tau2Runner]
+    models: list[Any]
+    inflight: list[int] = field(default_factory=list)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def __post_init__(self) -> None:
+        if not self.runners or len(self.runners) != len(self.models):
+            raise ValueError("one runner and one model per endpoint")
+        self.inflight = [0] * len(self.runners)
+
+    @property
+    def runtime(self) -> GuardRuntime | None:
+        return self.runners[0].runtime
+
+    @runtime.setter
+    def runtime(self, value: GuardRuntime | None) -> None:
+        for r in self.runners:
+            r.runtime = value
+
+    def pop_simulation(self, run_id: str) -> Any:
+        for r in self.runners:
+            sim = r.pop_simulation(run_id)
+            if sim is not None:
+                return sim
+        return None
+
+    def __call__(self, harness: Harness, case: Any, model: Any, store: Any, *, run_id: str) -> Trace:
+        with self._lock:
+            i = min(range(len(self.inflight)), key=lambda j: self.inflight[j])
+            self.inflight[i] += 1
+        try:
+            return self.runners[i](harness, case, self.models[i], store, run_id=run_id)
+        finally:
+            with self._lock:
+                self.inflight[i] -= 1
