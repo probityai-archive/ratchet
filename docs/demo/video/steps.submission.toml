@@ -13,7 +13,7 @@ outcome = "admitted"
 cmd = "ratchet show trace {{BAD_TRACE}}"
 hold = 3.5
 captions = [
-  { at = 0.0, text = "Demo scenario, scripted agent. Passing tests does not show what a patch would block." },
+  { at = 0.0, text = "Ratchet turns an AI agent's mistakes into tested, signed safety rules. Demo scenario, scripted agent." },
   { at = 3.0, text = "A refund commits, then times out. The agent retries. The ledger shows two refunds." },
 ]
 
@@ -69,6 +69,7 @@ captions = [
 
 [[step]]
 id = "refusal"
+outcome = "refused"
 cmd = "ratchet show decision {{REFUSED_CAND}}"
 db = "{{REFUSED_DB}}"
 hold = 9.0
@@ -83,11 +84,11 @@ captions = [
 id = "refusal_v3"
 cmd = "ratchet show decision b972467a3b9a"
 db = "ratchet_v3_full"
-hold = 6.0
+hold = 9.0
 captions = [
   { at = 0.0, text = "Live gpt-oss-120b, 3,800 fresh runs: a change lifts the pass rate from 33.4% to 42.1%." },
-  { at = 2.5, text = "It also drops one policy case from 21 to 8 of 40. Ratchet refuses it and signs the refusal." },
-  { at = 4.5, text = "An unchanged control moved a case from 32 to 23 of 40. Without this gate, noise looks like progress." },
+  { at = 3.0, text = "It also drops one policy case from 21 to 8 of 40. Ratchet refuses it and signs the refusal." },
+  { at = 6.0, text = "An unchanged control moved a case from 32 to 23 of 40. Without this gate, noise looks like progress." },
 ]
 
 [[step]]
@@ -102,18 +103,18 @@ captions = [
 [[step]]
 id = "lineage"
 cmd = "ratchet show lineage"
-hold = 3.5
+hold = 5.0
 captions = [
-  { at = 0.0, text = "Every version, trace and decision is kept in MongoDB Atlas, rejections included." },
+  { at = 0.0, text = "Everything lives in MongoDB Atlas: $graphLookup builds this lineage, Vector Search finds past failures, a database role hides held-out cases from the improver." },
 ]
 
 [[step]]
 id = "hooks"
 cmd = "cat docs/results/hooks-replay.md"
-hold = 4.0
+hold = 5.5
 captions = [
   { at = 0.0, text = "Real data: one guard replayed over 629,192 tool calls from 13,712 real coding-agent sessions." },
-  { at = 2.0, text = "7 fires, each a push to main the guard would have stopped. 0 errors. 393 seconds." },
+  { at = 2.5, text = "7 fires, each a force push to main it would have denied. 0 errors. About 1,600 checks per second." },
 ]
 
 [[step]]
@@ -122,13 +123,4 @@ cmd = "cat {{RESULTS_FILE}}"
 hold = 3.5
 captions = [
   { at = 0.0, text = "Also run on AgentDojo ({{AGENTDOJO_CASES}} held-out cases) and tau-bench retail ({{TAU_CASES}} held-out tasks)." },
-]
-
-[[step]]
-id = "level2"
-cmd = "cat {{LEVEL2_FILE}}"
-hold = 4.0
-captions = [
-  { at = 0.0, text = "The improver's own instructions face the same gate. On live models, search instructions admitted {{LEVEL2_SEARCH_YIELD}}, the starting ones {{LEVEL2_SEED_YIELD}}." },
-  { at = 2.5, text = "Failure -> executable change -> recorded checks -> signed decision." },
 ]

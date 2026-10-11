@@ -35,8 +35,8 @@ SENTINEL_TITLE = "ratchet-demo-start"
 
 # canvas, banner height, caption height, terminal font size (px), caption font size (px), banner font size
 FORMATS: dict[str, dict[str, int]] = {
-    "169": {"w": 1920, "h": 1080, "banner": 64, "caption": 176, "font": 26, "cap_font": 40, "ban_font": 28},
-    "45": {"w": 1080, "h": 1350, "banner": 76, "caption": 292, "font": 30, "cap_font": 44, "ban_font": 30},
+    "169": {"w": 1920, "h": 1080, "banner": 64, "caption": 230, "font": 24, "cap_font": 54, "ban_font": 28},
+    "45": {"w": 1080, "h": 1350, "banner": 76, "caption": 360, "font": 28, "cap_font": 56, "ban_font": 30},
 }
 
 
