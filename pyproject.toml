@@ -19,6 +19,8 @@ ratchet = "ratchet.cli:main"
 [project.optional-dependencies]
 bench = [
     "agentdojo==0.1.35",
+    "litellm==1.102.1",
+    "tau-bench",
 ]
 
 [dependency-groups]
@@ -51,3 +53,6 @@ python_version = "3.12"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-W error"
+
+[tool.uv.sources]
+tau-bench = { git = "https://github.com/sierra-research/tau-bench", rev = "59a200c6d575d595120f1cb70fea53cef0632f6b" }
