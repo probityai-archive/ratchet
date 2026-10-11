@@ -2,6 +2,14 @@
 
     uv run python docs/demo/derive_ids.py [--uri URI] [--db DB] [--level2 FILE] [--no-deep-verify]
 
+The demo has two outcomes, chosen from what the store holds, and DEMO_OUTCOME names it:
+  admitted  the store (--db, else RATCHET_DB, else the ratchet* database with the most admitted decisions,
+            then the most decisions) holds an admitted decision whose receipt verifies
+  refused   no store holds one; the admitted keys (ADMITTED_*, CLEARED_CAND, STABLE_*, PROTECTED_N,
+            DISCORDANCE, HELDOUT_N) are then absent, and every other key is still required
+Both outcomes show the refusal scene: REFUSED_* is the rejected decision closest to admission across the
+live-model databases (every ratchet* database whose name does not start with `ratchet_demo`).
+
 Writes `docs/demo/ids.env` (git-ignored, one `# source:` comment above each value) and the two short
 summaries the demo shows (`docs/demo/out/results-summary.txt`, `docs/demo/out/level2-summary.txt`). Nothing
 is typed by hand: each value is read from the store, from the stored result pages, or from the level-2
@@ -45,6 +53,20 @@ EVOLVE_LOG = "docs/demo/out/evolve.log"
 GATE_REPLAY, GATE_FRESH = "replay", "fresh"
 AUTHORITY_GATES = ("authority", "structure")
 BAD_TRACE_FAMILY = "refund_lost_reply"
+OUTCOME_ADMITTED, OUTCOME_REFUSED = "admitted", "refused"
+ADMITTED_ONLY = (
+    "ADMITTED_DECISION",
+    "ADMITTED_CAND",
+    "CLEARED_CAND",
+    "STABLE_RECOVERIES",
+    "STABLE_NEEDED",
+    "PROTECTED_N",
+    "DISCORDANCE",
+    "HELDOUT_N",
+)
+DEMO_DB_PREFIX = "ratchet_demo"
+LEVEL2_DB = "ratchet_l2"
+LEVEL2_ID = re.compile(r"^(level2-[^:]+):([^:]+):")
 
 CaseInfoFn = Callable[[str], Any]
 
@@ -171,7 +193,11 @@ def timeout_then_retry(events: Sequence[Any]) -> bool:
     return False
 
 
-def pick_bad_trace(store: Any, parent: str, case_info: CaseInfoFn, family: str | None = None) -> str | None:
+def pick_bad_trace(
+    store: Any, parent: str, case_info: CaseInfoFn, family: str | None = None, need_retry: bool = True
+) -> str | None:
+    """The newest failed trap trace of `family` for `parent`; with `need_retry`, only one where a timed-out
+    tool call was retried."""
     family = family or BAD_TRACE_FAMILY
     for t in store.traces({"harness_version": parent}, newest_first=True):
         if t.outcome.passed:
@@ -181,7 +207,7 @@ def pick_bad_trace(store: Any, parent: str, case_info: CaseInfoFn, family: str |
             info is not None
             and info.family == family
             and info.kind == "trap"
-            and timeout_then_retry(t.events)
+            and (not need_retry or timeout_then_retry(t.events))
         ):
             return f"{t.run_id}/{t.case_id}"
     return None
@@ -200,6 +226,186 @@ def running_checkpoint(store: Any) -> str | None:
     return None
 
 
+def derive_authority_and_resume(store: Any, docs: Sequence[Mapping[str, Any]], out: Derived) -> None:
+    authority = [d for d in _newest(docs) if not d.get("admitted") and set(_failed(d)) & set(AUTHORITY_GATES)]
+    if authority:
+        out.set(
+            "AUTHORITY_DECISION",
+            authority[0]["candidate"],
+            f"candidate of decision {authority[0]['_id']}, "
+            "the newest rejected decision that failed an authority gate",
+        )
+    else:
+        out.fail("AUTHORITY_DECISION", "no rejected decision failed an authority gate")
+    run = running_checkpoint(store)
+    if run:
+        out.set("RESUME_RUN", run, "newest checkpoint with status running")
+        out.set("RESUME_CMD", f"ratchet resume {run}", "built from RESUME_RUN")
+    else:
+        out.fail("RESUME_RUN", "no checkpoint is still `running` (kill a run mid-case, then derive again)")
+        out.fail("RESUME_CMD", "needs RESUME_RUN")
+
+
+def pick_rejected(
+    store: Any,
+    docs: Sequence[Mapping[str, Any]],
+    resolve: Callable[[Any, Sequence[str]], Sequence[Any]],
+    parent: str | None,
+) -> Mapping[str, Any] | None:
+    """The newest replay-rejected guard candidate of `parent`, preferring one that blocked a success."""
+    rejected = [
+        d
+        for d in _newest(docs)
+        if replay_rejected(d)
+        and (parent is None or d.get("parent") == parent)
+        and has_guards(store, resolve, str(d["candidate"]))
+    ]
+    rejected.sort(key=lambda d: not blocked_a_success(d))
+    return rejected[0] if rejected else None
+
+
+@dataclass(frozen=True)
+class Closeness:
+    """How near a rejected decision came to admission, read from its fresh-evaluation gate."""
+
+    doc: Mapping[str, Any]
+    recoveries: list[str]
+    recovery_runs: str
+    protected: list[str]
+    kept: list[str]
+    regressed: list[str]
+    discordant: list[str]
+    heldout_n: int
+    confirm_invalid: bool
+
+    def rank(self) -> tuple[int, bool, int, int]:
+        return (
+            len(self.recoveries),
+            self.kept == self.protected,
+            -len(self.regressed),
+            -len(_failed(self.doc)),
+        )
+
+
+def closeness(doc: Mapping[str, Any]) -> Closeness | None:
+    gate = _check(doc, "heldout") or _check(doc, GATE_FRESH)
+    ev = (gate or {}).get("evidence") or {}
+    outcomes, order = ev.get("outcomes") or {}, list(ev.get("order") or [])
+    if doc.get("admitted") or not outcomes or "C1" not in order:
+        return None
+    c1 = order.index("C1")
+    both, first = list(ev.get("stable_recoveries") or []), list(ev.get("stable_recoveries_c1") or [])
+    recoveries, runs = (
+        (both, "both fresh runs") if len(both) >= len(first) else (first, "its first fresh run")
+    )
+    protected = list(ev.get("protected") or [])
+    kept = [c for c in protected if (outcomes.get(c) or [None] * (c1 + 1))[c1] == "pass"]
+    confirm_invalid = "C2" in order and all(
+        (v[order.index("C2")] if len(v) > order.index("C2") else "invalid") == "invalid"
+        for v in outcomes.values()
+    )
+    regressed = list(((_check(doc, "no_regression") or {}).get("evidence") or {}).get("regressed") or [])
+    return Closeness(
+        doc,
+        recoveries,
+        runs,
+        protected,
+        kept,
+        regressed,
+        list(ev.get("discordant") or []),
+        int(ev.get("manifest") or len(outcomes)),
+        confirm_invalid,
+    )
+
+
+def pick_closest(dbs: Mapping[str, Sequence[Mapping[str, Any]]]) -> tuple[str, Closeness] | None:
+    """The rejected decision closest to admission across databases: most recoveries, then every protected
+    case kept, then fewest regressed must-succeed cases, then fewest failed gates."""
+    scored = [(db, c) for db, docs in dbs.items() for d in docs if (c := closeness(d)) is not None]
+    if not scored:
+        return None
+    return max(scored, key=lambda dc: (dc[1].rank(), str(dc[1].doc.get("decided_at", ""))))
+
+
+def derive_refusal(out: Derived, picked: tuple[str, Closeness] | None) -> None:
+    keys = (
+        "REFUSED_DB",
+        "REFUSED_CAND",
+        "REFUSED_DECISION",
+        "REFUSED_RECOVERIES",
+        "REFUSED_RECOVERY_RUNS",
+        "REFUSED_PROTECTED_N",
+        "REFUSED_KEPT",
+        "REFUSED_WHY",
+        "REFUSED_HELDOUT_N",
+        "PARENT_DISCORDANT",
+        "PARENT_DISCORDANT_CASES",
+    )
+    if picked is None:
+        for key in keys:
+            out.fail(key, "no rejected decision records per-case fresh outcomes")
+        return
+    db, c = picked
+    src = f"{db}, decision {c.doc['_id']}, fresh-evaluation gate"
+    out.set("REFUSED_DB", db, "the live-model database holding the closest rejected decision")
+    out.set("REFUSED_CAND", c.doc["candidate"], f"{src}: closest to admission of every live-model rejection")
+    out.set("REFUSED_DECISION", c.doc["_id"], src)
+    out.set("REFUSED_RECOVERIES", len(c.recoveries), src)
+    out.set("REFUSED_RECOVERY_RUNS", c.recovery_runs, src)
+    out.set("REFUSED_PROTECTED_N", len(c.protected), src)
+    out.set("REFUSED_KEPT", len(c.kept), src)
+    out.set("REFUSED_HELDOUT_N", c.heldout_n, src)
+    why = []
+    if c.regressed:
+        n = len(c.regressed)
+        why.append(f"{n} must-succeed case{'s' if n > 1 else ''} failed ({', '.join(c.regressed)})")
+    if c.confirm_invalid:
+        why.append("its confirmation run was invalid")
+    if not why:
+        why.append("failed " + ", ".join(_failed(c.doc)))
+    out.set("REFUSED_WHY", " and ".join(why), src)
+    out.set("PARENT_DISCORDANT", len(c.discordant), f"{src}: cases the two parent runs disagree on")
+    out.set("PARENT_DISCORDANT_CASES", ", ".join(c.discordant) or "none", src)
+
+
+def derive_level2_from_store(
+    out: Derived, docs: Sequence[Mapping[str, Any]], db: str, out_dir: Path = OUT
+) -> None:
+    """Level 2 from the stored decisions of the level-2 runs (`level2-<run>:<arm>:...` ids), newest run that
+    has both a seed and a search arm."""
+    runs: dict[str, dict[str, list[Mapping[str, Any]]]] = {}
+    newest: dict[str, str] = {}
+    for d in docs:
+        m = LEVEL2_ID.match(str(d.get("_id", "")))
+        if m:
+            runs.setdefault(m.group(1), {}).setdefault(m.group(2), []).append(d)
+            newest[m.group(1)] = max(newest.get(m.group(1), ""), str(d.get("decided_at", "")))
+    full = [r for r in runs if {"seed", "search"} <= set(runs[r])]
+    if not full:
+        for key in ("LEVEL2_FILE", "LEVEL2_SEARCH_YIELD", "LEVEL2_SEED_YIELD"):
+            out.fail(
+                key, f"no level-2 result file, and {db} records no run with both a seed and a search arm"
+            )
+        return
+    run = max(full, key=lambda r: newest[r])
+    head = f"{'arm':<12}{'proposed':>10}{'replay_cleared':>16}{'admitted':>10}{'yield':>8}"
+    lines = [f"Level 2: improver instructions, same gate (Atlas {db}, run {run}, live models)", head]
+    yields: dict[str, str] = {}
+    for name in sorted(runs[run]):
+        arm_docs = runs[run][name]
+        cleared = sum(1 for d in arm_docs if (_check(d, GATE_REPLAY) or {}).get("passed"))
+        admitted = sum(1 for d in arm_docs if d.get("admitted"))
+        yields[name] = f"{admitted}/{len(arm_docs)}"
+        lines.append(f"{name:<12}{len(arm_docs):>10}{cleared:>16}{admitted:>10}{yields[name]:>8}")
+    out_dir.mkdir(exist_ok=True)
+    summary = out_dir / "level2-summary.txt"
+    summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    src = f"Atlas {db}, decisions of run {run}"
+    out.set("LEVEL2_FILE", rel(summary), f"built from {src}")
+    out.set("LEVEL2_SEARCH_YIELD", yields["search"], f"{src}, arm search: admitted/proposed")
+    out.set("LEVEL2_SEED_YIELD", yields["seed"], f"{src}, arm seed: admitted/proposed")
+
+
 def derive_from_store(
     store: Any,
     out: Derived,
@@ -209,15 +415,21 @@ def derive_from_store(
     resolve: Callable[[Any, Sequence[str]], Sequence[Any]],
     pick_rows: Callable[..., Any],
     fresh_view: Callable[[Mapping[str, Any]], Any],
+    refused_parent: str | None = None,
 ) -> None:
+    """Every store value. With no admitted decision, the replay keys come from `refused_parent` (the parent
+    of the refusal scene's candidate) and the admitted keys are left absent."""
     docs = decision_docs(store)
     out.set("N_DECISIONS", len(docs), "count of documents in `decisions`")
     out.set("N_REJECTED", sum(1 for d in docs if not d.get("admitted")), "decisions with admitted=false")
+    derive_authority_and_resume(store, docs, out)
 
     admitted, why = pick_admitted(docs, verifies)
     if admitted is None:
-        out.fail("ADMITTED_DECISION", why)
+        out.set("DEMO_OUTCOME", OUTCOME_REFUSED, f"no admitted decision verifies: {why}")
     else:
+        out.set("DEMO_OUTCOME", OUTCOME_ADMITTED, f"decision {admitted['_id']} is admitted and verifies")
+        out.set("ADMITTED_CAND", admitted["candidate"], f"candidate of decision {admitted['_id']}")
         view = fresh_view((_check(admitted, GATE_FRESH) or {}).get("evidence") or {})
         src = f"decision {admitted['_id']}, `fresh` gate"
         out.set(
@@ -234,14 +446,25 @@ def derive_from_store(
             out.set("DISCORDANCE", view.discordance, src)
             out.set("HELDOUT_N", len(view.rows), src)
 
-    pair = pick_pair(store, docs, resolve)
+    pair = pick_pair(store, docs, resolve) if admitted is not None else None
+    if admitted is None:
+        rejected_only = pick_rejected(store, docs, resolve, refused_parent)
+        if rejected_only is None:
+            reason = f"no replay-rejected guard candidate of parent {refused_parent}"
+            for key in ("REJECTED_CAND", "REPLAY_TRACES", "BAD_TRACE"):
+                out.fail(key, reason)
+            return
+        pair = (rejected_only, rejected_only)
     if pair is None:
         reason = "no admitted guard candidate has a replay-rejected guard candidate of the same parent"
         for key in ("CLEARED_CAND", "REJECTED_CAND", "REPLAY_TRACES", "BAD_TRACE"):
             out.fail(key, reason)
     else:
         cleared, rejected = pair
-        out.set("CLEARED_CAND", cleared["candidate"], f"admitted guard candidate, decision {cleared['_id']}")
+        if admitted is not None:
+            out.set(
+                "CLEARED_CAND", cleared["candidate"], f"admitted guard candidate, decision {cleared['_id']}"
+            )
         out.set(
             "REJECTED_CAND",
             rejected["candidate"],
@@ -254,7 +477,7 @@ def derive_from_store(
             out.set("REPLAY_TRACES", count, f"newest trace of each case recorded for parent {parent}")
         else:
             out.fail("REPLAY_TRACES", f"no traces recorded for parent {parent}")
-        bad = pick_bad_trace(store, parent, case_info)
+        bad = pick_bad_trace(store, parent, case_info, need_retry=admitted is not None)
         if bad:
             out.set("BAD_TRACE", bad, f"newest failed {BAD_TRACE_FAMILY} trap trace of parent {parent}")
         else:
@@ -262,24 +485,6 @@ def derive_from_store(
                 "BAD_TRACE",
                 f"no failed {BAD_TRACE_FAMILY} trace of parent {parent} with a timeout then a retry",
             )
-
-    authority = [d for d in _newest(docs) if not d.get("admitted") and set(_failed(d)) & set(AUTHORITY_GATES)]
-    if authority:
-        out.set(
-            "AUTHORITY_DECISION",
-            authority[0]["_id"],
-            "newest rejected decision that failed an authority gate",
-        )
-    else:
-        out.fail("AUTHORITY_DECISION", "no rejected decision failed an authority gate")
-
-    run = running_checkpoint(store)
-    if run:
-        out.set("RESUME_RUN", run, "newest checkpoint with status running")
-        out.set("RESUME_CMD", f"ratchet resume {run}", "built from RESUME_RUN")
-    else:
-        out.fail("RESUME_RUN", "no checkpoint is still `running` (kill a run mid-case, then derive again)")
-        out.fail("RESUME_CMD", "needs RESUME_RUN")
 
 
 # -- the stored result pages and the level-2 file -------------------------------------------------------
@@ -334,6 +539,25 @@ def tau_summary(text: str) -> tuple[list[str], int] | None:
     return render_columns(found[0], found[1], names), max(counts)
 
 
+def tau_self_runs(text: str) -> tuple[str, str, str] | None:
+    """(harness, "31 and 26", "40"): the held-out scores of the repeated runs of one unchanged harness in one
+    evolve source (rows whose role starts with `parent_run`), from the `Every evaluation` table."""
+    found = table(text, ["source", "role", "harness", "held-out passed"])
+    if found is None:
+        return None
+    head, rows = found
+    groups: dict[tuple[str, str], list[str]] = {}
+    for r in rows:
+        cell = dict(zip(head, r, strict=False))
+        if cell.get("role", "").startswith("parent_run") and "/" in cell.get("held-out passed", ""):
+            groups.setdefault((cell["source"], cell["harness"]), []).append(cell["held-out passed"])
+    for (_src, harness), scores in groups.items():
+        totals = {s.split("/")[1] for s in scores}
+        if len(scores) >= 2 and len(totals) == 1:
+            return harness, " and ".join(s.split("/")[0] for s in scores), totals.pop()
+    return None
+
+
 def derive_from_results(out: Derived, results: Path = RESULTS, out_dir: Path = OUT) -> None:
     summary: list[str] = []
     dojo_file, tau_file = results / "agentdojo.md", results / "tau-retail.md"
@@ -354,6 +578,14 @@ def derive_from_results(out: Derived, results: Path = RESULTS, out_dir: Path = O
         lines, tasks = tau
         summary += ["tau-bench retail (docs/results/tau-retail.md)", *lines, ""]
         out.set("TAU_CASES", tasks, "largest held-out task count in tau-retail.md")
+        self_runs = tau_self_runs(tau_file.read_text(encoding="utf-8"))
+        if self_runs is None:
+            out.fail("TAU_SELF_SCORES", "tau-retail.md records no repeated runs of one unchanged harness")
+        else:
+            src = f"tau-retail.md, `Every evaluation`, parent runs of harness {self_runs[0]}"
+            out.set("TAU_SELF_HARNESS", self_runs[0], src)
+            out.set("TAU_SELF_SCORES", self_runs[1], src)
+            out.set("TAU_SELF_TOTAL", self_runs[2], src)
     if dojo is not None and tau is not None:
         out_dir.mkdir(exist_ok=True)
         path = out_dir / "results-summary.txt"
@@ -445,10 +677,46 @@ def ratchet_verifies(decision_id: str) -> str | None:
     return lines[-1] if lines else f"exit {done.returncode}"
 
 
+def rank_databases(counts: Mapping[str, tuple[int, int]]) -> str | None:
+    """The database to read the demo from: most admitted decisions, then most decisions. `counts` maps a
+    database name to (admitted, decisions)."""
+    if not counts:
+        return None
+    return max(sorted(counts), key=lambda n: counts[n])
+
+
+def ratchet_databases(client: Any) -> list[str]:
+    return [n for n in client.list_database_names() if n.startswith("ratchet")]
+
+
+def stored_decisions(client: Any, db: str) -> list[Mapping[str, Any]]:
+    if "decisions" not in client[db].list_collection_names():
+        return []
+    return [d for d in client[db]["decisions"].find({}) if d.get("type", "decision") == "decision"]
+
+
+def resolve_cross_db(out: Derived, key: str, found: Mapping[str, str], extra: Mapping[str, str]) -> None:
+    """When `key` is missing in the demo database, take it from another database (`found` maps db -> value)
+    and name that database in `<key>_DB`."""
+    if key not in out.missing or not found:
+        return
+    db = sorted(found)[0]
+    del out.missing[key]
+    out.set(key, found[db], f"database {db} (the demo database has none)")
+    out.set(f"{key.split('_')[0]}_DB", db, f"the database holding {key}")
+    for k, v in extra.items():
+        out.missing.pop(k, None)
+        out.set(k, v.format(found[db]), f"built from {key}")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--uri", default=os.environ.get("RATCHET_MONGODB_URI", ""))
-    ap.add_argument("--db", default=os.environ.get("RATCHET_DB", "ratchet"))
+    ap.add_argument(
+        "--db",
+        default=os.environ.get("RATCHET_DB", ""),
+        help="demo database (default: the ratchet* database with the most admitted, then most, decisions)",
+    )
     ap.add_argument("--level2", type=Path, help="level-2 result JSON (default: docs/results/level2.json)")
     ap.add_argument(
         "--no-deep-verify", action="store_true", help="check the signature only, not `ratchet verify`"
@@ -458,6 +726,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("derive_ids: set RATCHET_MONGODB_URI or pass --uri", file=sys.stderr)
         return 2
 
+    from pymongo import MongoClient
+
     from ratchet.cli import LiveBackend
     from ratchet.store import Store
     from ratchet.view.admission import fresh_view
@@ -465,29 +735,87 @@ def main(argv: Sequence[str] | None = None) -> int:
     from ratchet.view.matrix import pick_rows
     from ratchet.view.verify import trusted_keys, verify_decision
 
-    os.environ["RATCHET_MONGODB_URI"], os.environ["RATCHET_DB"] = args.uri, args.db
-    trusted = trusted_keys(None, os.environ)
+    client: Any = MongoClient(args.uri)
+    all_docs = {n: stored_decisions(client, n) for n in ratchet_databases(client)}
+    live = {n: d for n, d in all_docs.items() if not n.startswith(DEMO_DB_PREFIX)}
     out = Derived()
-    with Store(args.uri, args.db) as store:
-        by_id = {str(d["_id"]): d for d in decision_docs(store)}
+    refusal = pick_closest(live)
+    derive_refusal(out, refusal)
 
-        def verifies(decision_id: str) -> str | None:
-            res = verify_decision(by_id[decision_id], trusted)
-            if not res.ok:
-                return res.summary
-            return None if args.no_deep_verify else ratchet_verifies(decision_id)
+    db = args.db or rank_databases(
+        {n: (sum(1 for d in docs if d.get("admitted")), len(docs)) for n, docs in all_docs.items()}
+    )
+    if not db:
+        print("derive_ids: no ratchet* database exists", file=sys.stderr)
+        return 2
+    os.environ["RATCHET_MONGODB_URI"] = args.uri
+    trusted = trusted_keys(None, os.environ)
 
-        derive_from_store(
-            store,
-            out,
-            case_info=LiveBackend().case_info,
-            verifies=verifies,
-            resolve=resolve_candidates,
-            pick_rows=pick_rows,
-            fresh_view=fresh_view,
-        )
+    def run_store(name: str, refused_parent: str | None) -> Derived:
+        os.environ["RATCHET_DB"] = name
+        got = Derived()
+        with Store(args.uri, name) as store:
+            by_id = {str(d["_id"]): d for d in decision_docs(store)}
+
+            def verifies(decision_id: str) -> str | None:
+                res = verify_decision(by_id[decision_id], trusted)
+                if not res.ok:
+                    return res.summary
+                return None if args.no_deep_verify else ratchet_verifies(decision_id)
+
+            derive_from_store(
+                store,
+                got,
+                case_info=LiveBackend().case_info,
+                verifies=verifies,
+                resolve=resolve_candidates,
+                pick_rows=pick_rows,
+                fresh_view=fresh_view,
+                refused_parent=refused_parent,
+            )
+        return got
+
+    refused_parent = str(refusal[1].doc["parent"]) if refusal else None
+    got = run_store(db, refused_parent)
+    if got.values.get("DEMO_OUTCOME", ("",))[0] == OUTCOME_REFUSED and refusal and refusal[0] != db:
+        db = refusal[0]  # the refused outcome reads the database of its refusal scene, so one store serves it
+        got = run_store(db, refused_parent)
+    out.values.update(got.values)
+    out.missing.update(got.missing)
+    out.set(
+        "RATCHET_DB",
+        db,
+        "the demo database: "
+        + (
+            "it holds the admitted decision"
+            if got.values["DEMO_OUTCOME"][0] == OUTCOME_ADMITTED
+            else "no database holds an admitted decision, so the database of the refusal scene"
+        ),
+    )
+
+    authority = {
+        n: str(d["candidate"])
+        for n, docs in all_docs.items()
+        for d in _newest(docs)[:1000]
+        if not d.get("admitted") and set(_failed(d)) & set(AUTHORITY_GATES)
+    }
+    resolve_cross_db(out, "AUTHORITY_DECISION", authority, {})
+    resume: dict[str, str] = {}
+    for n in all_docs:
+        cur = client[n]["checkpoints"].find({"state.status": "running"}).sort("updated_at", -1).limit(1)
+        for doc in cur:
+            resume[n] = str(doc["_id"])
+    resolve_cross_db(out, "RESUME_RUN", resume, {"RESUME_CMD": "ratchet resume {}"})
+    for key, db_key in (("AUTHORITY_DECISION", "AUTHORITY_DB"), ("RESUME_RUN", "RESUME_DB")):
+        if key in out.values and db_key not in out.values:
+            out.set(db_key, db, f"the demo database holds {key}")
+
     derive_from_results(out)
-    derive_from_level2(out, [args.level2] if args.level2 else list(LEVEL2_DEFAULTS))
+    level2 = [args.level2] if args.level2 else list(LEVEL2_DEFAULTS)
+    if any(p.exists() for p in level2) or LEVEL2_DB not in all_docs:
+        derive_from_level2(out, level2)
+    else:
+        derive_level2_from_store(out, all_docs[LEVEL2_DB], LEVEL2_DB)
     derive_constants(out)
     return write_or_fail(out)
 
