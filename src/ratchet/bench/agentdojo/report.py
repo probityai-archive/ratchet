@@ -29,9 +29,11 @@ generation, and every candidate, composite and confirmation run of a promoted ve
 ran. Nothing was re-run or selected afterwards.
 
 **Agent models.** `gpt-5.6-luna` is the assigned agent model. Its baseline targeted ASR measured 0/32
-(banking), 0/20 (slack) and 0/40 (travel) on held-out attacked episodes, which leaves no security
-headroom to measure, so every suite was also run with `gemini-3.1-flash-lite`, whose baseline ASR on a
-banking probe was 4/8. The improver is `gpt-5.6-terra` in every run.
+(banking), 0/20 (slack), 0/40 (travel) and 0/140 (workspace) on held-out attacked episodes, which leaves
+no security headroom to measure, so every suite was also run with `gpt-oss-120b-medium`, whose baseline
+ASR on an 8-episode banking probe was 3/8. (`gemini-3.1-flash-lite`, 4/8 on the same probe, was run first;
+its provider quota ran out mid-run with HTTP 429 RESOURCE_EXHAUSTED, so those runs were stopped and are
+not reported.) The improver is `gpt-5.6-terra` in every run.
 
 **Differences from AgentDojo's reference pipeline**, each recorded so the numbers are not read as a
 leaderboard entry:
