@@ -444,6 +444,21 @@ def test_integration_real_sandbox_on_two_recorded_traces() -> None:
     assert out.candidates[1].blocked_calls[0]["benign_twin"] is True
 
 
+def test_c1_flips_count_both_directions_against_either_parent_run() -> None:
+    ev = {
+        "outcomes": {
+            "a": ["fail", "fail", "pass", "invalid"],
+            "b": ["pass", "fail", "fail", "pass"],
+            "c": ["fail", "pass", "pass", "pass"],
+            "d": ["fail", "fail", "fail", "fail"],
+        }
+    }
+    assert search.c1_flips(ev) == (["a"], ["b"])
+    rep = search.flips_report([ev, {}])
+    assert rep["candidates"] == 2 and rep["c1_fail_to_pass_total"] == 1 and rep["c1_pass_to_fail_total"] == 1
+    assert rep["candidates_with_2plus_recoveries_and_no_c1_break"] == 0
+
+
 def test_split_clusters_keeps_mixed_clusters_out_of_both_sides() -> None:
     def cl(cid: str, *cases: str) -> FailureCluster:
         return FailureCluster(cid, {}, [FailurePoint(f"r-{c}", c, 1, "x", "commission", "t") for c in cases])
@@ -484,6 +499,9 @@ def test_three_arm_comparison_under_the_real_admission_rule() -> None:
     assert arms["search"]["admitted"] == 1 and arms["search"]["admission_yield"] == "1/2"
     assert arms["search"]["heldout_flips_fail_to_pass"] == ["omit-10", "omit-9"]
     assert arms["search"]["heldout_flips_pass_to_fail"] == []
+    flips = arms["search"]["c1_flips_all_evaluated"]
+    assert flips["candidates"] == 1 and flips["c1_fail_to_pass_cases"] == ["omit-10", "omit-9"]
+    assert flips["candidates_with_2plus_recoveries_and_no_c1_break"] == 1
     assert arms["seed"]["admitted"] == 0 and sum(arms["seed"]["rejections_by_gate"].values()) >= 1
     assert arms["challenger"]["instructions_version"] != SEED.version
     assert arms["challenger"]["admitted"] == 0

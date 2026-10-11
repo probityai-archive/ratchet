@@ -826,6 +826,33 @@ def recovery_evidence(d: Decision) -> dict[str, Any]:
     return next((c.evidence for c in d.checks if "stable_recoveries" in c.evidence), {})
 
 
+def c1_flips(evidence: Mapping[str, Any]) -> tuple[list[str], list[str]]:
+    """Held-out cases a candidate's first fresh run flipped: (failed in both parent runs and passed in C1,
+    passed in either parent run and failed in C1). Informative even when the candidate was not admitted."""
+    up: list[str] = []
+    down: list[str] = []
+    for case, v in (evidence.get("outcomes") or {}).items():
+        p1, p2, c1 = v[0], v[1], v[2]
+        if p1 == p2 == "fail" and c1 == "pass":
+            up.append(case)
+        elif "pass" in (p1, p2) and c1 == "fail":
+            down.append(case)
+    return sorted(up), sorted(down)
+
+
+def flips_report(evidences: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """C1 flips over every freshly evaluated candidate, with the denominator."""
+    per = [c1_flips(e) for e in evidences]
+    return {
+        "candidates": len(per),
+        "c1_fail_to_pass_total": sum(len(u) for u, _ in per),
+        "c1_pass_to_fail_total": sum(len(d) for _, d in per),
+        "c1_fail_to_pass_max": max((len(u) for u, _ in per), default=0),
+        "candidates_with_2plus_recoveries_and_no_c1_break": sum(1 for u, d in per if len(u) >= 2 and not d),
+        "c1_fail_to_pass_cases": sorted({c for u, _ in per for c in u}),
+    }
+
+
 def arm_report(arm: Arm, slots: int) -> dict[str, Any]:
     """Per-arm numbers, every rate with its denominator."""
     outs = [c for o in arm.outcomes for c in o.candidates]
@@ -858,6 +885,7 @@ def arm_report(arm: Arm, slots: int) -> dict[str, Any]:
         "replay_score": f"{cleared}/{slots}",
         "heldout_flips_fail_to_pass": sorted(recovered),
         "heldout_flips_pass_to_fail": sorted(broken),
+        "c1_flips_all_evaluated": flips_report([recovery_evidence(d) for d in arm.decisions.values()]),
         "rejections_by_gate": _gate_failures(arm),
         "proposer_tokens": meter_payload(arm.meter),
         "per_cluster": [o.to_payload() for o in arm.outcomes],
