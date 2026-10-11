@@ -595,9 +595,13 @@ class EvalStore(Protocol):
     def put_eval(self, report: Any, *, eval_id: str | None = None) -> str: ...
 
 
-def record_run(store: EvalStore, run: SearchRun, generation: int = 0) -> str:
-    """Write the search record and the winning instructions (the shape the loop records them in)."""
-    rid = store.put_eval(run.record)
+def record_run(
+    store: EvalStore, run: SearchRun, generation: int = 0, context: Mapping[str, Any] | None = None
+) -> str:
+    """Write the search record and the winning instructions (the shape the loop records them in). `context`
+    (an experiment name, a generation) is stored on both, so a record is attributable without a lookup."""
+    ctx = dict(context or {})
+    rid = store.put_eval({**run.record, **ctx})
     store.put_eval(
         {
             "type": "improver_instructions",
@@ -608,6 +612,7 @@ def record_run(store: EvalStore, run: SearchRun, generation: int = 0) -> str:
             "generation": generation,
             "engine": ENGINE,
             "search_run": rid,
+            **ctx,
         }
     )
     return rid
@@ -1034,7 +1039,7 @@ def compare_level2(bench: Bench, experiment: str = "level2") -> dict[str, Any]:
         screen=screen, proposer=bench.improver, firewall=firewall, n=bench.n, propose_fn=bench.propose_fn
     )
     run = optimize_instructions(a, adapter, bench.improver, max_metric_calls=bench.search_calls)
-    run_id = record_run(bench.store, run)
+    run_id = record_run(bench.store, run, context={"experiment": experiment})
     bench.log(f"search {run.instructions.version} after {run.record['metric_calls']} metric calls")
 
     arms = [Arm("seed", SEED), Arm("challenger", challenger), Arm("search", run.instructions)]

@@ -385,11 +385,12 @@ def test_search_improves_instructions_and_records_the_pareto_front() -> None:
     assert rec["proposer_cost"]["model_calls"] == chat.proposals()
 
     store = MemStore()
-    rid = record_run(store, run, generation=2)
-    assert store.evals[0]["type"] == "instruction_search_run"
+    rid = record_run(store, run, generation=2, context={"experiment": "x"})
+    assert store.evals[0]["type"] == "instruction_search_run" and store.evals[0]["experiment"] == "x"
     ins = store.evals[1]
     assert ins["type"] == "improver_instructions" and ins["search_run"] == rid
     assert ins["version"] == run.instructions.version and ins["seen_clusters"] == [cluster.id]
+    assert ins["experiment"] == "x"
 
 
 def test_search_challenger_hook_returns_none_when_nothing_beats_the_champion() -> None:
