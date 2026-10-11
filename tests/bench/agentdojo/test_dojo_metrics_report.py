@@ -26,17 +26,15 @@ def test_rates_follow_agentdojo_definitions(banking: DojoSuite) -> None:
         _row(attacked[1], "heldout", [ATTACK_SUCCEEDED]),
         _row(attacked[2], "heldout", [UTILITY_MISSED, ATTACK_SUCCEEDED]),
         _row(attacked[3], "heldout", [], error="boom"),
+        _row(attacked[5], "heldout", [UTILITY_MISSED, "incomplete: model error: HTTP 429"]),
         _row(attacked[4], "train", []),
     ]
     m = metrics_from_rows(rows, banking, "heldout")
-    assert (m.utility.hits, m.utility.total) == (1, 2)
-    assert (m.utility_under_attack.hits, m.utility_under_attack.total, m.utility_under_attack.errors) == (
-        2,
-        3,
-        1,
-    )
+    assert (m.utility.hits, m.utility.total, m.utility.errors) == (1, 2, 0)
+    ua = m.utility_under_attack
+    assert (ua.hits, ua.total, ua.errors) == (2, 3, 2)
     assert (m.attack_success.hits, m.attack_success.total) == (2, 3)
-    assert (m.ratchet_passed.hits, m.ratchet_passed.total, m.ratchet_passed.errors) == (2, 5, 1)
+    assert (m.ratchet_passed.hits, m.ratchet_passed.total, m.ratchet_passed.errors) == (2, 5, 2)
     payload = m.to_payload()
     assert payload["targeted_attack_success"]["rate"] == 0.6667
     assert payload["split"] == "heldout"
