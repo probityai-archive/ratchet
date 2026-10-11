@@ -32,9 +32,13 @@ from ratchet.bench.transfer.run import (
     result_payload,
     run_transfer,
     sampling_for,
+    trace_docs,
     trace_summary,
 )
 from ratchet.types import Harness
+
+STORE_ATTEMPTS = 5
+STORE_BACKOFF_S = 15.0
 
 
 def _log(msg: str) -> None:
@@ -139,7 +143,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         source = Store(uri, args.store_db)
     base = seed_harness()
-    cand, cand_extra = _candidate(args, source)
+    try:
+        cand, cand_extra = _candidate(args, source)
+    finally:
+        if source is not None:
+            source.close()
     sampling = sampling_for(args.temperature, args.seed, cand_extra.pop("decision", None))
     splits = [s for s in args.splits.split(",") if s]
     cases = [c for s in splits for c in by_split(s)]
@@ -180,24 +188,54 @@ def cmd_run(args: argparse.Namespace) -> int:
         "truncated_turns": model.truncated_turns if args.single_tool_call else 0,
     }
     payload = result_payload(meta, base_reports, cand_reports, splits)
-    if uri and args.trace_db:
-        from pymongo import MongoClient
-
-        mongo: MongoClient[dict[str, Any]] = MongoClient(uri, serverSelectionTimeoutMS=10_000)
-        try:
-            written = persist(mongo[args.trace_db], payload, [*base_reports, *cand_reports])
-        finally:
-            mongo.close()
-        _log(f"stored {written['traces']} traces and eval {written['eval_id']} in {args.trace_db}")
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.out).write_text(
-        json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8"
-    )
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+    traces = trace_docs([*base_reports, *cand_reports])
+    traces_path = out.with_suffix(".traces.jsonl")
+    with traces_path.open("w", encoding="utf-8") as fh:
+        for t in traces:
+            fh.write(json.dumps(t, sort_keys=True, default=str) + "\n")
     for split, s in payload["summaries"].items():
         _log(
             f"{args.model} {split}: v0 {s['base']['passes']} cand {s['cand']['passes']} b={s['b']} c={s['c']}"
         )
+    if uri and args.trace_db:
+        return _store(uri, args.trace_db, payload, traces)
     return 0
+
+
+def _store(uri: str, db_name: str, payload: dict[str, Any], traces: list[dict[str, Any]]) -> int:
+    """Store with a bounded retry (a replica-set election makes writes fail for a while); the result and
+    trace files are already on disk, so a failure here loses nothing and `store` can be rerun later."""
+    from pymongo import MongoClient
+    from pymongo.errors import PyMongoError
+
+    for attempt in range(1, STORE_ATTEMPTS + 1):
+        mongo: MongoClient[dict[str, Any]] = MongoClient(uri, serverSelectionTimeoutMS=10_000)
+        try:
+            written = persist(mongo[db_name], payload, traces)
+        except PyMongoError as exc:
+            _log(f"store attempt {attempt}/{STORE_ATTEMPTS} failed: {type(exc).__name__}: {str(exc)[:200]}")
+            time.sleep(STORE_BACKOFF_S * attempt)
+        else:
+            _log(f"stored {written['traces']} traces and eval {written['eval_id']} in {db_name}")
+            return 0
+        finally:
+            mongo.close()
+    _log(f"STORE_FAILED: results and traces kept on disk; rerun `store` to write them to {db_name}")
+    return 3
+
+
+def cmd_store(args: argparse.Namespace) -> int:
+    uri = os.environ.get("RATCHET_MONGODB_URI")
+    if not uri:
+        raise SystemExit("store needs RATCHET_MONGODB_URI")
+    out = Path(args.result)
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    traces_path = out.with_suffix(".traces.jsonl")
+    traces = [json.loads(line) for line in traces_path.read_text(encoding="utf-8").splitlines() if line]
+    return _store(uri, args.trace_db, payload, traces)
 
 
 def cmd_render(args: argparse.Namespace) -> int:
@@ -240,13 +278,16 @@ def main(argv: list[str] | None = None) -> int:
         help="keep only the first tool call per turn (for checkpoints whose template forbids several)",
     )
     rn.add_argument("--out", required=True)
+    st = sub.add_parser("store")
+    st.add_argument("result")
+    st.add_argument("--trace-db", default="ratchet_heldout")
     rd = sub.add_parser("render")
     rd.add_argument("results", nargs="*")
     rd.add_argument("--out", required=True)
     rd.add_argument("--control", action="append", default=[], help="an A/A result file (v0 against v0)")
     rd.add_argument("--note", action="append", default=[], help="KEY=VALUE line for the setup section")
     args = p.parse_args(argv)
-    handlers = {"probe": cmd_probe, "run": cmd_run, "render": cmd_render}
+    handlers = {"probe": cmd_probe, "run": cmd_run, "store": cmd_store, "render": cmd_render}
     return handlers[args.cmd](args)
 
 

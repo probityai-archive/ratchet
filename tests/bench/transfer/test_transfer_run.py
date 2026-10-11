@@ -19,6 +19,7 @@ from ratchet.bench.transfer.run import (
     probe_tool_call,
     result_payload,
     run_transfer,
+    trace_docs,
     trace_summary,
 )
 from ratchet.cases.registry import by_split
@@ -161,9 +162,9 @@ class FakeCollection:
     def __init__(self) -> None:
         self.docs: dict[str, dict[str, Any]] = {}
 
-    def insert_many(self, docs: list[dict[str, Any]], ordered: bool = True) -> None:
-        for d in docs:
-            self.docs[d["_id"]] = d
+    def bulk_write(self, ops: list[Any], ordered: bool = True) -> None:
+        for op in ops:
+            self.docs[op._filter["_id"]] = op._doc
 
     def replace_one(self, flt: dict[str, Any], doc: dict[str, Any], upsert: bool = False) -> None:
         self.docs[flt["_id"]] = doc
@@ -174,7 +175,7 @@ def test_persist_writes_every_trace_and_one_eval() -> None:
     b, c = run_transfer(seed_harness(), candidate(), cases, object(), fake_run_case, repeats=1, workers=1)
     payload = {"type": "transfer", "summaries": {}, "base_reports": [], "cand_reports": []}
     db = {"transfer_traces": FakeCollection(), "transfer_evals": FakeCollection()}
-    out = persist(db, payload, [*b, *c])
+    out = persist(db, payload, trace_docs([*b, *c]))
     assert out["traces"] == 6 and len(db["transfer_traces"].docs) == 6
     (ev,) = db["transfer_evals"].docs.values()
     assert ev["_id"] == out["eval_id"] and ev["type"] == "transfer"
@@ -199,6 +200,9 @@ class FakeStore:
 
     def get_harness(self, version: str) -> Harness | None:
         return self._h
+
+    def close(self) -> None:
+        return None
 
 
 def test_candidate_from_store_takes_latest_admitted(tmp_path: Path) -> None:
@@ -386,3 +390,45 @@ def test_seed_transport_adds_seed_to_chat_requests(monkeypatch: pytest.MonkeyPat
         assert c.name == "m"
     with default_client("http://h/v1", "k", "m") as c:
         assert c.name == "m"
+
+
+def test_store_retries_and_keeps_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import pymongo
+    from pymongo.errors import AutoReconnect
+
+    calls = {"n": 0}
+
+    class Flaky:
+        def __init__(self, uri: str, **_kw: Any) -> None:
+            pass
+
+        def __getitem__(self, name: str) -> dict[str, FakeCollection]:
+            calls["n"] += 1
+            if calls["n"] < 2:
+                raise AutoReconnect("no primary")
+            return {"transfer_traces": FakeCollection(), "transfer_evals": FakeCollection()}
+
+        def close(self) -> None:
+            pass
+
+    cand_file = tmp_path / "cand.json"
+    cand_file.write_text(json.dumps(asdict(candidate())), encoding="utf-8")
+    monkeypatch.setenv("RATCHET_MONGODB_URI", "mongodb://fake")
+    monkeypatch.setattr(pymongo, "MongoClient", Flaky)
+    monkeypatch.setattr(cli, "STORE_BACKOFF_S", 0.0)
+    monkeypatch.setattr(cli, "endpoint_info", lambda *_a, **_k: {"served": [], "server_version": None})
+    monkeypatch.setattr("ratchet.agent.worker.run_case", fake_run_case)
+    out = tmp_path / "r.json"
+    args = ["run", "--base-url", "u", "--model", "m", "--candidate-file", str(cand_file), "--splits", "audit"]
+    assert cli.main([*args, "--repeats", "1", "--out", str(out)]) == 0
+    assert calls["n"] == 2 and out.exists()
+    lines = out.with_suffix(".traces.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2 * len(by_split("audit"))
+    calls["n"] = -10
+    monkeypatch.setattr(cli, "STORE_ATTEMPTS", 2)
+    assert cli.main(["store", str(out)]) == 3
+    calls["n"] = 5
+    assert cli.main(["store", str(out)]) == 0
+    monkeypatch.delenv("RATCHET_MONGODB_URI")
+    with pytest.raises(SystemExit):
+        cli.main(["store", str(out)])

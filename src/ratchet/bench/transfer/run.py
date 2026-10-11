@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from pymongo import ReplaceOne
 
 from ratchet.agent.model import ChatModel, Message, ModelClient, ModelConfig, ModelTurn, ToolSpec
 from ratchet.bench.transfer.analysis import summarize
@@ -261,18 +262,21 @@ def default_client(
     return ModelClient(config, transport=SeedTransport(seed) if seed is not None else None)
 
 
-def persist(db: Any, payload: dict[str, Any], reports: Sequence[EvalReport]) -> dict[str, Any]:
+def trace_docs(reports: Sequence[EvalReport]) -> list[dict[str, Any]]:
+    """Every trace of every report as plain JSON, in run order."""
+    return [to_jsonable(trace) for rep in reports for trace in rep.traces]
+
+
+def persist(db: Any, payload: dict[str, Any], traces: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Write every trace and the summary into an evaluator-only database (held-out traces never go where
-    the improver can read). Plain inserts: no schema or search-index side effects on a shared cluster."""
+    the improver can read). Plain inserts: no schema or search-index side effects on a shared cluster.
+    Idempotent: ids derive from the summary and the run ids, so a retried store never duplicates."""
     summary = {k: v for k, v in payload.items() if k not in ("base_reports", "cand_reports")}
     eval_id = "transfer-" + sha256_hex(canonical_json(to_jsonable(summary)))[:16]
-    docs = []
-    for rep in reports:
-        for trace in rep.traces:
-            body = to_jsonable(trace)
-            docs.append({**body, "_id": f"{eval_id}:{trace.run_id}", "eval_id": eval_id})
+    docs = [{**t, "_id": f"{eval_id}:{t['run_id']}", "eval_id": eval_id} for t in traces]
     if docs:
-        db["transfer_traces"].insert_many(docs, ordered=False)
+        ops = [ReplaceOne({"_id": d["_id"]}, d, upsert=True) for d in docs]
+        db["transfer_traces"].bulk_write(ops, ordered=False)
     db["transfer_evals"].replace_one(
         {"_id": eval_id}, {**to_jsonable(payload), "_id": eval_id, "stored_at": now_iso()}, upsert=True
     )
