@@ -9,6 +9,8 @@ dependencies = [
     "pymongo>=4.10",
     "httpx>=0.27",
     "cryptography>=44",
+    "rich>=15.0.0",
+    "raindrop-ai",
 ]
 
 [project.scripts]
