@@ -62,19 +62,19 @@ def ids_for(outcome: str) -> dict[str, str]:
 
 
 @pytest.mark.parametrize("variant", [None, "45"])
-def test_admitted_outcome_shows_the_admission_then_the_refusal(variant: str | None) -> None:
+def test_admitted_outcome_records_the_product_scenes_in_order(variant: str | None) -> None:
     steps, missing = drive.load_steps(STEPS, ids_for("admitted"), variant)
     assert missing == []
     names = [s["id"] for s in steps]
-    assert names.index("admitted") < names.index("refusal")
-    assert {"verify", "failure", "matrix"} <= set(names)
-    assert not {"failure_live", "matrix_live"} & set(names)
-    assert all(
-        "Demo scenario" in s["captions"][0]["text"] for s in steps if s["id"] in ("failure", "admitted")
-    )
-    refusal = next(s for s in steps if s["id"] == "refusal")
-    assert refusal["db"] == "v-refused_db"
-    assert refusal["captions"][0]["text"].startswith("Live models")
+    assert names == ["failure", "matrix", "admitted", "verify", "authority"]
+    assert "Demo scenario" in steps[0]["captions"][0]["text"]
+    assert not {"failure_live", "matrix_live", "refusal"} & set(names)
+
+
+def test_chart_card_steps_are_never_recorded() -> None:
+    for outcome in ("admitted", "refused"):
+        steps, _ = drive.load_steps(STEPS, ids_for(outcome), None)
+        assert not {"refusal_v3", "lineage", "hooks", "benchmarks"} & {s["id"] for s in steps}
 
 
 def test_refused_outcome_needs_no_admitted_key_and_implies_no_admission() -> None:
