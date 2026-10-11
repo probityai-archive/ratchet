@@ -24,7 +24,7 @@ from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
 
 from ratchet.store import atlas_setup
-from ratchet.store.embed import CachedEmbedder, Embedder, VoyageEmbedder
+from ratchet.store.embed import CachedEmbedder, Embedder, Reranker, VoyageEmbedder, VoyageReranker
 from ratchet.types import (
     Cost,
     Event,
@@ -75,6 +75,19 @@ class SimilarFailure:
 
 
 @dataclass(frozen=True)
+class NewFailure:
+    summary: str
+    case_family: str
+    trace_ref: str | None = None
+    harness_version: str | None = None
+    failure_id: str | None = None
+
+    @property
+    def id(self) -> str:
+        return self.failure_id or sha256_hex(canonical_json([self.summary, self.case_family, self.trace_ref]))
+
+
+@dataclass(frozen=True)
 class ChangeEvent:
     operation: str
     collection: str
@@ -90,6 +103,14 @@ def rrf_fuse(rankings: Sequence[Sequence[str]], k: int = RRF_K) -> list[tuple[st
         for rank, item in enumerate(ranking, start=1):
             scores[item] = scores.get(item, 0.0) + 1.0 / (k + rank)
     return sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+def _filters(case_family: str | None, harness_version: str | None) -> dict[str, str]:
+    return {
+        name: value
+        for name, value in (("case_family", case_family), ("harness_version", harness_version))
+        if value is not None
+    }
 
 
 def _now() -> datetime:
@@ -171,14 +192,20 @@ class Store:
         uri: str,
         db: str,
         *,
+        heldout_db: str | None = None,
         embedder: Embedder | None = None,
+        reranker: Reranker | None = None,
         max_inline_bytes: int = DEFAULT_MAX_INLINE_BYTES,
         index_timeout_s: float = 120.0,
     ) -> None:
         self._client: MongoClient[Doc] = MongoClient(uri, tz_aware=True, serverSelectionTimeoutMS=10_000)
         self.db = self._client[db]
+        # held-out cases live in their own database so a database role can deny the improver every read
+        self.heldout = self._client[heldout_db or f"{db}_heldout"]
         self._raw_embedder = embedder
         self._embedder: CachedEmbedder | None = None
+        self._reranker = reranker
+        self._owned_reranker: VoyageReranker | None = None
         self._owned_embedder: VoyageEmbedder | None = None
         self._max_inline = max_inline_bytes
         self._index_timeout_s = index_timeout_s
@@ -191,6 +218,8 @@ class Store:
         """Close the database client and any embedder this store created itself."""
         if self._owned_embedder is not None:
             self._owned_embedder.close()
+        if self._owned_reranker is not None:
+            self._owned_reranker.close()
         self._client.close()
 
     def __enter__(self) -> Store:
@@ -439,7 +468,25 @@ class Store:
     def decisions(self, filter: Mapping[str, Any] | None = None) -> list[Doc]:
         return list(self._c("decisions").find(dict(filter or {})).sort("created_at", 1))
 
-    def _put_record(self, collection: str, record: Any, record_id: str | None) -> str:
+    def put_case(self, case: Any) -> str:
+        """Store a case. Held-out cases go to the separate held-out database; the rest to `cases`.
+
+        The case is a dataclass or mapping with `id` and `split` ("train" or "heldout").
+        """
+        body = to_jsonable(case)
+        if not isinstance(body, Mapping) or "id" not in body or body.get("split") not in ("train", "heldout"):
+            raise TypeError("a case needs an id and a split of 'train' or 'heldout'")
+        if body["split"] == "heldout":
+            atlas_setup.ensure_heldout(self.heldout)
+            return self._put_record(self.heldout[atlas_setup.HELDOUT_COLLECTION], body, body["id"])
+        return self._put_record(self._c("cases"), body, body["id"])
+
+    def cases(self, split: str = "train") -> list[Doc]:
+        """Cases of one split. Reading "heldout" needs a role that can read the held-out database."""
+        coll = self.heldout[atlas_setup.HELDOUT_COLLECTION] if split == "heldout" else self._c("cases")
+        return list(coll.find({"split": split}).sort("_id", 1))
+
+    def _put_record(self, collection: str | Collection[Doc], record: Any, record_id: str | None) -> str:
         body = to_jsonable(record)
         if not isinstance(body, Mapping):
             raise TypeError(
@@ -448,14 +495,14 @@ class Store:
         body = dict(body)
         digest = sha256_hex(canonical_json(body))
         rid = record_id or digest
-        coll = self._c(collection)
+        coll = self._c(collection) if isinstance(collection, str) else collection
         res = coll.update_one(
             {"_id": rid}, {"$setOnInsert": {**body, "digest": digest, "created_at": _now()}}, upsert=True
         )
         if res.upserted_id is None:
             stored = coll.find_one({"_id": rid}, {"digest": 1})
             if stored is None or stored["digest"] != digest:
-                raise IntegrityError(f"{collection} record {rid} already holds different content")
+                raise IntegrityError(f"{coll.name} record {rid} already holds different content")
         return rid
 
     # -- failure memory ----------------------------------------------------------------------------
@@ -470,55 +517,95 @@ class Store:
         failure_id: str | None = None,
     ) -> str:
         """Store a failure summary with its embedding. Idempotent on `failure_id` (default: content hash)."""
-        fid = failure_id or sha256_hex(canonical_json([summary, case_family, trace_ref]))
+        failure = NewFailure(summary, case_family, trace_ref, harness_version, failure_id)
+        self.put_failures([failure])
+        return failure.id
+
+    def put_failures(self, failures: Sequence[NewFailure]) -> list[str]:
+        """Store many failures, embedding all the new ones in one batch. Idempotent per failure id."""
         coll = self._c("failures")
-        if coll.find_one({"_id": fid}, {"_id": 1}) is not None:
-            return fid
-        vector = self.embedder.embed([summary], "document")[0]
-        coll.update_one(
-            {"_id": fid},
-            {
-                "$setOnInsert": {
-                    "summary": summary,
-                    "case_family": case_family,
-                    "trace_ref": trace_ref,
-                    "harness_version": harness_version,
-                    "embedding": vector,
-                    "embedding_model": self.embedder.model,
-                    "created_at": _now(),
-                }
-            },
-            upsert=True,
-        )
-        return fid
+        ids = [f.id for f in failures]
+        have = {d["_id"] for d in coll.find({"_id": {"$in": ids}}, {"_id": 1})}
+        fresh = {f.id: f for f in failures if f.id not in have}
+        if fresh:
+            vectors = self.embedder.embed([f.summary for f in fresh.values()], "document")
+            now = _now()
+            coll.bulk_write(
+                [
+                    _upsert_one(
+                        {"_id": fid},
+                        {
+                            "summary": f.summary,
+                            "case_family": f.case_family,
+                            "trace_ref": f.trace_ref,
+                            "harness_version": f.harness_version,
+                            "embedding": vector,
+                            "embedding_model": self.embedder.model,
+                            "created_at": now,
+                        },
+                    )
+                    for (fid, f), vector in zip(fresh.items(), vectors, strict=True)
+                ],
+                ordered=False,
+            )
+        return ids
 
     def _ensure_search(self) -> None:
         if not self._search_ready:
             self.setup(wait_search=True)
 
     def similar_failures(
-        self, text: str, k: int = 5, *, case_family: str | None = None, exclude_id: str | None = None
+        self,
+        text: str,
+        k: int = 5,
+        *,
+        case_family: str | None = None,
+        harness_version: str | None = None,
+        exclude_id: str | None = None,
     ) -> list[SimilarFailure]:
         """The k stored failures nearest to `text` by `$vectorSearch` over Voyage embeddings."""
         self._ensure_search()
         vector = self.embedder.embed([text], "query")[0]
-        return self._vector_hits(vector, k, case_family, exclude_id)
+        filters = _filters(case_family, harness_version)
+        return self._vector_hits(vector, k, filters, exclude_id)
 
     def similar_failures_hybrid(
-        self, text: str, k: int = 5, *, case_family: str | None = None, exclude_id: str | None = None
+        self,
+        text: str,
+        k: int = 5,
+        *,
+        case_family: str | None = None,
+        harness_version: str | None = None,
+        exclude_id: str | None = None,
+        rerank: bool = False,
     ) -> list[SimilarFailure]:
-        """`$search` keyword hits and `$vectorSearch` hits fused with reciprocal rank fusion."""
+        """`$search` keyword hits and `$vectorSearch` hits fused with reciprocal rank fusion.
+
+        With `rerank=True` the fused shortlist is reordered by Voyage's cross-encoder reranker and each
+        score is its relevance score; otherwise the score is the reciprocal-rank-fusion score.
+        """
         self._ensure_search()
         vector = self.embedder.embed([text], "query")[0]
+        filters = _filters(case_family, harness_version)
         pool = max(k * 4, 20)
-        by_vector = self._vector_hits(vector, pool, case_family, exclude_id)
-        by_text = self._text_hits(text, pool, case_family, exclude_id)
+        by_vector = self._vector_hits(vector, pool, filters, exclude_id)
+        by_text = self._text_hits(text, pool, filters, exclude_id)
         known = {h.id: h for h in [*by_text, *by_vector]}
         fused = rrf_fuse([[h.id for h in by_vector], [h.id for h in by_text]])
-        return [SimilarFailure(**{**asdict(known[i]), "score": score}) for i, score in fused[:k]]
+        if not rerank:
+            return [SimilarFailure(**{**asdict(known[i]), "score": score}) for i, score in fused[:k]]
+        shortlist = [known[i] for i, _ in fused[:pool]]
+        ranked = self._rerank_model().rerank(text, [h.summary for h in shortlist], k)
+        return [SimilarFailure(**{**asdict(shortlist[idx]), "score": score}) for idx, score in ranked]
+
+    def _rerank_model(self) -> Reranker:
+        if self._reranker is None:
+            self._owned_reranker = VoyageReranker()
+            self._reranker = self._owned_reranker
+        return self._reranker
 
     def _vector_hits(
-        self, vector: list[float], k: int, case_family: str | None, exclude_id: str | None
+        self, vector: list[float], k: int, filters: dict[str, str], exclude_id: str | None
     ) -> list[SimilarFailure]:
         stage: Doc = {
             "index": atlas_setup.FAILURES_VECTOR_INDEX,
@@ -527,8 +614,10 @@ class Store:
             "numCandidates": max(k * 20, 100),
             "limit": k + (1 if exclude_id else 0),
         }
-        if case_family is not None:
-            stage["filter"] = {"case_family": case_family}
+        if filters:
+            stage["filter"] = (
+                {"$and": [{k_: v} for k_, v in filters.items()]} if len(filters) > 1 else filters
+            )
         return self._hits(
             [{"$vectorSearch": stage}, {"$addFields": {"score": {"$meta": "vectorSearchScore"}}}],
             k,
@@ -536,11 +625,11 @@ class Store:
         )
 
     def _text_hits(
-        self, text: str, k: int, case_family: str | None, exclude_id: str | None
+        self, text: str, k: int, filters: dict[str, str], exclude_id: str | None
     ) -> list[SimilarFailure]:
         compound: Doc = {"must": [{"text": {"query": text, "path": "summary"}}]}
-        if case_family is not None:
-            compound["filter"] = [{"equals": {"path": "case_family", "value": case_family}}]
+        if filters:
+            compound["filter"] = [{"equals": {"path": f, "value": v}} for f, v in filters.items()]
         pipeline: list[Doc] = [
             {"$search": {"index": atlas_setup.FAILURES_TEXT_INDEX, "compound": compound}},
             {"$limit": k + (1 if exclude_id else 0)},
@@ -620,4 +709,12 @@ def _upsert_one(filter: Doc, fields: Doc) -> UpdateOne:
     return UpdateOne(filter, {"$setOnInsert": fields}, upsert=True)
 
 
-__all__ = ["ChangeEvent", "IntegrityError", "LineageNode", "SimilarFailure", "Store", "rrf_fuse"]
+__all__ = [
+    "ChangeEvent",
+    "IntegrityError",
+    "LineageNode",
+    "NewFailure",
+    "SimilarFailure",
+    "Store",
+    "rrf_fuse",
+]

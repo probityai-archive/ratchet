@@ -13,8 +13,10 @@ from ratchet.store import (
     EmbeddingError,
     IntegrityError,
     MissingKeyError,
+    NewFailure,
     Store,
     VoyageEmbedder,
+    VoyageReranker,
     atlas,
     atlas_setup,
     rrf_fuse,
@@ -219,3 +221,36 @@ def test_setup_main_requires_a_uri(
     monkeypatch.delenv("RATCHET_MONGODB_URI", raising=False)
     assert atlas_setup.main([]) == 2
     assert "--uri" in capsys.readouterr().err
+
+
+def test_reranker_posts_query_and_documents_and_returns_scored_indexes() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(
+            200, json={"data": [{"index": 1, "relevance_score": 0.9}, {"index": 0, "relevance_score": 0.2}]}
+        )
+
+    rr = VoyageReranker("k", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert rr.rerank("q", ["a", "b"], 2) == [(1, 0.9), (0, 0.2)]
+    assert seen[0]["query"] == "q" and seen[0]["documents"] == ["a", "b"] and seen[0]["top_k"] == 2
+    assert rr.rerank("q", [], 2) == [] and len(seen) == 1
+    rr.close()
+
+
+def test_reranker_requires_a_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    with pytest.raises(MissingKeyError):
+        VoyageReranker()
+
+
+def test_new_failure_id_defaults_to_a_content_hash() -> None:
+    a = NewFailure("s", "fam", "r/1")
+    assert a.id == NewFailure("s", "fam", "r/1").id != NewFailure("s", "fam", "r/2").id
+    assert NewFailure("s", "fam", failure_id="given").id == "given"
+
+
+def test_filters_keep_only_the_given_fields() -> None:
+    assert atlas._filters(None, None) == {}
+    assert atlas._filters("f", "v") == {"case_family": "f", "harness_version": "v"}

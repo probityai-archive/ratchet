@@ -5,13 +5,15 @@ from __future__ import annotations
 import os
 import threading
 import time
+import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from conftest import HashEmbedder
+from conftest import HashEmbedder, make_client
 
-from ratchet.store import IntegrityError, Store, VoyageEmbedder, atlas_setup
+from ratchet.store import IntegrityError, NewFailure, Store, VoyageEmbedder, VoyageReranker, atlas_setup
 from ratchet.types import Cost, Event, Guard, Harness, Outcome, Procedure, Trace
 
 pytestmark = pytest.mark.integration
@@ -248,6 +250,56 @@ def test_hybrid_search_fuses_keyword_and_vector_hits(store: Store) -> None:
     assert [h.id for h in scoped] == ["f-ticket"]
 
 
+class _ReverseReranker:
+    model = "reverse"
+
+    def rerank(self, query: str, documents: Sequence[str], top_k: int) -> list[tuple[int, float]]:
+        return [(i, 1.0 - 0.1 * n) for n, i in enumerate(reversed(range(len(documents))))][:top_k]
+
+
+def test_hybrid_rerank_reorders_the_fused_shortlist(atlas_uri: str, hash_embedder: HashEmbedder) -> None:
+    name = f"ratchet_test_rr_{uuid.uuid4().hex[:8]}"
+    s = Store(atlas_uri, name, embedder=hash_embedder, reranker=_ReverseReranker())
+    try:
+        _load_failures(s)
+        plain = s.similar_failures_hybrid("dispute ticket closed early", 3)
+        reranked = s.similar_failures_hybrid("dispute ticket closed early", 3, rerank=True)
+        assert reranked[0].id == plain[-1].id and reranked[0].score == pytest.approx(1.0)
+        assert len(reranked) == 3
+    finally:
+        s._client.drop_database(name)
+        s.close()
+
+
+def test_harness_version_filters_vector_and_hybrid_search(store: Store) -> None:
+    store.put_failures(
+        [
+            NewFailure("refund timed out twice", "refund", "r/1", "v1", "a"),
+            NewFailure("refund timed out again", "refund", "r/2", "v2", "b"),
+        ]
+    )
+    store.setup()
+    hits = _eventually(lambda: store.similar_failures("refund timed out", 5, harness_version="v2"))
+    assert [h.id for h in hits] == ["b"]
+    both = store.similar_failures_hybrid("refund timed out", 5, harness_version="v1", case_family="refund")
+    assert [h.id for h in both] == ["a"]
+
+
+def test_put_failures_embeds_the_new_ones_in_a_single_batch(
+    store: Store, hash_embedder: HashEmbedder
+) -> None:
+    batch = [NewFailure(f"failure number {i}", "fam", f"r/{i}") for i in range(5)]
+    ids = store.put_failures(batch)
+    assert len(set(ids)) == 5 and store.db["failures"].count_documents({}) == 5
+    assert hash_embedder.calls == [("document", 5)]
+    assert store.put_failures([*batch, NewFailure("one more", "fam")]) == [
+        *ids,
+        NewFailure("one more", "fam").id,
+    ]
+    assert hash_embedder.calls == [("document", 5), ("document", 1)]
+    assert store.put_failures(batch) == ids and len(hash_embedder.calls) == 2
+
+
 def test_put_failure_is_idempotent_and_embeds_once(store: Store, hash_embedder: HashEmbedder) -> None:
     fid = store.put_failure("same text", case_family="x", trace_ref="r/1")
     assert store.put_failure("same text", case_family="x", trace_ref="r/1") == fid
@@ -297,7 +349,8 @@ def test_watch_yields_change_stream_events(store: Store) -> None:
 def test_voyage_embeddings_drive_semantic_retrieval(atlas_uri: str) -> None:
     if not os.environ.get("VOYAGE_API_KEY"):
         pytest.fail("VOYAGE_API_KEY is not set; export it for the live tests")
-    s = Store(atlas_uri, "ratchet_test_voyage", embedder=VoyageEmbedder())
+    voyage = VoyageEmbedder()
+    s = Store(atlas_uri, "ratchet_test_voyage", embedder=voyage)
     try:
         _load_failures(s)
         hits = _eventually(
@@ -306,6 +359,34 @@ def test_voyage_embeddings_drive_semantic_retrieval(atlas_uri: str) -> None:
         assert hits[0].id == "f-dup"
         hybrid = s.similar_failures_hybrid("customer was emailed prematurely", 3)
         assert hybrid[0].id == "f-mail"
+        reranker = VoyageReranker()
+        try:
+            s._reranker = reranker
+            best = s.similar_failures_hybrid("customer was emailed prematurely", 3, rerank=True)
+            assert best[0].id == "f-mail" and 0.0 <= best[0].score <= 1.0
+        finally:
+            reranker.close()
     finally:
         s._client.drop_database("ratchet_test_voyage")
         s.close()
+        voyage.close()
+
+
+def test_setup_cli_creates_everything_on_a_fresh_database(atlas_uri: str) -> None:
+    name = f"ratchet_test_cli_{uuid.uuid4().hex[:8]}"
+    try:
+        assert atlas_setup.main(["--uri", atlas_uri, "--db", name]) == 0
+        assert atlas_setup.main(["--uri", atlas_uri, "--db", name]) == 0
+        client = make_client(atlas_uri)
+        assert f"{name}_heldout" in client.list_database_names()
+        client.close()
+    finally:
+        client = make_client(atlas_uri)
+        client.drop_database(name)
+        client.drop_database(f"{name}_heldout")
+        client.close()
+
+
+def test_waiting_for_search_indexes_times_out_when_they_do_not_exist(store: Store) -> None:
+    with pytest.raises(TimeoutError, match="not queryable"):
+        atlas_setup.wait_search_indexes(store.db, timeout_s=0.2, poll_s=0.05)

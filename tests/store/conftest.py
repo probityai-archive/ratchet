@@ -25,7 +25,19 @@ _WORD = re.compile(r"[a-z0-9_]+")
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "integration: needs the local Atlas container (docker/compose.yaml)")
+    config.addinivalue_line(
+        "markers", "sandbox: runs against the hackathon Atlas cluster; opt in with -m sandbox"
+    )
     config.addinivalue_line("markers", "live: calls the real Voyage API; needs VOYAGE_API_KEY")
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Sandbox tests touch a shared cloud cluster, so they run only when asked for with `-m sandbox`."""
+    if "sandbox" in (config.getoption("-m") or ""):
+        return
+    chosen = [i for i in items if "sandbox" not in i.keywords]
+    config.hook.pytest_deselected(items=[i for i in items if "sandbox" in i.keywords])
+    items[:] = chosen
 
 
 class HashEmbedder:
@@ -71,8 +83,14 @@ def atlas_uri() -> str:
 
     if not up():
         compose = ROOT / "docker" / "compose.yaml"
-        subprocess.run(["docker", "compose", "-f", str(compose), "up", "-d", "--wait"], check=False)
-    assert up(), "local Atlas is not reachable; run: docker compose -f docker/compose.yaml up -d --wait"
+        try:
+            subprocess.run(
+                ["docker", "compose", "-f", str(compose), "up", "-d", "--wait"], check=False, timeout=240
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            pytest.fail(f"local Atlas is down and docker could not start it ({type(exc).__name__})")
+    if not up():
+        pytest.fail("local Atlas is not reachable; run: docker compose -f docker/compose.yaml up -d --wait")
     return uri
 
 

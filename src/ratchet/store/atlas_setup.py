@@ -1,6 +1,6 @@
 """Create the Ratchet collections, indexes and Atlas search indexes. Safe to re-run.
 
-    uv run python -m ratchet.store.atlas_setup --uri "$RATCHET_MONGODB_URI" --db ratchet
+    uv run python -m ratchet.store --uri "$RATCHET_MONGODB_URI" --db ratchet
 
 Every query the store runs has an index here. Search indexes are created only when missing, and replaced
 when their definition changed, so running this against a live cluster never drops data or an index.
@@ -26,6 +26,7 @@ COLLECTIONS = (
     "runs",
     "traces",
     "trace_chunks",
+    "cases",
     "evals",
     "decisions",
     "failures",
@@ -35,6 +36,7 @@ COLLECTIONS = (
 
 _SEARCH_UNREACHABLE = 508  # SearchIndexManagementHostUnreachable
 
+HELDOUT_COLLECTION = "cases"
 FAILURES_VECTOR_INDEX = "failures_vector"
 FAILURES_TEXT_INDEX = "failures_text"
 
@@ -74,7 +76,11 @@ _VECTOR_DEFINITION: dict[str, Any] = {
 _TEXT_DEFINITION: dict[str, Any] = {
     "mappings": {
         "dynamic": False,
-        "fields": {"summary": {"type": "string"}, "case_family": {"type": "token"}},
+        "fields": {
+            "summary": {"type": "string"},
+            "case_family": {"type": "token"},
+            "harness_version": {"type": "token"},
+        },
     }
 }
 SEARCH_INDEXES: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
@@ -132,6 +138,12 @@ def ensure_schema(
             db[collection].create_search_index(SearchIndexModel(definition=definition, name=name, type=kind))
 
 
+def ensure_heldout(heldout_db: Database[dict[str, Any]]) -> None:
+    """Create the held-out case collection in its own database, which a role can deny."""
+    if HELDOUT_COLLECTION not in heldout_db.list_collection_names():
+        heldout_db.create_collection(HELDOUT_COLLECTION)
+
+
 def search_indexes_ready(db: Database[dict[str, Any]]) -> bool:
     """True when every search index exists and is queryable."""
     for collection, name, _kind, _definition in SEARCH_INDEXES:
@@ -160,15 +172,15 @@ def main(argv: list[str] | None = None) -> int:
         print("error: pass --uri or set RATCHET_MONGODB_URI", file=sys.stderr)
         return 2
     client: MongoClient[dict[str, Any]] = MongoClient(args.uri, tz_aware=True)
-    db = client[args.db]
-    ensure_schema(db)
-    wait_search_indexes(db, args.timeout)
-    print(
-        f"ok: {len(COLLECTIONS)} collections, {len(BTREE_INDEXES)} indexes, "
-        f"{len(SEARCH_INDEXES)} search indexes"
-    )
+    try:
+        db = client[args.db]
+        ensure_schema(db)
+        ensure_heldout(client[f"{args.db}_heldout"])
+        wait_search_indexes(db, args.timeout)
+        print(
+            f"ok: {len(COLLECTIONS)} collections, {len(BTREE_INDEXES)} indexes, "
+            f"{len(SEARCH_INDEXES)} search indexes"
+        )
+    finally:
+        client.close()
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

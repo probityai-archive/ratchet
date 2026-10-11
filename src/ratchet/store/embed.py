@@ -20,7 +20,9 @@ from pymongo.collection import Collection
 InputType = Literal["document", "query"]
 
 VOYAGE_URL = "https://api.voyageai.com/v1/embeddings"
+RERANK_URL = "https://api.voyageai.com/v1/rerank"
 DEFAULT_MODEL = "voyage-4-large"
+DEFAULT_RERANK_MODEL = "rerank-2.5"
 EMBEDDING_DIMS = 1024
 _MAX_BATCH = 128
 _RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
@@ -40,18 +42,26 @@ class Embedder(Protocol):
     def embed(self, texts: Sequence[str], input_type: InputType) -> list[list[float]]: ...
 
 
-class VoyageEmbedder:
-    """Voyage AI embeddings over HTTPS. The key is read from `VOYAGE_API_KEY` and is never logged."""
+class Reranker(Protocol):
+    model: str
+
+    def rerank(self, query: str, documents: Sequence[str], top_k: int) -> list[tuple[int, float]]:
+        """(index into documents, relevance score) pairs, best first."""
+        ...
+
+
+class _VoyageHTTP:
+    """Authenticated JSON POSTs to Voyage with bounded retries. The key is never logged or raised."""
 
     def __init__(
         self,
-        api_key: str | None = None,
-        model: str = DEFAULT_MODEL,
+        api_key: str | None,
+        model: str,
+        url: str,
         *,
-        client: httpx.Client | None = None,
-        retries: int = 4,
-        backoff_s: float = 1.0,
-        url: str = VOYAGE_URL,
+        client: httpx.Client | None,
+        retries: int,
+        backoff_s: float,
     ) -> None:
         key = api_key if api_key is not None else os.environ.get("VOYAGE_API_KEY", "")
         if not key:
@@ -66,23 +76,8 @@ class VoyageEmbedder:
     def close(self) -> None:
         self._client.close()
 
-    def embed(self, texts: Sequence[str], input_type: InputType) -> list[list[float]]:
-        out: list[list[float]] = []
-        for start in range(0, len(texts), _MAX_BATCH):
-            out.extend(self._embed_batch(list(texts[start : start + _MAX_BATCH]), input_type))
-        return out
-
-    def _embed_batch(self, batch: list[str], input_type: InputType) -> list[list[float]]:
-        body = {"input": batch, "model": self.model, "input_type": input_type, "truncation": True}
+    def _post_with_retry(self, body: dict[str, Any]) -> httpx.Response:
         headers = {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
-        resp = self._post_with_retry(body, headers)
-        rows = sorted(resp.json()["data"], key=lambda r: r["index"])
-        vectors = [list(map(float, r["embedding"])) for r in rows]
-        if len(vectors) != len(batch) or any(len(v) != EMBEDDING_DIMS for v in vectors):
-            raise EmbeddingError(f"unexpected embedding shape from model {self.model}")
-        return vectors
-
-    def _post_with_retry(self, body: dict[str, Any], headers: dict[str, str]) -> httpx.Response:
         last = "no attempt made"
         for attempt in range(self._retries + 1):
             try:
@@ -94,10 +89,65 @@ class VoyageEmbedder:
                     return resp
                 last = f"HTTP {resp.status_code}"
                 if resp.status_code not in _RETRY_STATUS:
-                    raise EmbeddingError(f"embedding request failed: {last}")
+                    raise EmbeddingError(f"voyage request failed: {last}")
             if attempt < self._retries:
                 time.sleep(self._backoff_s * 2**attempt)
-        raise EmbeddingError(f"embedding request failed after retries: {last}")
+        raise EmbeddingError(f"voyage request failed after retries: {last}")
+
+
+class VoyageEmbedder(_VoyageHTTP):
+    """Voyage AI embeddings over HTTPS. The key is read from `VOYAGE_API_KEY`."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = DEFAULT_MODEL,
+        *,
+        client: httpx.Client | None = None,
+        retries: int = 4,
+        backoff_s: float = 1.0,
+        url: str = VOYAGE_URL,
+    ) -> None:
+        super().__init__(api_key, model, url, client=client, retries=retries, backoff_s=backoff_s)
+
+    def embed(self, texts: Sequence[str], input_type: InputType) -> list[list[float]]:
+        out: list[list[float]] = []
+        for start in range(0, len(texts), _MAX_BATCH):
+            out.extend(self._embed_batch(list(texts[start : start + _MAX_BATCH]), input_type))
+        return out
+
+    def _embed_batch(self, batch: list[str], input_type: InputType) -> list[list[float]]:
+        body = {"input": batch, "model": self.model, "input_type": input_type, "truncation": True}
+        resp = self._post_with_retry(body)
+        rows = sorted(resp.json()["data"], key=lambda r: r["index"])
+        vectors = [list(map(float, r["embedding"])) for r in rows]
+        if len(vectors) != len(batch) or any(len(v) != EMBEDDING_DIMS for v in vectors):
+            raise EmbeddingError(f"unexpected embedding shape from model {self.model}")
+        return vectors
+
+
+class VoyageReranker(_VoyageHTTP):
+    """Voyage cross-encoder reranking: reads query and document together, so it orders a short list better
+    than vector distance can."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = DEFAULT_RERANK_MODEL,
+        *,
+        client: httpx.Client | None = None,
+        retries: int = 4,
+        backoff_s: float = 1.0,
+        url: str = RERANK_URL,
+    ) -> None:
+        super().__init__(api_key, model, url, client=client, retries=retries, backoff_s=backoff_s)
+
+    def rerank(self, query: str, documents: Sequence[str], top_k: int) -> list[tuple[int, float]]:
+        if not documents:
+            return []
+        body = {"query": query, "documents": list(documents), "model": self.model, "top_k": top_k}
+        rows = self._post_with_retry(body).json()["data"]
+        return [(int(r["index"]), float(r["relevance_score"])) for r in rows]
 
 
 def cache_key(model: str, input_type: InputType, text: str) -> str:
