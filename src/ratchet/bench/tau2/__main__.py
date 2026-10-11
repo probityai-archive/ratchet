@@ -174,6 +174,14 @@ class TraceSink:
         self._coll.insert_one(doc)
         self.written += 1
 
+    def upsert(self, trace: dict[str, Any], extra: dict[str, Any]) -> None:
+        """Insert a recorded trace (from a run's traces.jsonl) under its id; a second upload replaces it."""
+        _id = f"{self.run_name}:{trace['run_id']}"
+        self._coll.replace_one(
+            {"_id": _id}, {**trace, **extra, "_id": _id, "run_name": self.run_name}, upsert=True
+        )
+        self.written += 1
+
     def close(self) -> None:
         self._client.close()
 
@@ -487,6 +495,26 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_upload(args: argparse.Namespace) -> int:
+    """Store a finished run's traces (each with its result row) in the evaluator-only database. Used for runs
+    made on a box, which carries no database credentials."""
+    uri = os.environ.get("RATCHET_MONGODB_URI")
+    if not uri:
+        raise SystemExit("set RATCHET_MONGODB_URI")
+    root = Path(args.run)
+    config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+    rows = {r["run_id"]: r for r in read_jsonl(root / "runs.jsonl") if r.get("run_id")}
+    sink = TraceSink(uri, args.trace_db, f"{config['domain']}/{config['harness']['version']}/{root.name}")
+    try:
+        for t in read_jsonl(root / "traces.jsonl"):
+            if t["run_id"] in rows:
+                sink.upsert(t, {"row": rows[t["run_id"]]})
+    finally:
+        sink.close()
+    _log(f"stored {sink.written} traces in {args.trace_db}.tau2_traces")
+    return 0
+
+
 def all_runs(out: Path) -> list[Path]:
     return sorted(p.parent for p in Path(out).glob("runs/*/*/*/config.json"))
 
@@ -546,6 +574,10 @@ def parser() -> argparse.ArgumentParser:
     e.add_argument("--max-clusters", type=int, default=4)
     e.add_argument("--candidates-per-cluster", type=int, default=3)
     e.set_defaults(func=cmd_evolve)
+    up = sub.add_parser("upload")
+    up.add_argument("run")
+    up.add_argument("--trace-db", default="ratchet_heldout")
+    up.set_defaults(func=cmd_upload)
     fz = sub.add_parser("finalize")
     fz.add_argument("run")
     fz.set_defaults(func=cmd_finalize)

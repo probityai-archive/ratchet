@@ -58,6 +58,9 @@ class FakeMongo:
     def insert_one(self, doc: dict[str, Any]) -> None:
         FakeMongo.docs.append(doc)
 
+    def replace_one(self, query: dict[str, Any], doc: dict[str, Any], upsert: bool = False) -> None:
+        FakeMongo.docs = [d for d in FakeMongo.docs if d["_id"] != query["_id"]] + [doc]
+
     def close(self) -> None:
         return None
 
@@ -307,6 +310,22 @@ def test_evolve_with_nothing_to_fix_freezes_the_seed(
     assert cli.load_harness(str(root / "frozen.json"), "airline").version == frozen["harness"]["version"]
     with pytest.raises(SystemExit, match="already has a run"):
         cli.main(args)
+
+
+def test_upload_stores_a_box_run_once(
+    monkeypatch: pytest.MonkeyPatch, scripted: SayDone, tmp_path: Path
+) -> None:
+    import pymongo
+
+    root = _run(tmp_path)
+    monkeypatch.setattr(pymongo, "MongoClient", FakeMongo)
+    with pytest.raises(SystemExit, match="RATCHET_MONGODB_URI"):
+        cli.main(["upload", str(root)])
+    monkeypatch.setenv("RATCHET_MONGODB_URI", "mongodb://fake")
+    FakeMongo.docs = []
+    assert cli.main(["upload", str(root)]) == 0
+    assert cli.main(["upload", str(root)]) == 0
+    assert len(FakeMongo.docs) == 4 and all("row" in d for d in FakeMongo.docs)
 
 
 def test_a_run_over_several_endpoints_records_each_and_finishes(
