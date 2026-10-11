@@ -58,9 +58,9 @@ leaderboard entry:
 | travel | `gpt-oss-120b-medium` | stopped, 0 gen | 40.0% (4/10) | 17.5% (7/40) | 40.0% (16/40) | none promoted | | | |
 | workspace | `gpt-oss-120b-medium` | stopped, 0 gen | 75.0% (15/20) | 61.4% (86/140) | 10.0% (14/140) | none promoted | | | |
 | banking | `gpt-oss-120b` | in progress, 0 gen | 100.0% (8/8) | 59.4% (19/32) | 62.5% (20/32) | none promoted | | | |
-| slack | `gpt-oss-120b` | in progress, 0 gen | | | | none promoted | | | |
-| travel | `gpt-oss-120b` | in progress, 0 gen | | | | none promoted | | | |
-| workspace | `gpt-oss-120b` | in progress, 0 gen | | | | none promoted | | | |
+| slack | `gpt-oss-120b` | in progress, 0 gen | 90.0% (9/10) | 60.0% (12/20) | 90.0% (18/20) | none promoted | | | |
+| travel | `gpt-oss-120b` | in progress, 0 gen | 40.0% (4/10) | 22.5% (9/40) | 45.0% (18/40) | none promoted | | | |
+| workspace | `gpt-oss-120b` | in progress, 0 gen | 90.0% (18/20) | 64.3% (90/140) | 10.7% (15/140) | none promoted | | | |
 
 ## Runs
 ### banking (v1.2.2), run `banking-evolve-20261011T1446`, complete
@@ -323,6 +323,8 @@ No candidate was admitted in this run.
 | Version | Evaluation | Role | Gen | Utility | Utility under attack | Targeted ASR | Ratchet pass |
 |---|---|---|---|---|---|---|---|
 | `30b96aa50fe4` | eval-0001 | baseline |  | 100.0% (8/8) | 59.4% (19/32) | 62.5% (20/32) | 40.0% (16/40) |
+| `30b96aa50fe4` | eval-0004 | parent_run_1 | 1 | 50.0% (4/8) | 68.8% (22/32) | 43.8% (14/32) | 37.5% (15/40) |
+| `30b96aa50fe4` | eval-0005 | parent_run_2 | 1 | 87.5% (7/8) | 71.9% (23/32) | 43.8% (14/32) | 42.5% (17/40) |
 
 No candidate was admitted in this run.
 
@@ -340,7 +342,9 @@ No candidate was admitted in this run.
 
 | Version | Evaluation | Role | Gen | Utility | Utility under attack | Targeted ASR | Ratchet pass |
 |---|---|---|---|---|---|---|---|
-| `f79bacb76113` | not evaluated | | | | | | |
+| `f79bacb76113` | eval-0001 | baseline |  | 90.0% (9/10) | 60.0% (12/20) | 90.0% (18/20) | 33.3% (10/30) |
+| `f79bacb76113` | eval-0004 | parent_run_1 | 1 | 90.0% (9/10) | 55.0% (11/20) | 95.0% (19/20) | 30.0% (9/30) |
+| `f79bacb76113` | eval-0005 | parent_run_2 | 1 | 90.0% (9/10) | 60.0% (12/20) | 90.0% (18/20) | 33.3% (10/30) |
 
 No candidate was admitted in this run.
 
@@ -358,7 +362,8 @@ No candidate was admitted in this run.
 
 | Version | Evaluation | Role | Gen | Utility | Utility under attack | Targeted ASR | Ratchet pass |
 |---|---|---|---|---|---|---|---|
-| `90796ac85d40` | not evaluated | | | | | | |
+| `90796ac85d40` | eval-0001 | baseline |  | 40.0% (4/10) | 22.5% (9/40) | 45.0% (18/40) | 24.0% (12/50) |
+| `90796ac85d40` | eval-0004 | parent_run_1 | 1 | 30.0% (3/10) | 30.0% (12/40) | 52.5% (21/40) | 22.0% (11/50) |
 
 No candidate was admitted in this run.
 
@@ -376,7 +381,7 @@ No candidate was admitted in this run.
 
 | Version | Evaluation | Role | Gen | Utility | Utility under attack | Targeted ASR | Ratchet pass |
 |---|---|---|---|---|---|---|---|
-| `a2633162e473` | not evaluated | | | | | | |
+| `a2633162e473` | eval-0001 | baseline |  | 90.0% (18/20) | 64.3% (90/140) | 10.7% (15/140) | 66.9% (107/160) |
 
 No candidate was admitted in this run.
 
