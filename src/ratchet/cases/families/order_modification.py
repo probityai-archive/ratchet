@@ -1,0 +1,315 @@
+"""An order change where the customer adds one more change before the irreversible step."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from ratchet.cases.build import Company, address, make_case
+from ratchet.cases.model import Case, Expect, Family
+from ratchet.world.faults import Fault
+
+FAMILY = Family(
+    id="order_modification",
+    title="Order modification with a late addition",
+    rationale=(
+        "In tau-bench retail, item changes to a pending order can be made once; the agent must collect "
+        "every change before calling the tool, and the price difference must be settled exactly. Customers "
+        "add changes mid-conversation, and an agent that acts on its first read locks the order with half "
+        "the request and cannot apply the rest. Here a follow-up message lands on the ticket while the "
+        "agent looks up the order or the catalog. The final items must reflect every change, and charges "
+        "minus refunds must equal the new order total. Controls have a single change (one with a refund "
+        "delta) or several changes stated up front, which must still go in one call. A benign twin mentions "
+        "a second change and then withdraws it, with nothing pending."
+    ),
+    sources=[
+        "tau-bench retail (Yao et al., 2024): modify_pending_order_items can be called once; collect all "
+        "items first",
+        "tau2-bench (Barres et al., 2025): retail domain, final database state graded",
+    ],
+)
+_ID = FAMILY.id
+
+
+def _shop(c: Company) -> None:
+    c.product(
+        "prod_tee",
+        "Organic tee",
+        {
+            "sku-tee-blue-m": ({"color": "blue", "size": "M"}, 2400),
+            "sku-tee-blue-l": ({"color": "blue", "size": "L"}, 2600),
+            "sku-tee-red-m": ({"color": "red", "size": "M"}, 2400),
+            "sku-tee-red-l": ({"color": "red", "size": "L"}, 2600),
+        },
+    )
+    c.product(
+        "prod_mug",
+        "Stoneware mug",
+        {
+            "sku-mug-red": ({"glaze": "red"}, 1800),
+            "sku-mug-blue": ({"glaze": "blue"}, 1900),
+        },
+    )
+
+
+def _modify(order_id: str, *changes: tuple[str, str]) -> dict[str, Any]:
+    return {
+        "type": "modify_order",
+        "order_id": order_id,
+        "changes": [{"line_id": line, "new_sku": sku} for line, sku in changes],
+    }
+
+
+def _followup(ticket_id: str, body: str, request: dict[str, Any], tool: str) -> Fault:
+    return Fault(
+        "customer-followup",
+        "mutate",
+        tool=tool,
+        nth=1,
+        ops=[{"op": "customer_message", "ticket_id": ticket_id, "body": body, "requests": [request]}],
+        note="customer adds a change mid-run",
+    )
+
+
+def _v1() -> Case:
+    c = Company()
+    _shop(c)
+    c.customer("cus_hw22", "Hannah Weber", "hannah.weber@web.example", "pm_hw_visa")
+    c.order(
+        "ord_hw_510",
+        "cus_hw22",
+        "ch_1HwS4",
+        [("prod_tee", "sku-tee-blue-m"), ("prod_mug", "sku-mug-red")],
+        address("Lindenstrasse 4", "Berlin", "10969", "DE"),
+    )
+    c.ticket(
+        "T-1201",
+        "cus_hw22",
+        "Change tee size",
+        "Please change the tee on order ord_hw_510 (line L1) from M to L, same blue.",
+        [_modify("ord_hw_510", ("L1", "sku-tee-blue-l"))],
+    )
+    fault = _followup(
+        "T-1201",
+        "Sorry, one more thing before it goes out: please also make the mug (L2) blue.",
+        _modify("ord_hw_510", ("L2", "sku-mug-blue")),
+        "orders_get",
+    )
+    return make_case(
+        _ID,
+        "v1",
+        "train",
+        c,
+        "T-1201",
+        Expect(
+            ticket_status={"T-1201": "solved"},
+            orders={
+                "ord_hw_510": {
+                    "skus": ["sku-tee-blue-l", "sku-mug-blue"],
+                    "status": "pending_modified",
+                    "total_cents": 4500,
+                }
+            },
+            new_charges={"ord_hw_510": 300},
+            paid_equals_total=["ord_hw_510"],
+            mail_required=[{"template": "order_updated", "reference_id": "ord_hw_510"}],
+            mail_to="hannah.weber@web.example",
+        ),
+        faults=[fault],
+        trap="customer adds a second change after the order is read; one-shot modify locks it out",
+    )
+
+
+def _v2() -> Case:
+    c = Company()
+    c.product(
+        "prod_lamp",
+        "Arc floor lamp",
+        {
+            "sku-lamp-brass": ({"finish": "brass"}, 8900),
+            "sku-lamp-black": ({"finish": "black"}, 7900),
+        },
+    )
+    c.customer("cus_ys40", "Yusuf Sahin", "yusuf.sahin@gmail.example", "pm_ys_mc")
+    c.order(
+        "ord_ys_330",
+        "cus_ys40",
+        "ch_8YsG2",
+        [("prod_lamp", "sku-lamp-brass")],
+        address("Bagdat Cd 210", "Istanbul", "34728", "TR"),
+    )
+    c.ticket(
+        "T-1240",
+        "cus_ys40",
+        "Lamp finish",
+        "On order ord_ys_330 I would prefer the black lamp instead of brass (line L1).",
+        [_modify("ord_ys_330", ("L1", "sku-lamp-black"))],
+    )
+    return make_case(
+        _ID,
+        "v2",
+        "train",
+        c,
+        "T-1240",
+        Expect(
+            ticket_status={"T-1240": "solved"},
+            orders={
+                "ord_ys_330": {"skus": ["sku-lamp-black"], "status": "pending_modified", "total_cents": 7900}
+            },
+            refunds={"ch_8YsG2": {"total_cents": 1000, "count": 1, "status": "succeeded"}},
+            paid_equals_total=["ord_ys_330"],
+            mail_required=[{"template": "order_updated", "reference_id": "ord_ys_330"}],
+            mail_to="yusuf.sahin@gmail.example",
+        ),
+    )
+
+
+def _v3() -> Case:
+    c = Company()
+    c.product(
+        "prod_pack",
+        "Daypack",
+        {
+            "sku-pack-grey-20l": ({"color": "grey", "volume": "20l"}, 6500),
+            "sku-pack-grey-30l": ({"color": "grey", "volume": "30l"}, 7500),
+        },
+    )
+    c.product(
+        "prod_bottle",
+        "Insulated bottle",
+        {
+            "sku-bottle-steel": ({"finish": "steel"}, 2200),
+            "sku-bottle-black": ({"finish": "black"}, 2400),
+        },
+    )
+    c.customer("cus_lm09", "Luis Moreno", "luis.moreno@telefonica.example", "pm_lm_visa")
+    c.order(
+        "ord_lm_918",
+        "cus_lm09",
+        "ch_6LmP0",
+        [("prod_bottle", "sku-bottle-steel"), ("prod_pack", "sku-pack-grey-20l")],
+        address("Calle Mayor 19", "Madrid", "28013", "ES"),
+    )
+    c.ticket(
+        "T-1388",
+        "cus_lm09",
+        "Bigger daypack",
+        "For order ord_lm_918, could you swap the 20 l daypack (line L2) for the 30 l one?",
+        [_modify("ord_lm_918", ("L2", "sku-pack-grey-30l"))],
+    )
+    fault = _followup(
+        "T-1388",
+        "And the bottle (L1) in black please, if it is not too late.",
+        _modify("ord_lm_918", ("L1", "sku-bottle-black")),
+        "catalog_get_product",
+    )
+    return make_case(
+        _ID,
+        "v3",
+        "heldout",
+        c,
+        "T-1388",
+        Expect(
+            ticket_status={"T-1388": "solved"},
+            orders={
+                "ord_lm_918": {
+                    "skus": ["sku-bottle-black", "sku-pack-grey-30l"],
+                    "status": "pending_modified",
+                    "total_cents": 9900,
+                }
+            },
+            new_charges={"ord_lm_918": 1200},
+            paid_equals_total=["ord_lm_918"],
+            mail_required=[{"template": "order_updated", "reference_id": "ord_lm_918"}],
+            mail_to="luis.moreno@telefonica.example",
+        ),
+        faults=[fault],
+        trap="the extra change arrives while the agent checks the catalog, on a different line",
+    )
+
+
+def _v4() -> Case:
+    c = Company()
+    _shop(c)
+    c.customer("cus_ao77", "Amara Obi", "amara.obi@yahoo.example", "pm_ao_visa")
+    c.order(
+        "ord_ao_603",
+        "cus_ao77",
+        "ch_2AoX5",
+        [("prod_mug", "sku-mug-blue"), ("prod_tee", "sku-tee-red-m")],
+        address("14 Allen Ave", "Lagos", "100271", "NG"),
+    )
+    c.ticket(
+        "T-1405",
+        "cus_ao77",
+        "Two changes",
+        "On order ord_ao_603: the mug (L1) in red instead of blue, and the tee (L2) in L instead of M.",
+        [_modify("ord_ao_603", ("L1", "sku-mug-red"), ("L2", "sku-tee-red-l"))],
+    )
+    return make_case(
+        _ID,
+        "v4",
+        "heldout",
+        c,
+        "T-1405",
+        Expect(
+            ticket_status={"T-1405": "solved"},
+            orders={
+                "ord_ao_603": {
+                    "skus": ["sku-mug-red", "sku-tee-red-l"],
+                    "status": "pending_modified",
+                    "total_cents": 4400,
+                }
+            },
+            new_charges={"ord_ao_603": 100},
+            paid_equals_total=["ord_ao_603"],
+            mail_required=[{"template": "order_updated", "reference_id": "ord_ao_603"}],
+            mail_to="amara.obi@yahoo.example",
+        ),
+        trap="two changes stated up front; applying them one call at a time locks the order after the first",
+    )
+
+
+def _v5() -> Case:
+    c = Company()
+    _shop(c)
+    c.customer("cus_mk64", "Marta Kowalska", "marta.kowalska@wp.example", "pm_mk_mc")
+    c.order(
+        "ord_mk_745",
+        "cus_mk64",
+        "ch_4MkE7",
+        [("prod_mug", "sku-mug-red"), ("prod_tee", "sku-tee-red-m")],
+        address("ul. Prosta 7", "Warsaw", "00-838", "PL"),
+    )
+    c.ticket(
+        "T-1466",
+        "cus_mk64",
+        "Tee size",
+        "Please switch the tee on order ord_mk_745 (line L2) to size L. I wondered about the mug colour "
+        "too, but I will keep it red. That is everything.",
+        [_modify("ord_mk_745", ("L2", "sku-tee-red-l"))],
+    )
+    return make_case(
+        _ID,
+        "v5",
+        "heldout",
+        c,
+        "T-1466",
+        Expect(
+            ticket_status={"T-1466": "solved"},
+            orders={
+                "ord_mk_745": {
+                    "skus": ["sku-mug-red", "sku-tee-red-l"],
+                    "status": "pending_modified",
+                    "total_cents": 4400,
+                }
+            },
+            new_charges={"ord_mk_745": 200},
+            paid_equals_total=["ord_mk_745"],
+            mail_required=[{"template": "order_updated", "reference_id": "ord_mk_745"}],
+            mail_to="marta.kowalska@wp.example",
+        ),
+    )
+
+
+def cases() -> list[Case]:
+    return [_v1(), _v2(), _v3(), _v4(), _v5()]
