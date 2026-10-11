@@ -171,6 +171,8 @@ def cmd_trial(args: argparse.Namespace) -> int:
     config = {
         "agent_model": args.agent_model,
         "user_model": args.user_model,
+        "agent_endpoint": base_url,
+        "user_endpoint": args.user_base_url or base_url,
         "temperature": args.temperature,
         "tool_sandbox_commit": tool_sandbox_commit(),
         "harness": harness.version,
@@ -186,7 +188,7 @@ def cmd_trial(args: argparse.Namespace) -> int:
     }
     (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     model = _client(base_url, api_key, args.agent_model, args.temperature)
-    user = endpoint_user(base_url, api_key, args.user_model)
+    user = endpoint_user(args.user_base_url or base_url, api_key, args.user_model)
     runner = RecordingRunner(ToolSandboxRunner(user=user), store, len(cases))
     report = evaluate_many([harness], cases, runner, model, workers=args.workers)[0]
     payload = {**report.to_payload(), "config": config, "finished": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
@@ -234,6 +236,8 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     config = {
         "agent_model": args.agent_model,
         "user_model": args.user_model,
+        "agent_endpoint": base_url,
+        "user_endpoint": args.user_base_url or base_url,
         "improver_model": args.improver_model,
         "temperature": args.temperature,
         "tool_sandbox_commit": tool_sandbox_commit(),
@@ -250,7 +254,9 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     model = _client(base_url, api_key, args.agent_model, args.temperature)
     improver = _client(base_url, api_key, args.improver_model, None)
     runner = RecordingRunner(
-        ToolSandboxRunner(user=endpoint_user(base_url, api_key, args.user_model)), store, len(cases)
+        ToolSandboxRunner(user=endpoint_user(args.user_base_url or base_url, api_key, args.user_model)),
+        store,
+        len(cases),
     )
     signer = Signer.from_env() if os.environ.get("RATCHET_SIGNING_KEY") else Signer.generate()
     log_path = root / "log.txt"
@@ -334,6 +340,7 @@ def parser() -> argparse.ArgumentParser:
     t.add_argument("--user-model", default="gpt-5.6-luna")
     t.add_argument("--temperature", type=float, default=0.0)
     t.add_argument("--base-url", default=None)
+    t.add_argument("--user-base-url", default=None, help="the user simulator's endpoint, if not --base-url")
     t.add_argument("--workers", type=int, default=8)
     t.add_argument("--seed", type=int, default=DEFAULT_SEED)
     t.add_argument("--n-train", type=int, default=26, help="base scenarios assigned to train")
@@ -353,6 +360,7 @@ def parser() -> argparse.ArgumentParser:
     e.add_argument("--improver-model", default="gpt-5.6-terra")
     e.add_argument("--temperature", type=float, default=0.0)
     e.add_argument("--base-url", default=None)
+    e.add_argument("--user-base-url", default=None, help="the user simulator's endpoint, if not --base-url")
     e.add_argument("--workers", type=int, default=8)
     e.add_argument("--seed", type=int, default=DEFAULT_SEED)
     e.add_argument("--n-train", type=int, default=26, help="base scenarios assigned to train")

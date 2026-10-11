@@ -271,3 +271,22 @@ def test_evolve_wires_the_lab_and_writes_the_result(
     assert (root / "scenarios.jsonl").exists() and (root / "cases.json").exists()
     with pytest.raises(SystemExit, match="already has a run"):
         cli.main(args)
+
+
+def test_the_user_simulator_can_use_its_own_endpoint(
+    offline: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[str] = []
+
+    def user(url: str, *_a: Any, **_k: Any) -> Any:
+        asked.append(url)
+        return user_factory([END])
+
+    monkeypatch.setattr(cli, "endpoint_user", user)
+    base = ["--out", str(tmp_path), "trial", "--limit", "1", "--workers", "1"]
+    assert cli.main([*base, "--user-base-url", "http://users.test/v1"]) == 0
+    assert cli.main([*base, "--trial", "2"]) == 0
+    assert asked == ["http://users.test/v1", "http://endpoint.test/v1"]
+    config = json.loads(next(tmp_path.rglob("all-trial-1/config.json")).read_text(encoding="utf-8"))
+    assert config["agent_endpoint"] == "http://endpoint.test/v1"
+    assert config["user_endpoint"] == "http://users.test/v1"
