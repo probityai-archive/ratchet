@@ -11,7 +11,7 @@ dependencies = [
     "cryptography>=44",
     "rich>=15.0.0",
     "raindrop-ai==0.0.75",
-    "probity-verify",
+    "probity-verify==0.1.0",
     "agent-evidence-vectors==0.17.7",
 ]
 
@@ -47,6 +47,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ratchet"]
+
+[tool.hatch.build.targets.sdist]
+# Ship what the repository tracks; never local demo output or tool state.
+exclude = ["docs/demo/ids.env", "docs/demo/out", ".humanizer", "private", "captures", "research", "dist"]
 
 [tool.ruff]
 line-length = 110
