@@ -36,7 +36,9 @@ tests/        one test module per source module, plus tests/integration/
   (see Safety).
 - `Procedure(id, name, when: str, steps: list[str], origin_failure_ids: list[str])`
 - `Harness(version: str, parent: str | None, system_prompt: str, procedures: list[Procedure], guards: list[Guard], tool_allowlist: list[str], created_by: Literal["seed","improver","human"], digest: str)`.
-  `digest` is the SHA-256 of the canonical JSON of every other field; the version id is its first 12 hex chars.
+  `digest` is the SHA-256 of the canonical JSON of every field EXCEPT `digest` and `version` (exactly
+  `Harness.content_of`); `version` is the first 12 hex chars of `digest`. Every read and every verification
+  recomputes both and rejects a mismatch.
 
 ## Lane interfaces
 
@@ -217,16 +219,6 @@ FRESH executions count as evaluation evidence. RECORDED displays add no
 new evidence. CACHED response playback never counts as a fresh run.
 
 Costs are recorded and reported, not used as a worker admission gate.
-```
-
-**Source locations:** line numbers refer to the supplied contract, not the obsolete reference ledger in ruling 1.
-
-| Location | Short excerpt | Backup references |
-|---|---|---|
-| Lines 36-38 | `Procedure(... when: str ...)` | `context_start_text: "- Procedure(id, name"`; `context_end_text: "first 12 hex chars."` |
-| Lines 64-69 | `Replay (guards only)`; `max(2, D+1)` | `context_start_text: "1. Replay (guards only):"`; `context_end_text: "judged by this gate only."` |
-| Lines 70-75 | `Authority does not grow` | `context_start_text: "3. No regression:"`; `context_end_text: "It is not a gate."` |
-| Lines 80-87 | `Held-out secrecy`; `The receipt (DSSE)` | `context_start_text: "Held-out secrecy:"`; `context_end_text: "an independently pinned key."` |
 
 ## Safety
 
