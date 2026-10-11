@@ -1,6 +1,6 @@
 """Orders: line items, shipping address and status. Item changes are allowed once, while pending.
 
-As in tau-bench retail, `orders_modify_items` may be called only once per order: after it the order is
+`orders_modify_items` may be called only once per order: after it the order is
 `pending_modified` and its items are locked. The tool never moves money; the price difference must be
 settled at the payment provider.
 """
