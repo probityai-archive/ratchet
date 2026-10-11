@@ -16,8 +16,8 @@ from ratchet.cases.families import (
     reconciliation,
     refund_lost_reply,
 )
-from ratchet.cases.model import Case, CaseKind, CaseSplit, Family
-from ratchet.types import canonical_json, sha256_hex, to_jsonable
+from ratchet.cases.model import Case, CaseKind, Family
+from ratchet.types import Split, canonical_json, sha256_hex, to_jsonable
 
 _MODULES: tuple[ModuleType, ...] = (
     refund_lost_reply,
@@ -50,7 +50,7 @@ def all_cases() -> list[Case]:
     return list(_all())
 
 
-def by_split(split: CaseSplit) -> list[Case]:
+def by_split(split: Split) -> list[Case]:
     return [c for c in _all() if c.split == split]
 
 

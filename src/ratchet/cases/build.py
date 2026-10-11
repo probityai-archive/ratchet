@@ -6,7 +6,8 @@ import copy
 from datetime import timedelta
 from typing import Any
 
-from ratchet.cases.model import Case, CaseSplit, Expect
+from ratchet.cases.model import Case, Expect
+from ratchet.types import Split
 from ratchet.world.core import format_time, parse_time
 from ratchet.world.faults import Fault
 
@@ -262,7 +263,7 @@ class Company:
 def make_case(
     family: str,
     variant: str,
-    split: CaseSplit,
+    split: Split,
     company: Company,
     ticket_id: str,
     expect: Expect,

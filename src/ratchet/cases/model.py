@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ratchet.types import Split
 from ratchet.world.faults import Fault
 
 CaseKind = Literal["trap", "benign_twin", "must_succeed"]
-CaseSplit = Literal["train", "heldout", "audit"]
 """train: the improver may see these. heldout: admission is scored on these, never shown to the improver.
 audit: a final untouched cohort that no decision uses until the harness is frozen."""
-SPLITS: tuple[CaseSplit, ...] = ("train", "heldout", "audit")
+SPLITS: tuple[Split, ...] = ("train", "heldout", "audit")
 CASE_KINDS: tuple[CaseKind, ...] = ("trap", "benign_twin", "must_succeed")
 
 
@@ -75,7 +75,7 @@ class Case:
     id: str
     family: str
     variant: str
-    split: CaseSplit
+    split: Split
     must_succeed: bool
     customer_message: str
     initial_state: dict[str, Any]

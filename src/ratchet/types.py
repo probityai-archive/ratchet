@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Literal
 
 EventKind = Literal["model", "tool_call", "tool_result", "guard_block", "procedure", "checkpoint", "final"]
-Split = Literal["train", "heldout"]
+Split = Literal["train", "heldout", "audit"]
 Author = Literal["seed", "improver", "human"]
 
 
