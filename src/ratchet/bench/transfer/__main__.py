@@ -232,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     rn.add_argument("--out", required=True)
     rd = sub.add_parser("render")
-    rd.add_argument("results", nargs="+")
+    rd.add_argument("results", nargs="*")
     rd.add_argument("--out", required=True)
     rd.add_argument("--control", action="append", default=[], help="an A/A result file (v0 against v0)")
     rd.add_argument("--note", action="append", default=[], help="KEY=VALUE line for the setup section")

@@ -70,7 +70,7 @@ def _model_section(res: dict[str, Any], digest: str, title: str | None = None) -
             )
     out += [
         "",
-        "| Split | Arm | Benign-twin interventions | must_succeed failures (runs) | Run errors "
+        "| Split | Arm | Benign-twin interventions | Failed runs on must_succeed-flagged cases | Run errors "
         "| Non-FRESH results |",
         "|---|---|---|---|---|---|",
     ]
