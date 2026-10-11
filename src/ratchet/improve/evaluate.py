@@ -58,6 +58,17 @@ class CaseResult:
     error: str | None = None
     mode: Mode = "FRESH"
     recorded_at: str | None = None
+    attempts: int = 1
+    infra_failed: bool = False
+
+
+INFRA_REASON = "incomplete: model error"
+INFRA_RETRIES = 2  # predeclared: a run lost to the model endpoint is re-run at most this many times
+
+
+def is_infra_failure(trace: Trace) -> bool:
+    """The run never completed because the model endpoint failed: no evidence about the harness either way."""
+    return any(r.startswith(INFRA_REASON) for r in trace.outcome.reasons)
 
 
 def interventions(trace: Trace) -> int:
@@ -121,6 +132,8 @@ class EvalReport:
             "train": {"passed": len(self.passed("train")), "total": self.count("train")},
             "heldout": {"passed": len(self.passed("heldout")), "total": self.count("heldout")},
             "errors": sum(1 for r in self.results if r.error),
+            "infra_failed": sum(1 for r in self.results if r.infra_failed),
+            "infra_retries": sum(r.attempts - 1 for r in self.results),
             "fresh_calls": sum(r.fresh_calls for r in self.results),
             "cached_calls": sum(r.cached_calls for r in self.results),
             "modes": self.modes(),
@@ -145,6 +158,8 @@ class EvalReport:
                     "fresh_calls": r.fresh_calls,
                     "cached_calls": r.cached_calls,
                     "mode": r.mode,
+                    "attempts": r.attempts,
+                    "infra_failed": r.infra_failed,
                     "recorded_at": r.recorded_at,
                     "error": r.error,
                 }
@@ -156,28 +171,35 @@ class EvalReport:
 def _one(
     run_case: RunCase, harness: Harness, case: CaseLike, model: Any, store: Any
 ) -> tuple[CaseResult, Trace | None]:
-    run_id = f"run-{harness.version}-{uuid.uuid4().hex[:12]}"
-    try:
-        trace = run_case(harness, case, model, store, run_id=run_id)
-    except Exception as exc:  # an infrastructure failure is recorded as a failed case, never hidden
-        msg = f"{type(exc).__name__}: {exc}"[:500]
+    """One case. A run lost to the model endpoint (an exception, or an incomplete run whose model call
+    failed) is re-run under the predeclared limit; a completed run, pass or fail, is never re-run. A case
+    still lost after the limit is marked `infra_failed`: invalid evidence, never a pass and never a fail."""
+    msg = ""
+    trace: Trace | None = None
+    attempts = 0
+    while attempts <= INFRA_RETRIES:
+        attempts += 1
+        run_id = f"run-{harness.version}-{uuid.uuid4().hex[:12]}"
+        try:
+            trace = run_case(harness, case, model, store, run_id=run_id)
+        except Exception as exc:
+            msg = f"{type(exc).__name__}: {exc}"[:500]
+            trace = None
+            continue
+        if not is_infra_failure(trace):
+            break
+    if trace is None:
         failed = CaseResult(
-            case.id,
-            case.split,
-            case.must_succeed,
-            case.kind,
-            False,
-            [f"run error: {msg}"],
-            None,
-            Cost(),
-            error=msg,
-        )
+            case.id, case.split, case.must_succeed, case.kind, False, [f"run error: {msg}"], None, Cost(),
+            error=msg, attempts=attempts, infra_failed=True,
+        )  # fmt: skip
         return failed, None
     o = trace.outcome
     fresh, cached = model_calls(trace)
     result = CaseResult(
         case.id, case.split, case.must_succeed, case.kind, o.passed, list(o.reasons), trace.run_id, o.cost,
-        interventions(trace), fresh, cached, mode="CACHED" if cached else "FRESH",
+        interventions(trace), fresh, cached, mode="CACHED" if cached else "FRESH", attempts=attempts,
+        infra_failed=is_infra_failure(trace),
     )  # fmt: skip
     return result, trace
 

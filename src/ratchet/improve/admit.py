@@ -139,7 +139,7 @@ def _outcome(e: EvalReport | None, case_id: str) -> bool | None:
     if e is None:
         return None
     r = _heldout(e).get(case_id)
-    if r is None or r.mode != "FRESH" or r.error:
+    if r is None or r.mode != "FRESH" or r.error or r.infra_failed:
         return None
     return r.passed
 

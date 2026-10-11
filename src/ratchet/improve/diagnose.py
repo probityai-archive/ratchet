@@ -19,6 +19,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from ratchet.improve.evaluate import is_infra_failure
 from ratchet.improve.llm import Chat, Meter, ask_json
 from ratchet.improve.sim import Simulator, Walk, call_of, last_seq
 from ratchet.types import Event, Trace, canonical_json, sha256_hex
@@ -27,12 +28,15 @@ Mode = Literal["commission", "omission", "unlocated"]
 
 _QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 _IDLIKE = re.compile(r"\b[\w.-]*\d[\w.-]*\b")
+# Record ids, emails and slugs: any token joining word characters with "@", ".", "-" or "_".
+_COMPOUND = re.compile(r"[\w]+(?:[@.\-_][\w]+)+")
 _SPACE = re.compile(r"\s+")
 
 
 def normalize(text: str) -> str:
     """A reason with its specifics removed, so the same mechanism on different records matches."""
     out = _QUOTED.sub("<s>", text.lower())
+    out = _COMPOUND.sub("<id>", out)
     out = _IDLIKE.sub("<id>", out)
     return _SPACE.sub(" ", out).strip()
 
@@ -179,7 +183,7 @@ def diagnose(
     groups: dict[str, tuple[dict[str, str], list[FailurePoint]]] = {}
     by_run: dict[str, Trace] = {}
     for t in traces:
-        if t.outcome.passed:
+        if t.outcome.passed or is_infra_failure(t):  # an endpoint failure says nothing about the harness
             continue
         by_run[t.run_id] = t
         walk: Walk | None = None

@@ -40,6 +40,7 @@ def _args(argv: Sequence[str] | None) -> argparse.Namespace:
     p.add_argument("--base-url", default=env.get("RATCHET_BASE_URL", "http://localhost:8787/v1"))
     p.add_argument("--model", default=env.get("RATCHET_MODEL", "gpt-5.6-luna"))
     p.add_argument("--improver-model", default=env.get("RATCHET_IMPROVER_MODEL", "gpt-5.6-terra"))
+    p.add_argument("--improver-base-url", default=env.get("RATCHET_IMPROVER_BASE_URL", ""))
     p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument("--uri", default=env.get("RATCHET_MONGODB_URI", ""))
     p.add_argument("--db", default=env.get("RATCHET_DB", "ratchet"))
@@ -77,14 +78,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     cases = [c for c in all_cases() if not a.family or c.family in a.family]
     signer = Signer.from_env() if os.environ.get("RATCHET_SIGNING_KEY") else Signer.generate()
     agent_cfg = ModelConfig(base_url=a.base_url, model=a.model, api_key=key, temperature=a.temperature)
+    improver_url = a.improver_base_url or a.base_url
+    improver_key = os.environ.get("RATCHET_IMPROVER_API_KEY", key)
     improver_cfg = ModelConfig(
-        base_url=a.base_url, model=a.improver_model, api_key=key, temperature=a.temperature
+        base_url=improver_url, model=a.improver_model, api_key=improver_key, temperature=a.temperature
     )
     model_config = {
         "base_url": a.base_url,
         "model": a.model,
         "temperature": a.temperature,
         "improver_model": a.improver_model,
+        "improver_base_url": improver_url,
     }
     config = {
         **model_config,

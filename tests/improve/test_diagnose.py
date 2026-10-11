@@ -93,3 +93,17 @@ def test_recorded_views_reads_snapshots() -> None:
     ]
     w2 = RecordedViews().walk(replace(t, events=events))
     assert w2.faithful and w2.steps[0].view == {"k": 1} and w2.steps[0].executed
+
+
+def test_record_ids_emails_and_slugs_do_not_split_one_mechanism() -> None:
+    a = "mail m_1 sent to customer-record, not the customer of record aiko.tanaka@docomo.example"
+    b = "mail m_2 sent to customer@record.invalid, not the customer of record omar.farouk@yahoo.example"
+    assert normalize(a) == normalize(b)
+
+
+def test_endpoint_failures_are_not_diagnosed() -> None:
+    from ratchet.improve.evaluate import INFRA_REASON
+
+    t = bad_timeout(1)
+    lost = replace(t, outcome=replace(t.outcome, reasons=[f"{INFRA_REASON}: timeout"]))
+    assert diagnose([lost]) == []
