@@ -121,7 +121,11 @@ def test_two_generations_ratchet_both_levels() -> None:
     chat, store, signer = RoutingChat(), MemStore(), Signer.generate()
     logs: list[str] = []
     result = evolve(
-        store, model=None, generations=3, lab=_lab(store, chat, signer, log=logs.append), seed=SEED
+        store,
+        model=None,
+        generations=3,
+        lab=_lab(store, chat, signer, log=logs.append, evaluation_families=frozenset({"omit"})),
+        seed=SEED,
     )
     g1, g2, g3 = result.generations
 
@@ -144,6 +148,10 @@ def test_two_generations_ratchet_both_levels() -> None:
     fs = g2.level2["frozen_score"]
     assert fs["challenger"]["admitted"] == 1 and fs["champion"]["admitted"] == 0
     assert g2.level2["kept"] is True and g2.level2["champion_after"] == g2.level2["challenger"]
+    assert g2.level2["metric"] == "descendant admission yield"
+    assert g2.level2["promotion_rule"] == {"more_distinct_admitted": True, "no_lost_cluster_coverage": True,
+                                           "no_fewer_stable_recoveries": True}  # fmt: skip
+    assert g2.level2["families"] == {"tuning": ["plain", "timeout"], "evaluation": ["omit"]}
     assert result.instructions.text.startswith("IMPROVED")
     assert g2.promoted == result.harness.version and result.harness.procedures and result.harness.guards
 

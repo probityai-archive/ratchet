@@ -239,6 +239,10 @@ class FakeCase:
     must_succeed: bool = True
     kind: str = "trap"
 
+    @property
+    def family(self) -> str:
+        return self.id.rsplit("-", 1)[0]
+
 
 def fake_cases() -> list[FakeCase]:
     """Timeout cases are traps a duplicate-refund guard fixes; plain cases are their benign twins."""

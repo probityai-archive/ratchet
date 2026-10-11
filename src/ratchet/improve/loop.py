@@ -85,6 +85,16 @@ class Lab:
     repair_rounds: int = 1
     suite_digest: str | None = field(default_factory=frozen_suite_digest)
     model_config: dict[str, Any] = field(default_factory=dict)
+    # Level 2 splits case families in two: the improver's instructions are tuned on clusters from the
+    # first half and compared on clusters from the second. None means the sorted families, halved.
+    evaluation_families: frozenset[str] | None = None
+
+    def family_split(self) -> tuple[frozenset[str], frozenset[str]]:
+        families = sorted({c.family for c in self.cases})
+        evaluation = self.evaluation_families
+        if evaluation is None:
+            evaluation = frozenset(families[len(families) // 2 :])
+        return frozenset(families) - evaluation, frozenset(evaluation)
 
     @property
     def decision_cases(self) -> list[CaseLike]:
@@ -466,6 +476,10 @@ def _promote(
     return best.candidate.harness, best.report, best.decision
 
 
+def _families(cluster: FailureCluster, family_of: dict[str, str]) -> set[str]:
+    return {family_of[m.case_id] for m in cluster.members}
+
+
 def _frozen_batch(clusters: list[FailureCluster], seen: set[str]) -> dict[str, Any]:
     batch = [c for c in clusters if c.id not in seen]
     return {
@@ -498,6 +512,8 @@ def evolve(
     heldout_cases = [c for c in lab.cases if c.split == "heldout"]
     visible = sorted(c.id for c in train_cases)
     benign_ids = {c.id for c in lab.cases if c.kind == "benign_twin"}
+    family_of = {c.id: c.family for c in lab.cases}
+    tune_families, eval_families = lab.family_split()
     evaluator = evaluator_identity(lab.cases, lab.model_config, lab.suite_digest)
     store.put_eval({"type": "evaluator", **evaluator}, eval_id=f"evaluator-{evaluator['version']}")
     store.put_harness(parent)
@@ -550,7 +566,8 @@ def evolve(
         }
         frozen: dict[str, Any] = {"cluster_ids": [], "digest": None}
         if challenger is not None:
-            frozen = _frozen_batch(clusters, seen[champion.version] | seen[challenger.version])
+            evaluation = [c for c in clusters if _families(c, family_of) <= eval_families]
+            frozen = _frozen_batch(evaluation, seen[champion.version] | seen[challenger.version])
             batch = [c for c in clusters if c.id in frozen["cluster_ids"]]
             if batch:
                 arms["challenger"] = (challenger, ArmScore(challenger.version, frozen["cluster_ids"]), batch)
@@ -599,6 +616,7 @@ def evolve(
             "admitted": len(admitted),
         }
 
+        tuning_ids = {c.id for c in clusters if _families(c, family_of) <= tune_families}
         champion, challenger, rec.level2 = _level2(
             store,
             arms,
@@ -613,7 +631,9 @@ def evolve(
             gen,
             g.task_stats,
             lab.candidates_per_cluster,
+            tuning_ids,
         )
+        rec.level2["families"] = {"tuning": sorted(tune_families), "evaluation": sorted(eval_families)}
         rec.agent_cost = {"candidates": [_cost(r) for r in reports]}
         _finish(store, rec, started, meter, tried)
         lab.log(f"gen {gen}: level1 {rec.level1} level2 {rec.level2}")
@@ -626,11 +646,11 @@ def _propose_all(
     g: _Gen,
     train: list[Trace],
     lab: Lab,
-) -> tuple[list[_Tried], list[str]]:
+) -> tuple[list[_Tried], list[tuple[str, str]]]:
     assert lab.improver is not None
     passing = [t for t in train if t.outcome.passed]
     tried: list[_Tried] = []
-    rejected: list[str] = []
+    rejected: list[tuple[str, str]] = []
     for arm, (ins, score, batch) in arms.items():
         for cl in batch:
             prop = propose(
@@ -651,7 +671,7 @@ def _propose_all(
                 "duplicates": prop.duplicates,
                 "empty": int(not prop.candidates),
             }
-            rejected += [f"[{arm}] {r['reason']}" for r in prop.rejected]
+            rejected += [(cl.id, f"[{arm}] {r['reason']}") for r in prop.rejected]
             tried += [_Tried(c, arm) for c in prop.candidates]
     clusters = {c.id: c for _, _, batch in arms.values() for c in batch}
     check_s = 0.0
@@ -736,12 +756,13 @@ def _level2(
     challenger: Instructions | None,
     seen: dict[str, set[str]],
     tried: list[_Tried],
-    rejected: list[str],
+    rejected: list[tuple[str, str]],
     improver: Chat,
     meter: Meter,
     gen: int,
     task_stats: dict[tuple[str, str], dict[str, int]],
     slots_per_task: int,
+    tuning_ids: set[str],
 ) -> tuple[Instructions, Instructions | None, dict[str, Any]]:
     """Score each arm on the frozen batch, keep or drop the challenger, and draft the next one."""
     frozen_ids = set(frozen["cluster_ids"])
@@ -767,6 +788,7 @@ def _level2(
                 s.stable_recoveries += len(t.decision.check("heldout").evidence["stable_recoveries"])
         scored[arm] = s
     level2: dict[str, Any] = {
+        "metric": "descendant admission yield",
         "champion": champion.version,
         "challenger": challenger.version if challenger else None,
         "frozen_batch": frozen,
@@ -779,10 +801,24 @@ def _level2(
     }
     if challenger is not None and "challenger" in arms:
         ch, cs = scored["challenger"], scored["champion"]
-        keep = ch.admission_yield > cs.admission_yield
+        covered = {
+            arm: sorted(
+                {t.candidate.cluster_id for t in tried if t.arm == arm and t.status == "admitted"}
+                & frozen_ids
+            )
+            for arm in ("champion", "challenger")
+        }
+        rule = {
+            "more_distinct_admitted": ch.admitted > cs.admitted,
+            "no_lost_cluster_coverage": set(covered["champion"]) <= set(covered["challenger"]),
+            "no_fewer_stable_recoveries": ch.stable_recoveries >= cs.stable_recoveries,
+        }
+        keep = all(rule.values())
         level2 |= {
             "claim": True,
             "frozen_score": {"champion": cs.to_payload(), "challenger": ch.to_payload()},
+            "covered_clusters": covered,
+            "promotion_rule": rule,
             "kept": keep,
         }
         if keep:
@@ -793,6 +829,7 @@ def _level2(
     else:
         level2 |= {"claim": False, "reason": "no challenger this generation"}
     if challenger is None:
+        tuning = [t for t in tried if t.candidate.cluster_id in tuning_ids]
         examples = [
             f"[{t.arm}] {t.candidate.kind} for cluster {t.candidate.cluster_id}: {t.status}"
             + (
@@ -802,9 +839,9 @@ def _level2(
                 else ""
             )
             + (f" (copied literals: {[h['literal'] for h in t.lint_hits][:5]})" if t.lint_hits else "")
-            for t in tried
-        ] + rejected
-        shown = {t.candidate.cluster_id for t in tried}
+            for t in tuning
+        ] + [text for cid, text in rejected if cid in tuning_ids]
+        shown = {t.candidate.cluster_id for t in tuning}
         challenger = propose_instructions(
             champion, {n: s for n, (_, s, _) in arms.items()}, examples, improver, meter
         )
