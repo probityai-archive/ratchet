@@ -40,7 +40,7 @@ def _model_section(res: dict[str, Any], digest: str, title: str | None = None) -
         f"({meta.get('truncated_turns', 0)} turns had extra tool calls dropped, both arms together).",
         "",
         "| Split | Cases | v0 passes per repeat | Candidate passes per repeat | v0 strict | Candidate strict "
-        "| Noise D (v0 / cand) | b (v0 fail, cand pass) | c (v0 pass, cand fail) | Exact McNemar p "
+        "| Noise D (v0 / cand) | b (v0 fail, cand pass) | c (v0 pass, cand fail) | Exact binomial p "
         "| Margin max(2, D+1) |",
         "|---|---|---|---|---|---|---|---|---|---|---|",
     ]

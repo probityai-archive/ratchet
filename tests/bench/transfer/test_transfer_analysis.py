@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ratchet.bench.transfer.analysis import mcnemar_exact, paired_rows, summarize
+from ratchet.bench.transfer.analysis import discordant_pair_p, paired_rows, summarize
 from ratchet.improve.evaluate import CaseResult, EvalReport
 from ratchet.types import Cost
 
@@ -35,14 +35,14 @@ def outcomes(*ids: str) -> dict[str, bool]:
     return {cid: cid in ids for cid, *_ in CASES}
 
 
-def test_mcnemar_exact_known_values() -> None:
-    assert mcnemar_exact(0, 0) == 1.0
-    assert mcnemar_exact(5, 0) == pytest.approx(2 / 32)
-    assert mcnemar_exact(0, 5) == pytest.approx(2 / 32)
-    assert mcnemar_exact(3, 3) == 1.0
-    assert mcnemar_exact(10, 2) == pytest.approx(0.0386, abs=1e-4)
+def test_discordant_pair_p_known_values() -> None:
+    assert discordant_pair_p(0, 0) == 1.0
+    assert discordant_pair_p(5, 0) == pytest.approx(2 / 32)
+    assert discordant_pair_p(0, 5) == pytest.approx(2 / 32)
+    assert discordant_pair_p(3, 3) == 1.0
+    assert discordant_pair_p(10, 2) == pytest.approx(0.0386, abs=1e-4)
     with pytest.raises(ValueError):
-        mcnemar_exact(-1, 0)
+        discordant_pair_p(-1, 0)
 
 
 def test_summary_counts_every_case_and_repeat() -> None:
@@ -60,7 +60,7 @@ def test_summary_counts_every_case_and_repeat() -> None:
     # repeat 1: h1,h2 b; repeat 2: h1,h2 b, h3 neither
     assert (s.b, s.c) == (4, 0)
     assert (s.strict_b, s.strict_c) == (2, 0)
-    assert s.p_value == pytest.approx(mcnemar_exact(4, 0))
+    assert s.p_value == pytest.approx(discordant_pair_p(4, 0))
     assert s.cand.benign_twin_interventions == 1
     assert s.base.must_succeed_failures == 5 and s.cand.must_succeed_failures == 1
     assert s.by_kind["trap"]["cases"] == 2 and s.by_kind["trap"]["b"] == 4

@@ -8,7 +8,8 @@ Definitions (per split, per model):
 - pass count of an arm in repeat r: cases passed in that repeat, out of the split's case count.
 - noise D of an arm: cases whose outcome differs between that arm's repeats (0 with one repeat).
 - discordant pairs, repeat-matched: over every repeat r, cases where base failed and candidate passed (b)
-  and where base passed and candidate failed (c); McNemar's exact two-sided p over the pooled b and c.
+  and where base passed and candidate failed (c); the exact two-sided binomial p over the pooled b and c
+  (under no effect each discordant pair is equally likely to go either way).
 - strict pairs: a case counts as passed by an arm only when every repeat passed (the admission rule's
   repeat semantics); b and c are then counted once per case.
 """
@@ -91,8 +92,8 @@ class SplitSummary:
         }
 
 
-def mcnemar_exact(b: int, c: int) -> float:
-    """Two-sided exact McNemar p-value: binomial(b + c, 1/2), doubled tail, capped at 1."""
+def discordant_pair_p(b: int, c: int) -> float:
+    """Exact two-sided binomial p for b of b + c discordant pairs at 1/2: doubled tail, capped at 1."""
     if b < 0 or c < 0:
         raise ValueError("discordant counts cannot be negative")
     n = b + c
@@ -199,9 +200,9 @@ def summarize(base: Sequence[EvalReport], cand: Sequence[EvalReport], split: str
         cand=_arm(rows, "cand", _non_fresh(cand, split)),
         b=b,
         c=c,
-        p_value=mcnemar_exact(b, c),
+        p_value=discordant_pair_p(b, c),
         strict_b=sb,
         strict_c=sc,
-        strict_p_value=mcnemar_exact(sb, sc),
+        strict_p_value=discordant_pair_p(sb, sc),
         by_kind=by_kind,
     )

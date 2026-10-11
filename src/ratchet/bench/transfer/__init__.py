@@ -10,9 +10,9 @@ from ratchet.bench.transfer.analysis import (
     ArmStats,
     CaseRow,
     SplitSummary,
-    mcnemar_exact,
+    discordant_pair_p,
     paired_rows,
     summarize,
 )
 
-__all__ = ["ArmStats", "CaseRow", "SplitSummary", "mcnemar_exact", "paired_rows", "summarize"]
+__all__ = ["ArmStats", "CaseRow", "SplitSummary", "discordant_pair_p", "paired_rows", "summarize"]
