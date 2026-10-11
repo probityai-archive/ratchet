@@ -72,22 +72,8 @@ jobs:
           exit 1
       - run: uv sync --all-groups --all-extras
       # Default selection: sandbox tests (hackathon cluster secrets) and live tests (VOYAGE_API_KEY) are deselected.
-      # The kill_parent escape test runs in its own job because it signals the pytest process itself on a kernel
-      # without Landlock signal scoping.
       - name: pytest
         run: >-
           uv run --with pytest-timeout python -m pytest -q -W error --timeout=120 -rfEs --tb=short
           -m "not sandbox and not live"
-          --deselect "tests/agent/test_guards.py::test_sandbox_refuses_escape[kill_parent]"
           --cov=src/ratchet --cov-report=term-missing:skip-covered
-
-  sandbox-signal:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-      - run: uv sync --all-groups --all-extras
-      - run: >-
-          uv run --with pytest-timeout python -m pytest -q -W error --timeout=120
-          "tests/agent/test_guards.py::test_sandbox_refuses_escape[kill_parent]"
