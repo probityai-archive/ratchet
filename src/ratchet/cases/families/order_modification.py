@@ -12,7 +12,7 @@ FAMILY = Family(
     id="order_modification",
     title="Order modification with a late addition",
     rationale=(
-        "In tau-bench retail, item changes to a pending order can be made once; the agent must collect "
+        "Item changes to a pending order can be made once; the agent must collect "
         "every change before calling the tool, and the price difference must be settled exactly. Customers "
         "add changes mid-conversation, and an agent that acts on its first read locks the order with half "
         "the request and cannot apply the rest. Here a follow-up message lands on the ticket while the "
@@ -21,11 +21,6 @@ FAMILY = Family(
         "delta) or several changes stated up front, which must still go in one call. A benign twin mentions "
         "a second change and then withdraws it, with nothing pending."
     ),
-    sources=[
-        "tau-bench retail (Yao et al., 2024): modify_pending_order_items can be called once; collect all "
-        "items first",
-        "tau2-bench (Barres et al., 2025): retail domain, final database state graded",
-    ],
 )
 _ID = FAMILY.id
 

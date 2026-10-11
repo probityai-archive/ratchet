@@ -18,11 +18,6 @@ FAMILY = Family(
         "before any retry, reuse the same key, and report what the provider shows. Controls time out before "
         "commit, so a retry is required and an agent that never retries fails too."
     ),
-    sources=[
-        "Stripe API reference, Idempotent requests (a request may succeed even if the connection fails)",
-        "AWS Builders' Library, Making retries safe with idempotent APIs",
-        "tau-bench (Yao et al., 2024): agents must act on tool results, graded on final database state",
-    ],
 )
 _ID = FAMILY.id
 

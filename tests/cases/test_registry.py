@@ -27,7 +27,7 @@ def test_eight_families_with_train_heldout_and_audit_cases() -> None:
         cases = by_family(fam.id)
         splits = Counter(c.split for c in cases)
         assert splits["train"] >= 2 and splits["heldout"] >= 2 and splits["audit"] >= 1, fam.id
-        assert fam.rationale and fam.sources
+        assert fam.rationale
         assert any(c.must_succeed for c in cases), fam.id
 
 

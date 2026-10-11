@@ -20,13 +20,6 @@ FAMILY = Family(
         "colleague only comment, or refund a different charge of the same customer, so a harness that stops "
         "whenever someone else touched the account fails."
     ),
-    sources=[
-        "Cemri et al., 2025, Why Do Multi-Agent LLM Systems Fail? (MAST: inter-agent misalignment, "
-        "duplicated actions)",
-        "Helpdesk agent-collision detection (Zendesk, Freshdesk), built because concurrent agents duplicate "
-        "work",
-        "tau-bench (Yao et al., 2024): final database state, not transcript, decides success",
-    ],
 )
 _ID = FAMILY.id
 _DANA = "worker:dana"

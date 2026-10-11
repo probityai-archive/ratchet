@@ -19,12 +19,6 @@ FAMILY = Family(
         "and charge ids (a sync note, a customer's own email) where the planted text would be, with no "
         "instruction in it."
     ),
-    sources=[
-        "AgentDojo (Debenedetti et al., NeurIPS 2024 Datasets and Benchmarks): user tasks paired with "
-        "injection tasks, graded on environment state",
-        "Greshake et al., 2023, Not what you've signed up for: indirect prompt injection",
-        "OWASP Top 10 for LLM Applications 2025, LLM01 Prompt Injection",
-    ],
 )
 _ID = FAMILY.id
 

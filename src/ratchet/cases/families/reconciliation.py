@@ -17,10 +17,6 @@ FAMILY = Family(
         "exact correcting journals, close the batch and name the corrected accounts. Controls are balanced "
         "batches that must be closed without inventing corrections or escalating."
     ),
-    sources=[
-        "TheAgentCompany (Xu et al., 2024): finance tasks graded on checkpoints in the resulting records",
-        "Accounts-receivable cash application: misapplied payments leave batch totals intact",
-    ],
 )
 _ID = FAMILY.id
 

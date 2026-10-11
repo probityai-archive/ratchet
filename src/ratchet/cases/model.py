@@ -50,12 +50,11 @@ class Expect:
 
 @dataclass(frozen=True)
 class Family:
-    """A failure family: the production failure it reproduces and where that failure is documented."""
+    """A failure family: the production failure it reproduces."""
 
     id: str
     title: str
     rationale: str
-    sources: list[str]
 
 
 @dataclass(frozen=True)

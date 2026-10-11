@@ -15,10 +15,6 @@ FAMILY = Family(
         "period end, an address change, an order cancellation with its refund) carry no trap. They exist so "
         "that every guard the improver proposes is tested against work that must still be completed."
     ),
-    sources=[
-        "OR-Bench (Cui et al., 2024): over-refusal of benign requests",
-        "tau-bench (Yao et al., 2024): pass^k reliability on routine retail and airline tasks",
-    ],
 )
 _ID = FAMILY.id
 
