@@ -10,7 +10,7 @@ dependencies = [
     "httpx>=0.27",
     "cryptography>=44",
     "rich>=15.0.0",
-    "raindrop-ai",
+    "raindrop-ai==0.0.75",
 ]
 
 [project.scripts]
