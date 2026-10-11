@@ -22,6 +22,7 @@ from typing import Any
 
 from ratchet.bench.transfer.render import render
 from ratchet.bench.transfer.run import (
+    SingleCallModel,
     default_client,
     endpoint_info,
     harness_from,
@@ -131,7 +132,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     info = endpoint_info(args.base_url, _key())
     _log(f"{args.model}: base {base.version}, cand {cand.version}, {len(cases)} cases, splits {splits}")
     started = now_iso()
-    with default_client(args.base_url, _key(), args.model) as model:
+    with default_client(args.base_url, _key(), args.model) as client:
+        model: Any = SingleCallModel(client) if args.single_tool_call else client
         base_reports, cand_reports = run_transfer(
             base,
             cand,
@@ -157,16 +159,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         "finished_at": now_iso(),
         "commit": _commit(),
         "trace_db": args.trace_db if uri and args.trace_db else None,
+        "single_tool_call": args.single_tool_call,
+        "truncated_turns": model.truncated_turns if args.single_tool_call else 0,
     }
     payload = result_payload(meta, base_reports, cand_reports, splits)
     if uri and args.trace_db:
         from pymongo import MongoClient
 
-        client: MongoClient[dict[str, Any]] = MongoClient(uri, serverSelectionTimeoutMS=10_000)
+        mongo: MongoClient[dict[str, Any]] = MongoClient(uri, serverSelectionTimeoutMS=10_000)
         try:
-            written = persist(client[args.trace_db], payload, [*base_reports, *cand_reports])
+            written = persist(mongo[args.trace_db], payload, [*base_reports, *cand_reports])
         finally:
-            client.close()
+            mongo.close()
         _log(f"stored {written['traces']} traces and eval {written['eval_id']} in {args.trace_db}")
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(
@@ -207,6 +211,11 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--workers", type=int, default=8)
     rn.add_argument("--store-db", default=os.environ.get("RATCHET_DB", "ratchet"))
     rn.add_argument("--trace-db", default="ratchet_heldout", help="evaluator-only database; empty to skip")
+    rn.add_argument(
+        "--single-tool-call",
+        action="store_true",
+        help="keep only the first tool call per turn (for checkpoints whose template forbids several)",
+    )
     rn.add_argument("--out", required=True)
     rd = sub.add_parser("render")
     rd.add_argument("results", nargs="+")

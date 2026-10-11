@@ -8,14 +8,16 @@ and digests, the case-suite digest and every per-case result, so the report can 
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
-from ratchet.agent.model import ChatModel, ModelClient, ModelConfig
+from ratchet.agent.model import ChatModel, Message, ModelClient, ModelConfig, ModelTurn, ToolSpec
 from ratchet.bench.transfer.analysis import summarize
 from ratchet.improve.evaluate import EvalReport, RunCase, evaluate_many
 from ratchet.types import Guard, Harness, Procedure, Trace, canonical_json, sha256_hex, to_jsonable
@@ -173,6 +175,37 @@ def result_payload(
         "base_reports": [r.to_payload() for r in base_reports],
         "cand_reports": [r.to_payload() for r in cand_reports],
     }
+
+
+class SingleCallModel:
+    """Keep only the first tool call of a turn, exactly what vLLM does for `parallel_tool_calls: false`.
+
+    Llama 3.x's own chat template refuses an assistant message carrying more than one tool call ("This model
+    only supports single tool-calls at once!"), yet the llama3_json parser will return several when the model
+    writes them, so the next request of that run fails with HTTP 400. Applied to both arms of a comparison,
+    so the pairing is unaffected; the count of truncated turns is recorded.
+    """
+
+    def __init__(self, inner: ChatModel) -> None:
+        self._inner = inner
+        self._lock = threading.Lock()
+        self.truncated_turns = 0
+
+    @property
+    def name(self) -> str:
+        return self._inner.name
+
+    def complete(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelTurn:
+        turn = self._inner.complete(messages, tools)
+        if len(turn.tool_calls) <= 1:
+            return turn
+        with self._lock:
+            self.truncated_turns += 1
+        first = turn.tool_calls[0]
+        raw = turn.message.get("tool_calls") or []
+        message = {**turn.message, "tool_calls": raw[:1]}
+        errors = {k: v for k, v in turn.arg_errors.items() if k == first.call_id}
+        return replace(turn, message=message, tool_calls=[first], arg_errors=errors)
 
 
 def default_client(base_url: str, api_key: str, model_name: str) -> ModelClient:

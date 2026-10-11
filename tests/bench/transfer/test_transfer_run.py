@@ -297,3 +297,35 @@ def test_cli_run_persists_when_a_store_uri_is_set(tmp_path: Path, monkeypatch: p
     assert written["db"] == "ratchet_heldout" and written["closed"]
     assert len(written["colls"]["transfer_traces"].docs) == 2 * n
     assert json.loads(out.read_text(encoding="utf-8"))["meta"]["trace_db"] == "ratchet_heldout"
+
+
+def test_single_call_model_keeps_first_call_only() -> None:
+    from dataclasses import replace
+
+    from ratchet.bench.transfer.run import SingleCallModel
+
+    multi = scripted_turn(tool_calls=[("a", {"x": 1}), ("b", {})])
+    multi = replace(multi, arg_errors={"c0": "bad", "c1": "bad"})
+    single = scripted_turn(tool_calls=[("a", {})])
+    model = SingleCallModel(ScriptedModel([multi, single, scripted_turn("done")], name="inner"))
+    assert model.name == "inner"
+    t = model.complete([], [])
+    assert [c.name for c in t.tool_calls] == ["a"] and len(t.message["tool_calls"]) == 1
+    assert t.arg_errors == {"c0": "bad"} and t.output_tokens == multi.output_tokens
+    assert model.complete([], []) is single
+    assert model.complete([], []).content == "done"
+    assert model.truncated_turns == 1
+
+
+def test_cli_run_single_tool_call_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cand_file = tmp_path / "cand.json"
+    cand_file.write_text(json.dumps(asdict(candidate())), encoding="utf-8")
+    monkeypatch.delenv("RATCHET_MONGODB_URI", raising=False)
+    monkeypatch.setattr(cli, "endpoint_info", lambda *_a, **_k: {"served": [], "server_version": None})
+    monkeypatch.setattr("ratchet.agent.worker.run_case", fake_run_case)
+    out = tmp_path / "res.json"
+    args = ["run", "--base-url", "http://h/v1", "--model", "m", "--candidate-file", str(cand_file)]
+    args += ["--splits", "audit", "--repeats", "1", "--single-tool-call", "--out", str(out)]
+    assert cli.main(args) == 0
+    meta = json.loads(out.read_text(encoding="utf-8"))["meta"]
+    assert meta["single_tool_call"] is True and meta["truncated_turns"] == 0

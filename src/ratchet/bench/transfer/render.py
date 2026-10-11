@@ -36,6 +36,8 @@ def _model_section(res: dict[str, Any], digest: str) -> list[str]:
         "checkpoint's generation config (the client sends no temperature).",
         f"- Window: {meta['started_at']} to {meta['finished_at']} (UTC); {meta['repeats']} fresh repeats; "
         f"{meta['workers']} concurrent runs; result file sha256 `{digest}`.",
+        f"- Single tool call per turn: {'yes' if meta.get('single_tool_call') else 'no'} "
+        f"({meta.get('truncated_turns', 0)} turns had extra tool calls dropped, both arms together).",
         "",
         "| Split | Cases | v0 passes per repeat | Candidate passes per repeat | v0 strict | Candidate strict "
         "| Noise D (v0 / cand) | b (v0 fail, cand pass) | c (v0 pass, cand fail) | Exact McNemar p "
