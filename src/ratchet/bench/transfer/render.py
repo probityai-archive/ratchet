@@ -103,9 +103,9 @@ def render(
 ) -> str:
     """`results` is (payload, sha256 of its file) per model; `header` adds setup lines; `controls` are A/A
     runs (v0 against itself) that measure how much two identical harnesses disagree on each model."""
-    if not results:
+    if not results and not controls:
         raise ValueError("no result files to render")
-    first = results[0][0]["meta"]
+    first = (results or controls)[0][0]["meta"]
     lines = [
         "# Cross-model transfer of admitted harness changes",
         "",
@@ -117,9 +117,6 @@ def render(
         "## Setup",
         "",
         f"- Base: `{first['base']['version']}` (seed, digest `{first['base']['digest'][:16]}`).",
-        f"- Candidate: `{first['cand']['version']}` (digest `{first['cand']['digest'][:16]}`), "
-        f"{first['cand']['guards']} guards, {first['cand']['procedures']} procedures, admitted by decision "
-        f"`{first['cand'].get('decision_id')}` on derivation model `{first['cand'].get('derived_on')}`.",
         f"- Case suite digest `{first['suite_digest']}`; splits {', '.join(first['splits'])}; "
         f"case counts {first['case_counts']}.",
         f"- Code: ratchet commit `{first.get('commit')}`. Mode: FRESH for every run (counted per arm below).",
@@ -127,11 +124,19 @@ def render(
         "decision.",
         "",
     ]
+    for res, _ in results:
+        c = res["meta"]["cand"]
+        lines.append(
+            f"- Candidate on {res['meta']['model']}: `{c['version']}` (digest `{c['digest'][:16]}`), "
+            f"{c['guards']} guards, {c['procedures']} procedures, admitted by decision "
+            f"`{c.get('decision_id')}` on derivation model `{c.get('derived_on')}`."
+        )
     for key, value in header.items():
         lines.append(f"- {key}: {value}")
-    if header:
-        lines.append("")
+    lines.append("")
     lines += ["## Verdicts", ""]
+    if not results:
+        lines.append("- No transfer run: no admitted harness existed when this report was generated.")
     for res, _ in results:
         for split, s in res["summaries"].items():
             met, gain, need = margin_met(s)

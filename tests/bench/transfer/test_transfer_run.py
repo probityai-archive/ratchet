@@ -116,6 +116,8 @@ def test_run_transfer_pairs_fresh_repeats_and_renders() -> None:
     assert "| heldout | 4 |" in md and "- Note: x" in md and "transfer margin" in md
     with pytest.raises(ValueError):
         render([], {})
+    only = render([], {"Status": "waiting"}, [(payload, "a" * 64)])
+    assert "No transfer run" in only and "- Status: waiting" in only and "## A/A control: m" in only
 
 
 def test_margin_uses_base_noise() -> None:
