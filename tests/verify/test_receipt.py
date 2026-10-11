@@ -288,7 +288,7 @@ def test_an_empty_key_list_trusts_nothing(signer: Signer) -> None:
     assert (r.ok, r.decision, r.reason) == (False, "no_verdict", "no_trusted_key")
 
 
-def test_decision_object_from_the_admission_lane_verifies_with_the_predicate_added(signer: Signer) -> None:
+def test_decision_object_from_the_admission_lane_verifies_as_signed(signer: Signer) -> None:
     from ratchet.improve.admit import Check, Decision
 
     body = payload()
@@ -303,7 +303,9 @@ def test_decision_object_from_the_admission_lane_verifies_with_the_predicate_add
         report_digests=body["report_digests"],
         decided_at="2026-10-11T12:00:00+00:00",
     )
-    signed = sign({**decision.to_payload(), "predicateType": PREDICATE_URI}, signer)
+    assert decision.to_payload()["predicateType"] == PREDICATE_URI
+    signed = sign(decision.to_payload(), signer)
     r = check(signed, signer, reports=REPORTS, harnesses=HARNESSES, recomputed=RECOMPUTED)
     assert (r.ok, r.admission_verified, r.recomputation_complete) == (True, True, True)
-    assert check(sign(decision.to_payload(), signer), signer).reason == "unsupported_predicate"
+    bare = {k: v for k, v in decision.to_payload().items() if k != "predicateType"}
+    assert check(sign(bare, signer), signer).reason == "unsupported_predicate"
