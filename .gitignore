@@ -1,0 +1,14 @@
+# Private strategy, captures and research never enter this public repository.
+captures/
+research/
+private/
+.venv/
+__pycache__/
+*.pyc
+.env
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+.claude_correlation/
