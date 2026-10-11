@@ -18,7 +18,7 @@ import httpx
 from ratchet.agent.model import ChatModel, ModelClient, ModelConfig
 from ratchet.bench.transfer.analysis import summarize
 from ratchet.improve.evaluate import EvalReport, RunCase, evaluate_many
-from ratchet.types import Guard, Harness, Procedure, Trace
+from ratchet.types import Guard, Harness, Procedure, Trace, canonical_json, sha256_hex, to_jsonable
 
 PROBE_TOOL = {
     "type": "function",
@@ -178,3 +178,21 @@ def result_payload(
 def default_client(base_url: str, api_key: str, model_name: str) -> ModelClient:
     config = ModelConfig(base_url=base_url.rstrip("/"), model=model_name, api_key=api_key, timeout_s=300.0)
     return ModelClient(config)
+
+
+def persist(db: Any, payload: dict[str, Any], reports: Sequence[EvalReport]) -> dict[str, Any]:
+    """Write every trace and the summary into an evaluator-only database (held-out traces never go where
+    the improver can read). Plain inserts: no schema or search-index side effects on a shared cluster."""
+    summary = {k: v for k, v in payload.items() if k not in ("base_reports", "cand_reports")}
+    eval_id = "transfer-" + sha256_hex(canonical_json(to_jsonable(summary)))[:16]
+    docs = []
+    for rep in reports:
+        for trace in rep.traces:
+            body = to_jsonable(trace)
+            docs.append({**body, "_id": f"{eval_id}:{trace.run_id}", "eval_id": eval_id})
+    if docs:
+        db["transfer_traces"].insert_many(docs, ordered=False)
+    db["transfer_evals"].replace_one(
+        {"_id": eval_id}, {**to_jsonable(payload), "_id": eval_id, "stored_at": now_iso()}, upsert=True
+    )
+    return {"eval_id": eval_id, "traces": len(docs)}

@@ -26,6 +26,7 @@ from ratchet.bench.transfer.run import (
     endpoint_info,
     harness_from,
     now_iso,
+    persist,
     probe_tool_call,
     result_payload,
     run_transfer,
@@ -113,13 +114,10 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     uri = os.environ.get("RATCHET_MONGODB_URI")
     source = None
-    sink = None
     if uri:
         from ratchet.store import Store
 
         source = Store(uri, args.store_db)
-        if args.trace_db:
-            sink = Store(uri, args.trace_db)
     base = seed_harness()
     cand, cand_extra = _candidate(args, source)
     splits = [s for s in args.splits.split(",") if s]
@@ -136,7 +134,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             run_case,
             repeats=args.repeats,
             workers=args.workers,
-            store=sink,
+            store=None,
             log=_log,
         )
     meta = {
@@ -152,14 +150,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         "started_at": started,
         "finished_at": now_iso(),
         "commit": _commit(),
-        "trace_db": args.trace_db if sink is not None else None,
+        "trace_db": args.trace_db if uri and args.trace_db else None,
     }
     payload = result_payload(meta, base_reports, cand_reports, splits)
-    if sink is not None:
-        for rep in [*base_reports, *cand_reports]:
-            for trace in rep.traces:
-                sink.put_trace(trace)
-        sink.put_eval({k: v for k, v in payload.items() if k != "base_reports" and k != "cand_reports"})
+    if uri and args.trace_db:
+        from pymongo import MongoClient
+
+        client: MongoClient[dict[str, Any]] = MongoClient(uri, serverSelectionTimeoutMS=10_000)
+        try:
+            written = persist(client[args.trace_db], payload, [*base_reports, *cand_reports])
+        finally:
+            client.close()
+        _log(f"stored {written['traces']} traces and eval {written['eval_id']} in {args.trace_db}")
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(
         json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8"
@@ -198,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--repeats", type=int, default=2)
     rn.add_argument("--workers", type=int, default=8)
     rn.add_argument("--store-db", default=os.environ.get("RATCHET_DB", "ratchet"))
-    rn.add_argument("--trace-db", default="ratchet_transfer")
+    rn.add_argument("--trace-db", default="ratchet_heldout", help="evaluator-only database; empty to skip")
     rn.add_argument("--out", required=True)
     rd = sub.add_parser("render")
     rd.add_argument("results", nargs="+")

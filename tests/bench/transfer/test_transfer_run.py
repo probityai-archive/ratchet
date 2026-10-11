@@ -15,6 +15,7 @@ from ratchet.bench.transfer.render import margin_met, render
 from ratchet.bench.transfer.run import (
     endpoint_info,
     harness_from,
+    persist,
     probe_tool_call,
     result_payload,
     run_transfer,
@@ -151,3 +152,29 @@ def test_cli_run_and_render_with_candidate_file(tmp_path: Path, monkeypatch: pyt
     assert f"{n}/{n}" in md.read_text(encoding="utf-8")
     with pytest.raises(SystemExit):
         cli.main(["run", "--base-url", "u", "--model", "m", "--out", str(out)])
+
+
+class FakeCollection:
+    def __init__(self) -> None:
+        self.docs: dict[str, dict[str, Any]] = {}
+
+    def insert_many(self, docs: list[dict[str, Any]], ordered: bool = True) -> None:
+        for d in docs:
+            self.docs[d["_id"]] = d
+
+    def replace_one(self, flt: dict[str, Any], doc: dict[str, Any], upsert: bool = False) -> None:
+        self.docs[flt["_id"]] = doc
+
+
+def test_persist_writes_every_trace_and_one_eval() -> None:
+    cases = by_split("audit")[:3]
+    b, c = run_transfer(seed_harness(), candidate(), cases, object(), fake_run_case, repeats=1, workers=1)
+    payload = {"type": "transfer", "summaries": {}, "base_reports": [], "cand_reports": []}
+    db = {"transfer_traces": FakeCollection(), "transfer_evals": FakeCollection()}
+    out = persist(db, payload, [*b, *c])
+    assert out["traces"] == 6 and len(db["transfer_traces"].docs) == 6
+    (ev,) = db["transfer_evals"].docs.values()
+    assert ev["_id"] == out["eval_id"] and ev["type"] == "transfer"
+    assert all(d["eval_id"] == out["eval_id"] for d in db["transfer_traces"].docs.values())
+    empty = persist(db, payload, [])
+    assert empty["traces"] == 0
