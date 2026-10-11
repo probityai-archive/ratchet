@@ -13,6 +13,7 @@ list disagree.
 | [Guard replay over real coding-agent history](results/hooks-replay.md) | One Ratchet guard, `no-force-push-main`, tested by replay over the operator's own Claude Code session transcripts. |
 | [tau-bench airline: Ratchet results](results/tau-airline.md) | The loop on tau-bench airline with its own database and reward: pass^k by harness and split. |
 | [tau-bench retail: Ratchet results](results/tau-retail.md) | The loop on tau-bench retail with its own database and reward: pass^k by harness and split, with crashed and stopped runs listed. |
+| [tau2-bench: Ratchet results](results/tau2.md) | tau2-bench airline, retail and telecom run through Ratchet's worker loop: pass^k per run, with every planned, recorded and lost conversation counted and every stopped run listed with its reason. |
 | [Terminal-Bench 2.0: Ratchet results](results/terminal-bench.md) | Run records live under `private/bench/terminal/` (never committed); every number below is read from them and printed with its denominator. |
 | [Cross-model transfer of admitted harness changes](results/transfer.md) | Guards are code. |
 | [Live-model admission under the stochastic gate (v3)](results/v3-live.md) | A real model makes different choices on the same input, so one run per test case cannot tell a real improvement from luck. |
