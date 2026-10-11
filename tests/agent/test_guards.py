@@ -285,9 +285,9 @@ def test_guard_cannot_signal_its_parent_on_any_landlock_abi(max_abi: int | None)
     with GuardRuntime(GuardLimits(landlock_max_abi=max_abi)) as rt:
         isolation = rt.validate(SIGNAL_PROBE)
         if max_abi is not None:
-            assert (
-                isolation["landlock"].startswith(f"abi {max_abi},") and "signal" not in isolation["landlock"]
-            )
+            # The cap emulates an older kernel; a kernel older than the cap (6.8 has ABI 4) applies its own.
+            applied = int(isolation["landlock"].removeprefix("abi ").split(",", 1)[0])
+            assert 1 <= applied <= max_abi and "signal" not in isolation["landlock"], isolation["landlock"]
         denied = set(isolation["seccomp"].removeprefix("denied: ").split(","))
         assert {"kill", "tkill", "tgkill", "pidfd_open", "pidfd_send_signal"} <= denied, denied
         for target in (os.getpid(), os.getppid(), 1):
