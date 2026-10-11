@@ -19,7 +19,6 @@ from ratchet.store import (
     VoyageReranker,
     atlas,
     atlas_setup,
-    rrf_fuse,
 )
 from ratchet.store.embed import EMBEDDING_DIMS, CachedEmbedder, cache_key
 from ratchet.types import Cost, Event, Harness, Outcome, Trace
@@ -40,15 +39,6 @@ def _ok(request: httpx.Request) -> httpx.Response:
     body = json.loads(request.content)
     data = [{"index": i, "embedding": [0.5] * EMBEDDING_DIMS} for i in range(len(body["input"]))]
     return httpx.Response(200, json={"data": data[::-1]})
-
-
-def test_rrf_fuse_rewards_agreement_and_is_deterministic() -> None:
-    fused = rrf_fuse([["a", "b", "c"], ["c", "a", "d"]])
-    ids = [i for i, _ in fused]
-    assert ids[0] == "a" and set(ids) == {"a", "b", "c", "d"}
-    assert fused[0][1] == pytest.approx(1 / 61 + 1 / 62)
-    assert rrf_fuse([["x", "y"], ["y", "x"]]) == rrf_fuse([["x", "y"], ["y", "x"]])
-    assert rrf_fuse([]) == []
 
 
 def test_cache_key_separates_model_input_type_and_text() -> None:

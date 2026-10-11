@@ -42,7 +42,6 @@ Doc = dict[str, Any]
 WATCHABLE = ("harness_versions", "runs", "traces", "evals", "decisions", "failures", "checkpoints")
 DEFAULT_MAX_INLINE_BYTES = 4_000_000
 _CHUNK_BYTES = 1_000_000
-RRF_K = 60
 
 
 class IntegrityError(RuntimeError):
@@ -94,15 +93,6 @@ class ChangeEvent:
     doc_id: Any
     document: Doc | None
     token: Doc
-
-
-def rrf_fuse(rankings: Sequence[Sequence[str]], k: int = RRF_K) -> list[tuple[str, float]]:
-    """Reciprocal rank fusion: score(d) = sum over rankings of 1 / (k + rank), rank starting at 1."""
-    scores: dict[str, float] = {}
-    for ranking in rankings:
-        for rank, item in enumerate(ranking, start=1):
-            scores[item] = scores.get(item, 0.0) + 1.0 / (k + rank)
-    return sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
 def _filters(case_family: str | None, harness_version: str | None) -> dict[str, str]:
@@ -579,22 +569,43 @@ class Store:
         exclude_id: str | None = None,
         rerank: bool = False,
     ) -> list[SimilarFailure]:
-        """`$search` keyword hits and `$vectorSearch` hits fused with reciprocal rank fusion.
+        """Keyword (`$search`) and vector (`$vectorSearch`) hits fused by the server's `$rankFusion`.
 
-        With `rerank=True` the fused shortlist is reordered by Voyage's cross-encoder reranker and each
-        score is its relevance score; otherwise the score is the reciprocal-rank-fusion score.
+        `$rankFusion` is reciprocal rank fusion, weight / (60 + rank) summed over both lists. With
+        `rerank=True` the fused shortlist is reordered by Voyage's cross-encoder reranker and each score is
+        its relevance score; otherwise the score is the fusion score.
         """
         self._ensure_search()
         vector = self.embedder.embed([text], "query")[0]
         filters = _filters(case_family, harness_version)
         pool = max(k * 4, 20)
-        by_vector = self._vector_hits(vector, pool, filters, exclude_id)
-        by_text = self._text_hits(text, pool, filters, exclude_id)
-        known = {h.id: h for h in [*by_text, *by_vector]}
-        fused = rrf_fuse([[h.id for h in by_vector], [h.id for h in by_text]])
+        fusion: Doc = {
+            "$rankFusion": {
+                "input": {
+                    "pipelines": {
+                        "vec": [{"$vectorSearch": self._vector_stage(vector, pool, filters)}],
+                        "txt": [{"$search": self._text_stage(text, filters)}, {"$limit": pool}],
+                    }
+                },
+                "combination": {"weights": {"vec": 1, "txt": 1}},
+                "scoreDetails": True,
+            }
+        }
+        shortlist = self._hits(
+            [
+                fusion,
+                {"$limit": pool + 1},
+                {
+                    "$addFields": {
+                        "score": {"$getField": {"field": "value", "input": {"$meta": "scoreDetails"}}}
+                    }
+                },
+            ],
+            pool,
+            exclude_id,
+        )
         if not rerank:
-            return [SimilarFailure(**{**asdict(known[i]), "score": score}) for i, score in fused[:k]]
-        shortlist = [known[i] for i, _ in fused[:pool]]
+            return shortlist[:k]
         ranked = self._rerank_model().rerank(text, [h.summary for h in shortlist], k)
         return [SimilarFailure(**{**asdict(shortlist[idx]), "score": score}) for idx, score in ranked]
 
@@ -604,38 +615,79 @@ class Store:
             self._reranker = self._owned_reranker
         return self._reranker
 
-    def _vector_hits(
-        self, vector: list[float], k: int, filters: dict[str, str], exclude_id: str | None
-    ) -> list[SimilarFailure]:
+    @staticmethod
+    def _vector_stage(vector: list[float], limit: int, filters: dict[str, str]) -> Doc:
         stage: Doc = {
             "index": atlas_setup.FAILURES_VECTOR_INDEX,
             "path": "embedding",
             "queryVector": vector,
-            "numCandidates": max(k * 20, 100),
-            "limit": k + (1 if exclude_id else 0),
+            "numCandidates": max(limit * 20, 100),
+            "limit": limit,
         }
         if filters:
-            stage["filter"] = (
-                {"$and": [{k_: v} for k_, v in filters.items()]} if len(filters) > 1 else filters
-            )
+            stage["filter"] = {"$and": [{f: v} for f, v in filters.items()]} if len(filters) > 1 else filters
+        return stage
+
+    @staticmethod
+    def _text_stage(text: str, filters: dict[str, str]) -> Doc:
+        compound: Doc = {"must": [{"text": {"query": text, "path": "summary"}}]}
+        if filters:
+            compound["filter"] = [{"equals": {"path": f, "value": v}} for f, v in filters.items()]
+        return {"index": atlas_setup.FAILURES_TEXT_INDEX, "compound": compound}
+
+    def _vector_hits(
+        self, vector: list[float], k: int, filters: dict[str, str], exclude_id: str | None
+    ) -> list[SimilarFailure]:
+        stage = self._vector_stage(vector, k + (1 if exclude_id else 0), filters)
         return self._hits(
             [{"$vectorSearch": stage}, {"$addFields": {"score": {"$meta": "vectorSearchScore"}}}],
             k,
             exclude_id,
         )
 
-    def _text_hits(
-        self, text: str, k: int, filters: dict[str, str], exclude_id: str | None
-    ) -> list[SimilarFailure]:
-        compound: Doc = {"must": [{"text": {"query": text, "path": "summary"}}]}
-        if filters:
-            compound["filter"] = [{"equals": {"path": f, "value": v}} for f, v in filters.items()]
-        pipeline: list[Doc] = [
-            {"$search": {"index": atlas_setup.FAILURES_TEXT_INDEX, "compound": compound}},
-            {"$limit": k + (1 if exclude_id else 0)},
-            {"$addFields": {"score": {"$meta": "searchScore"}}},
-        ]
-        return self._hits(pipeline, k, exclude_id)
+    def wait_indexed(self, timeout_s: float = 60.0, poll_s: float = 0.25) -> int:
+        """Block until both search indexes have caught up with every stored failure; returns that count.
+
+        Atlas search indexes are eventually consistent: a document is queryable by `$vectorSearch` and by
+        `$search` at different moments, so a hybrid query right after a write can see only one list.
+        """
+        self._ensure_search()
+        coll = self._c("failures")
+        want = coll.count_documents({})
+        deadline = time.monotonic() + timeout_s
+        while True:
+            seen_text = next(
+                coll.aggregate(
+                    [
+                        {
+                            "$searchMeta": {
+                                "index": atlas_setup.FAILURES_TEXT_INDEX,
+                                "exists": {"path": "summary"},
+                                "count": {"type": "total"},
+                            }
+                        }
+                    ]
+                ),
+                {"count": {"total": 0}},
+            )["count"]["total"]
+            probe = coll.find_one({}, {"embedding": 1})
+            seen_vec = 0
+            if probe is not None:
+                seen_vec = len(
+                    list(
+                        coll.aggregate(
+                            [
+                                {"$vectorSearch": self._vector_stage(probe["embedding"], want, {})},
+                                {"$project": {"_id": 1}},
+                            ]
+                        )
+                    )
+                )
+            if seen_text >= want and seen_vec >= want:
+                return want
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"search indexes saw text={seen_text} vector={seen_vec} of {want}")
+            time.sleep(poll_s)
 
     def _hits(self, pipeline: list[Doc], k: int, exclude_id: str | None) -> list[SimilarFailure]:
         pipeline = [*pipeline, {"$project": {"embedding": 0}}]
@@ -716,5 +768,4 @@ __all__ = [
     "NewFailure",
     "SimilarFailure",
     "Store",
-    "rrf_fuse",
 ]

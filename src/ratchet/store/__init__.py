@@ -7,7 +7,6 @@ from ratchet.store.atlas import (
     NewFailure,
     SimilarFailure,
     Store,
-    rrf_fuse,
 )
 from ratchet.store.embed import EmbeddingError, MissingKeyError, VoyageEmbedder, VoyageReranker
 
@@ -22,5 +21,4 @@ __all__ = [
     "Store",
     "VoyageEmbedder",
     "VoyageReranker",
-    "rrf_fuse",
 ]

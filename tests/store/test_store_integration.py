@@ -44,15 +44,6 @@ def _trace(
     )
 
 
-def _eventually(fn: Any, timeout_s: float = 30.0) -> Any:
-    deadline = time.monotonic() + timeout_s
-    while True:
-        result = fn()
-        if result or time.monotonic() > deadline:
-            return result
-        time.sleep(0.25)
-
-
 def test_setup_is_idempotent_and_search_indexes_become_queryable(store: Store) -> None:
     store.setup()
     store.setup()
@@ -227,11 +218,13 @@ def _load_failures(store: Store) -> None:
             text, case_family=family, trace_ref=f"r/{fid}", harness_version="v1", failure_id=fid
         )
     store.setup()
+    store.wait_indexed()
+    store.wait_indexed()
 
 
 def test_similar_failures_vector_search_ranks_the_nearest_first(store: Store) -> None:
     _load_failures(store)
-    hits = _eventually(lambda: store.similar_failures("refund timed out so the agent refunded twice", 3))
+    hits = store.similar_failures("refund timed out so the agent refunded twice", 3)
     assert hits[0].id == "f-dup" and hits[0].trace_ref == "r/f-dup" and hits[0].harness_version == "v1"
     assert hits[0].score >= hits[-1].score
     scoped = store.similar_failures("refund timed out", 3, case_family="approval")
@@ -242,7 +235,7 @@ def test_similar_failures_vector_search_ranks_the_nearest_first(store: Store) ->
 def test_hybrid_search_fuses_keyword_and_vector_hits(store: Store) -> None:
     _load_failures(store)
     query = "dispute ticket closed early"
-    hits = _eventually(lambda: store.similar_failures_hybrid(query, 3))
+    hits = store.similar_failures_hybrid(query, 3)
     assert hits[0].id == "f-ticket"
     assert hits[0].score == pytest.approx(2 / 61)  # first in both rankings
     assert len({h.id for h in hits}) == len(hits)
@@ -279,7 +272,8 @@ def test_harness_version_filters_vector_and_hybrid_search(store: Store) -> None:
         ]
     )
     store.setup()
-    hits = _eventually(lambda: store.similar_failures("refund timed out", 5, harness_version="v2"))
+    store.wait_indexed()
+    hits = store.similar_failures("refund timed out", 5, harness_version="v2")
     assert [h.id for h in hits] == ["b"]
     both = store.similar_failures_hybrid("refund timed out", 5, harness_version="v1", case_family="refund")
     assert [h.id for h in both] == ["a"]
@@ -353,9 +347,7 @@ def test_voyage_embeddings_drive_semantic_retrieval(atlas_uri: str) -> None:
     s = Store(atlas_uri, "ratchet_test_voyage", embedder=voyage)
     try:
         _load_failures(s)
-        hits = _eventually(
-            lambda: s.similar_failures("a payment was refunded twice after a network timeout", 3)
-        )
+        hits = s.similar_failures("a payment was refunded twice after a network timeout", 3)
         assert hits[0].id == "f-dup"
         hybrid = s.similar_failures_hybrid("customer was emailed prematurely", 3)
         assert hybrid[0].id == "f-mail"
@@ -390,3 +382,20 @@ def test_setup_cli_creates_everything_on_a_fresh_database(atlas_uri: str) -> Non
 def test_waiting_for_search_indexes_times_out_when_they_do_not_exist(store: Store) -> None:
     with pytest.raises(TimeoutError, match="not queryable"):
         atlas_setup.wait_search_indexes(store.db, timeout_s=0.2, poll_s=0.05)
+
+
+def test_wait_indexed_returns_the_count_and_times_out_when_the_index_cannot_catch_up(store: Store) -> None:
+    store.put_failures([NewFailure(f"failure {i}", "fam", failure_id=f"w{i}") for i in range(4)])
+    store.setup()
+    assert store.wait_indexed() == 4
+    store.db["failures"].insert_one(  # a document the search indexes will never see: no summary field
+        {"_id": "ghost", "embedding": [0.0] * 1024, "case_family": "fam"}
+    )
+    with pytest.raises(TimeoutError, match="text="):
+        store.wait_indexed(timeout_s=1.0, poll_s=0.1)
+
+
+def test_hybrid_search_on_an_empty_collection_returns_nothing(store: Store) -> None:
+    store.setup()
+    assert store.similar_failures_hybrid("anything", 3) == []
+    assert store.similar_failures("anything", 3) == []

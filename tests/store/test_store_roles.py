@@ -160,12 +160,8 @@ def test_sandbox_vector_search_round_trip_and_latency() -> None:
                 s.put_failure(text, case_family=family, failure_id=fid)
             s.setup()
             query = "a payment was refunded twice after a timeout"
-            hits = []
-            for _ in range(120):
-                hits = s.similar_failures(query, 3)
-                if hits and hits[0].id == "f1":
-                    break
-                time.sleep(1)
+            s.wait_indexed(timeout_s=120)
+            hits = s.similar_failures(query, 3)
             assert hits[0].id == "f1"
             vector = s.embedder.embed([query], "query")[0]
             raw: list[float] = []

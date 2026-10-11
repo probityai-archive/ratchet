@@ -32,12 +32,11 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Sandbox tests touch a shared cloud cluster, so they run only when asked for with `-m sandbox`."""
-    if "sandbox" in (config.getoption("-m") or ""):
-        return
-    chosen = [i for i in items if "sandbox" not in i.keywords]
-    config.hook.pytest_deselected(items=[i for i in items if "sandbox" in i.keywords])
-    items[:] = chosen
+    """Tests needing a live secret run only on request: `-m sandbox` (cloud cluster), `-m live` (Voyage)."""
+    selected = config.getoption("-m") or ""
+    opted_out = [i for i in items if any(m in i.keywords and m not in selected for m in ("sandbox", "live"))]
+    config.hook.pytest_deselected(items=opted_out)
+    items[:] = [i for i in items if i not in opted_out]
 
 
 class HashEmbedder:
