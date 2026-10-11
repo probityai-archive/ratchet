@@ -53,6 +53,7 @@ class Execution:
     interventions: int = 0
     attempts: int = 1
     note: str = ""
+    endpoint: str = ""
 
 
 @dataclass(frozen=True)
