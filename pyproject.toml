@@ -22,6 +22,9 @@ bench = [
     "litellm==1.102.1",
     "tau-bench",
 ]
+gepa = [
+    "gepa==0.1.4",
+]
 
 [dependency-groups]
 dev = [
