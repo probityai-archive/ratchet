@@ -43,6 +43,7 @@ class FakeBackend:
         self.sink = sink or FakeSink()
         self.env: dict[str, str] = {}
         self.evolved: list[tuple[int, int]] = []
+        self.resumed: tuple[str, str, str] = ("", "", "")
 
     @contextmanager
     def open_store(self) -> Iterator[FakeStore]:
@@ -73,6 +74,15 @@ class FakeBackend:
 
     def case_info(self, case_id: str) -> Any:
         return info(case_id)
+
+    def get_case(self, case_id: str) -> Any:
+        return SimpleNamespace(id=case_id)
+
+    def resume_case(self, harness: Harness, case: Any, model: Any, store: Any, run_id: str) -> Any:
+        self.resumed = (harness.version, case.id, run_id)
+        return make_trace(
+            run_id, case.id, True, [("payments_refund", {"charge_id": "ch1"})], version=harness.version
+        )
 
     def evaluate(
         self, harness: Harness, cases: Sequence[Any], model: Any, store: Any, workers: int, repeats: int
@@ -365,10 +375,13 @@ def signed_backend(tamper: bool = False) -> tuple[FakeBackend, str]:
 def test_verify_a_stored_decision() -> None:
     backend, pub = signed_backend()
     code, out = run(["verify", "c0", "--pubkey", pub], backend)
-    assert code == 0
-    assert "VERIFIED" in out
+    # the signature is good, but a hand-signed body is not a full admission predicate
+    assert code == 1
+    assert "✓ DSSE envelope signature valid" in out
+    assert "NOT ESTABLISHED" in out
+    assert "reason code not_established" in out
     backend.env = {"RATCHET_SIGNING_KEY": "33" * 32}
-    assert run(["verify", "p0->c0"], backend)[0] == 0
+    assert run(["verify", "p0->c0"], backend)[0] == 1
 
 
 def test_verify_catches_tampering_wrong_keys_and_missing_decisions(tmp_path: Path) -> None:
@@ -515,3 +528,63 @@ def test_audit_cases_run_only_when_named_and_never_enter_the_matrix() -> None:
     ci = b.case_info(audit.id)
     assert ci is not None
     assert ci.split == "audit"
+
+
+# -- resume -------------------------------------------------------------------------------------------------
+
+
+def checkpoint(status: str = "running", version: str | None = None) -> dict[str, Any]:
+    call = {"name": "payments_refund", "args": {"charge_id": "ch1"}, "call_id": "c1"}
+    result = {"result": {"call_id": "c1", "ok": False, "error": "timeout"}}
+    return {
+        "status": status, "run_id": "run-x", "case_id": "refund.t1", "harness_version": version or "",
+        "events": [{"seq": 0, "kind": "tool_result", "payload": result, "ts": 1.0}],
+        "executed": [call], "pending": [{"name": "tickets_get", "args": {}, "call_id": "c2"}],
+    }  # fmt: skip
+
+
+def test_resume_reports_what_was_not_repeated() -> None:
+    backend = FakeBackend()
+    assert backend.store_obj is not None
+    backend.store_obj.checkpoints["run-x"] = checkpoint(version=backend.seed().version)
+    code, out = run(["resume", "run-x"], backend)
+    assert code == 0, out
+    assert "RESUMING" in out
+    assert "reply lost (timeout)" in out
+    assert "asked for but not yet run when it stopped: tickets_get" in out
+    assert "NOT REPEATED" not in out or "RE-ISSUED" in out  # the fake run repeats the refund by design
+    assert "RE-ISSUED BY THE MODEL" in out
+    assert backend.resumed[2] == "run-x"
+    assert any(t.run_id == "run-x" for t in backend.store_obj.trace_list)
+
+
+def test_resume_refuses_a_missing_or_finished_run() -> None:
+    backend = FakeBackend()
+    assert backend.store_obj is not None
+    code, out = run(["resume", "nope"], backend)
+    assert code == 1
+    assert "no checkpoint" in out
+    backend.store_obj.checkpoints["run-x"] = checkpoint("final", backend.seed().version)
+    code, out = run(["resume", "run-x"], backend)
+    assert code == 1
+    assert "already finished" in out
+    backend.store_obj.checkpoints["run-x"] = checkpoint("running", "0" * 12)
+    code, out = run(["resume", "run-x"], backend)
+    assert code == 1
+    assert "not in the store" in out
+
+
+def test_show_decision_envelope_out_and_verify_a_file(tmp_path: Path) -> None:
+    backend, pub = signed_backend()
+    target = tmp_path / "r.dsse"
+    code, out = run(["show", "decision", "c0", "--envelope-out", str(target)], backend)
+    assert code == 0
+    assert "wrote the signed envelope" in out
+    code, out = run(["verify", str(target), "--pubkey", pub], backend)
+    assert code == 0
+    assert "VERIFIED" in out
+    assert backend.store_obj is not None
+    backend.store_obj.decision_docs[-1]["envelope"] = None
+    code, out = run(["show", "decision", "c0", "--envelope-out", str(target)], backend)
+    assert code == 1
+    assert "no signed envelope" in out

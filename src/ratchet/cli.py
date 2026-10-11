@@ -8,6 +8,7 @@ agent, cases, improver). `LiveBackend` imports them lazily; tests hand in a fake
 from __future__ import annotations
 
 import argparse
+import base64
 import os
 import sys
 import traceback
@@ -22,7 +23,8 @@ from rich.text import Text
 
 from ratchet.improve.replay import GuardRunner, WalkCache
 from ratchet.improve.sim import Simulator
-from ratchet.types import Harness
+from ratchet.types import Harness, Trace
+from ratchet.view import resume as resume_view
 from ratchet.view.data import (
     CandidateRef,
     RunStore,
@@ -33,6 +35,7 @@ from ratchet.view.data import (
     find_decision_doc,
     resolve_candidates,
 )
+from ratchet.view.evidence import collect
 from ratchet.view.lineage import show_lineage
 from ratchet.view.live import DEFAULT_COLLECTIONS, follow
 from ratchet.view.matrix import (
@@ -71,6 +74,10 @@ class Backend(Protocol):
     def seed(self) -> Harness: ...
     def cases(self, split: str, family: str | None, ids: Sequence[str]) -> list[Any]: ...
     def case_info(self, case_id: str) -> CaseInfo | None: ...
+    def get_case(self, case_id: str) -> Any: ...
+    def resume_case(
+        self, harness: Harness, case: Any, model: Any, store: WriteStore, run_id: str
+    ) -> Trace: ...
     def evaluate(
         self,
         harness: Harness,
@@ -136,6 +143,19 @@ class LiveBackend:
         if not found:
             raise CliError("no cases match that selection")
         return found
+
+    def get_case(self, case_id: str) -> Any:
+        from ratchet.cases import get
+
+        try:
+            return get(case_id)
+        except KeyError as exc:
+            raise CliError(f"unknown case {case_id!r}") from exc
+
+    def resume_case(self, harness: Harness, case: Any, model: Any, store: WriteStore, run_id: str) -> Trace:
+        from ratchet.agent.worker import run_case
+
+        return run_case(harness, case, model, store, run_id=run_id)
 
     def case_info(self, case_id: str) -> CaseInfo | None:
         from ratchet.cases import all_cases
@@ -292,6 +312,26 @@ def _emit_run(
         console.print(Text(f"raindrop: {type(exc).__name__}: {exc}", style="yellow"))
 
 
+def cmd_resume(args: argparse.Namespace, backend: Backend, console: Console) -> int:
+    with backend.open_store() as store:
+        saved = store.resume(args.run_id)
+        if saved is None:
+            raise CliError(f"no checkpoint for run {args.run_id!r}: it never ran, or it ran without a store")
+        if saved.get("status") != "running":
+            raise CliError(f"run {args.run_id!r} already finished ({saved.get('status')}); nothing to resume")
+        version = str(saved["harness_version"])
+        harness = store.get_harness(version) or backend.seed()
+        if harness.version != version:
+            raise CliError(f"the harness {version} of this run is not in the store")
+        case = backend.get_case(str(saved["case_id"]))
+        console.print(resume_view.before(resume_view.build_report(saved)))
+        trace = backend.resume_case(harness, case, backend.model(), store, args.run_id)
+        store.put_trace(trace)
+        console.print()
+        console.print(resume_view.after(resume_view.build_report(saved, trace)))
+    return 0
+
+
 def cmd_evolve(args: argparse.Namespace, backend: Backend, console: Console) -> int:
     cases = backend.cases("all", None, [])
     with _telemetry(args, backend, console) as sink, backend.open_store() as store:
@@ -400,7 +440,19 @@ def cmd_show(args: argparse.Namespace, backend: Backend, console: Console) -> in
             if doc is None:
                 raise CliError(f"no decision {args.id!r}")
             console.print(decision_view(decision_info(doc)))
+            if args.envelope_out:
+                _write_envelope(doc, Path(args.envelope_out), console)
     return 0
+
+
+def _write_envelope(doc: dict[str, Any], target: Path, console: Console) -> None:
+    raw = doc.get("envelope")
+    if not raw:
+        raise CliError("this decision carries no signed envelope")
+    target.write_bytes(base64.b64decode(str(raw)))
+    console.print(
+        Text(f"wrote the signed envelope to {target}; check it: ratchet verify {target}", style="green")
+    )
 
 
 def _need(args: argparse.Namespace, what: str) -> str:
@@ -424,15 +476,21 @@ def _load_trace(store: ViewStore, ref: str) -> Any:
 def cmd_verify(args: argparse.Namespace, backend: Backend, console: Console) -> int:
     pem = Path(args.pubkey_file) if args.pubkey_file else None
     trusted = trusted_keys(args.pubkey, backend_env(backend), pem)
-    if args.envelope:
-        res = verify_envelope(Path(args.envelope).read_bytes(), trusted)
-        name = args.envelope
+    envelope_file = args.envelope or (
+        args.decision if args.decision and Path(args.decision).is_file() else None
+    )
+    if envelope_file:
+        res = verify_envelope(Path(envelope_file).read_bytes(), trusted)
+        name = str(envelope_file)
     else:
         with backend.open_store() as store:
             doc = find_decision_doc(store, args.decision)
-        if doc is None:
-            raise CliError(f"no decision {args.decision!r}")
-        res, name = verify_decision(doc, trusted), str(doc.get("_id"))
+            if doc is None:
+                raise CliError(f"no decision {args.decision!r}")
+            evidence = collect(store, doc, backend.runner, backend.simulator())
+        res, name = verify_decision(doc, trusted, evidence), str(doc.get("_id"))
+        for note in evidence.notes:
+            console.print(Text(f"evidence: {note}", style="yellow"))
     console.print(render_verify(res, name))
     return 0 if res.ok else 1
 
@@ -501,6 +559,10 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--cohort", choices=["baseline", "candidate"], default="baseline")
     run.set_defaults(func=cmd_run)
 
+    rs = sub.add_parser("resume", help="resume an interrupted case run from its Atlas checkpoint")
+    rs.add_argument("run_id")
+    rs.set_defaults(func=cmd_resume)
+
     ev = sub.add_parser("evolve", help="run the ratchet loop for N generations")
     ev.add_argument("--generations", "-n", type=int, default=3)
     ev.add_argument("--workers", type=int, default=8)
@@ -520,6 +582,9 @@ def _parser() -> argparse.ArgumentParser:
     sh = sub.add_parser("show", help="print the lineage, a trace, or a decision")
     sh.add_argument("what", choices=["lineage", "trace", "decision"])
     sh.add_argument("id", nargs="?", help="trace id (run_id or run_id/case_id) or decision id")
+    sh.add_argument(
+        "--envelope-out", metavar="FILE", help="decision only: write the signed DSSE envelope here"
+    )
     sh.set_defaults(func=cmd_show)
 
     vf = sub.add_parser("verify", help="verify a decision's signed DSSE receipt")
