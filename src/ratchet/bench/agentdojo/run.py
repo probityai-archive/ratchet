@@ -110,7 +110,7 @@ class JsonStore:
             raise FileExistsError(f"{root} already holds a run ({', '.join(used)}); use a new directory")
         self._lock = threading.Lock()
         self._evals = 0
-        self._harnesses: set[str] = set()
+        self._harnesses: dict[str, Harness] = {}
         self._traces: set[str] = set()
         self._decisions: dict[str, dict[str, Any]] = {}
 
@@ -122,9 +122,12 @@ class JsonStore:
     def put_harness(self, harness: Harness) -> bool:
         if harness.version in self._harnesses:
             return False
-        self._harnesses.add(harness.version)
+        self._harnesses[harness.version] = harness
         self._append("harnesses.jsonl", asdict(harness))
         return True
+
+    def get_harness(self, version: str) -> Harness | None:
+        return self._harnesses.get(version)
 
     def put_trace(self, trace: Trace) -> bool:
         if trace.run_id in self._traces:

@@ -118,6 +118,7 @@ def test_json_store_writes_each_record_once(tmp_path: Path, banking: DojoSuite) 
     store = JsonStore(tmp_path / "run")
     h: Harness = seed_harness(banking)
     assert store.put_harness(h) and not store.put_harness(h)
+    assert store.get_harness(h.version) == h and store.get_harness("other") is None
     runner = DojoRunner(banking)
     t = runner.run_case(h, _case(banking, "user_task_4", None), GroundTruthModel({}), None, run_id="r7")
     assert store.put_trace(t) and not store.put_trace(t)
