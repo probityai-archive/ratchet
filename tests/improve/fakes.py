@@ -31,13 +31,13 @@ class World:
         return cls(case_id, {charge: 50}, timeout_first_refund=case_id.startswith("timeout"))
 
     def call(self, c: ToolCall) -> ToolResult:
-        if c.name == "refund":
+        if c.name == "payments_refund":
             self.refund_attempts += 1
             self.refunds.append({"charge_id": c.args["charge_id"], "status": "succeeded"})
             if self.timeout_first_refund and self.refund_attempts == 1:
                 return ToolResult(c.call_id, False, None, "timeout")
             return ToolResult(c.call_id, True, {"status": "succeeded"})
-        if c.name == "list_refunds":
+        if c.name == "payments_list_refunds":
             return ToolResult(
                 c.call_id,
                 True,
@@ -93,7 +93,9 @@ def make_trace(
         add("tool_call", {"call": {"name": c.name, "args": c.args, "call_id": c.call_id}, "view": view})
         reason = _blocked_by(guards, c, view, history)
         if reason is not None:
-            add("guard_block", {"call_id": c.call_id, "source": "guard", "message": reason})
+            gid = reason.split(":", 1)[0].removeprefix("blocked by guard ")
+            add("guard_block", {"call_id": c.call_id, "source": "guard", "message": reason, "guard_id": gid,
+                                "tool": c.name})  # fmt: skip
             continue
         r = world.call(c)
         add("tool_result", {"result": {"call_id": r.call_id, "ok": r.ok, "data": r.data, "error": r.error}})
@@ -105,7 +107,11 @@ def make_trace(
 
 def bad_timeout(n: int, run: str | None = None) -> Trace:
     ch = f"ch_{n}"
-    calls = [("get_charge", {"charge_id": ch}), ("refund", {"charge_id": ch}), ("refund", {"charge_id": ch})]
+    calls = [
+        ("payments_get_charge", {"charge_id": ch}),
+        ("payments_refund", {"charge_id": ch}),
+        ("payments_refund", {"charge_id": ch}),
+    ]
     return make_trace(f"timeout-{n}", calls, run or f"bad-{n}")
 
 
@@ -113,7 +119,7 @@ def good_timeout(n: int, run: str | None = None) -> Trace:
     ch = f"ch_{n}"
     return make_trace(
         f"timeout-{n}",
-        [("refund", {"charge_id": ch}), ("list_refunds", {"charge_id": ch})],
+        [("payments_refund", {"charge_id": ch}), ("payments_list_refunds", {"charge_id": ch})],
         run or f"good-{n}",
     )
 
@@ -121,12 +127,14 @@ def good_timeout(n: int, run: str | None = None) -> Trace:
 def good_plain(n: int, run: str | None = None) -> Trace:
     ch = f"ch_{n}"
     return make_trace(
-        f"plain-{n}", [("get_charge", {"charge_id": ch}), ("refund", {"charge_id": ch})], run or f"plain-{n}"
+        f"plain-{n}",
+        [("payments_get_charge", {"charge_id": ch}), ("payments_refund", {"charge_id": ch})],
+        run or f"plain-{n}",
     )
 
 
 def lazy(n: int, run: str | None = None) -> Trace:
-    return make_trace(f"plain-{n}", [("get_charge", {"charge_id": f"ch_{n}"})], run or f"lazy-{n}")
+    return make_trace(f"plain-{n}", [("payments_get_charge", {"charge_id": f"ch_{n}"})], run or f"lazy-{n}")
 
 
 class FakeSimulator:
@@ -205,7 +213,7 @@ class ScriptedChat:
 
 NO_DUP_GUARD = """
 def check(call, view, history):
-    if call.name != "refund":
+    if call.name != "payments_refund":
         return None
     charge = call.args["charge_id"]
     if any(r["charge_id"] == charge and r["status"] == "succeeded" for r in view["refunds"]):
@@ -215,7 +223,7 @@ def check(call, view, history):
 
 BLOCK_ALL_REFUNDS = """
 def check(call, view, history):
-    return "no refunds" if call.name == "refund" else None
+    return "no refunds" if call.name == "payments_refund" else None
 """
 
 CRASHING_GUARD = """
@@ -259,9 +267,9 @@ class FakeRunCase:
         if case.id == self.explode:
             raise RuntimeError("model endpoint down")
         ch = {"charge_id": "ch_" + case.id.rsplit("-", 1)[-1]}
-        script: list[tuple[str, dict[str, Any]]] = [("get_charge", ch), ("refund", ch)]
+        script: list[tuple[str, dict[str, Any]]] = [("payments_get_charge", ch), ("payments_refund", ch)]
         if case.id.startswith("timeout"):
-            script.append(("refund", ch))
+            script.append(("payments_refund", ch))
         elif case.id.startswith("omit") and not harness.procedures:
             script = script[:1]
         return make_trace(case.id, script, f"{run_id}-{case.id}", harness.version, harness.guards)

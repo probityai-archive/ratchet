@@ -125,5 +125,5 @@ def test_overbroad_guard_is_rejected_early_and_clearance_needs_every_trace() -> 
 def test_similarity_order_puts_target_like_traces_first() -> None:
     from ratchet.improve.replay import similarity_order
 
-    order = similarity_order([good_plain(1), good_timeout(2)], [bad_timeout(3)], "refund")
+    order = similarity_order([good_plain(1), good_timeout(2)], [bad_timeout(3)], "payments_refund")
     assert [t.run_id for t in order] == ["plain-1", "good-2"]

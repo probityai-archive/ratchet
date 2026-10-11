@@ -29,7 +29,7 @@ PARENT = Harness.build(
     system_prompt="You handle refunds.",
     procedures=[],
     guards=[],
-    tool_allowlist=["refund", "list_refunds", "get_charge"],
+    tool_allowlist=["payments_refund", "payments_list_refunds", "payments_get_charge"],
     created_by="seed",
 )
 
@@ -73,7 +73,7 @@ def test_propose_builds_candidates_of_each_kind_and_records_rejections() -> None
     prompt = chat.prompts()
     # The model sees the failing step, the real state view, and what passing runs looked like.
     assert "<== FAILING STEP" in prompt and '"refunds": [{"charge_id": "ch_1"' in prompt
-    assert "refund -> list_refunds" in prompt and "<== same tool, passing" in prompt
+    assert "payments_refund -> payments_list_refunds" in prompt and "<== same tool, passing" in prompt
     assert SEED.text in prompt
 
 
@@ -102,7 +102,7 @@ def test_instructions_are_content_addressed() -> None:
 
 def test_passing_shapes_counts_sequences() -> None:
     shapes = passing_shapes([good_plain(1), good_plain(2), good_timeout(3)])
-    assert shapes[0].startswith("2x  get_charge -> refund")
+    assert shapes[0].startswith("2x  payments_get_charge -> payments_refund")
 
 
 def test_revise_guard_feeds_replay_failures_back() -> None:
@@ -118,7 +118,10 @@ def test_revise_guard_feeds_replay_failures_back() -> None:
     fixed = revise_guard(broad, rep, cluster, PARENT, chat, walks=walks)
     assert not isinstance(fixed, str)
     prompt = chat.prompts()
-    assert "FALSE POSITIVE in passing run plain-6" in prompt and "Call blocked wrongly: refund" in prompt
+    assert (
+        "FALSE POSITIVE in passing run plain-6" in prompt
+        and "Call blocked wrongly: payments_refund" in prompt
+    )
     rep2 = replay(fixed.new_guards(PARENT)[0], cluster.members, cluster.traces, passing, walks, LocalRunner())
     assert rep2.passed
 

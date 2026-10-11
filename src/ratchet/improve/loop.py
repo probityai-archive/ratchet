@@ -76,6 +76,12 @@ class Lab:
     repair_rounds: int = 1
     suite_digest: str | None = field(default_factory=frozen_suite_digest)
     model_config: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def decision_cases(self) -> list[CaseLike]:
+        """Train and held-out cases. The audit cohort is never used for any decision."""
+        return [c for c in self.cases if c.split in ("train", "heldout")]
+
     log: Callable[[str], None] = lambda _msg: None
 
 
@@ -387,9 +393,9 @@ def _promote(
     if len(picks) < 2:
         return best.candidate.harness, best.report, best.decision
     combo = compose(g.parent, [t.candidate for t in picks])
-    report = evaluate_many([combo], lab.cases, lab.run_case, model, workers=lab.workers, repeats=lab.repeats)[
-        0
-    ]
+    report = evaluate_many(
+        [combo], lab.decision_cases, lab.run_case, model, workers=lab.workers, repeats=lab.repeats
+    )[0]
     _persist_eval(store, report, {"generation": g.gen, "role": "composite"})
     d, _ = _decide(
         store,
@@ -443,7 +449,7 @@ def evolve(
         meter = Meter()
         rec = GenerationRecord(gen, parent.version)
         # The parent runs twice, fresh, every generation: the noise floor is measured, never assumed.
-        parent_eval = evaluate_many([parent], lab.cases, lab.run_case, model, workers=lab.workers,
+        parent_eval = evaluate_many([parent], lab.decision_cases, lab.run_case, model, workers=lab.workers,
                                     repeats=lab.repeats)[0]  # fmt: skip
         _persist_eval(store, parent_eval, {"generation": gen, "role": "parent_run_1"})
         parent_rerun = evaluate_many([parent], heldout_cases, lab.run_case, model, workers=lab.workers,
@@ -605,7 +611,7 @@ def _evaluate_and_admit(
     shortlist = _shortlist(tried, lanes_for(frozen_ids, lab.max_evals))
     reports = evaluate_many(
         [t.candidate.harness for t in shortlist],
-        lab.cases,
+        lab.decision_cases,
         lab.run_case,
         model,
         workers=lab.workers,

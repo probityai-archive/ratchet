@@ -21,7 +21,7 @@ def test_clusters_by_mechanism_and_names_the_failing_step() -> None:
     clusters = diagnose(traces, FakeSimulator())
     assert [len(c.members) for c in clusters] == [2, 1]
     dup, omit = clusters
-    assert dup.key["mode"] == "commission" and dup.key["tool"] == "refund"
+    assert dup.key["mode"] == "commission" and dup.key["tool"] == "payments_refund"
     assert dup.key["prior_error"] == "timeout" and dup.key["repeat"] == "same_args"
     assert {m.seq for m in dup.members} == {5}
     assert {m.id for m in dup.members} == {"bad-1@5", "bad-2@5"}

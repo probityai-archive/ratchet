@@ -31,7 +31,7 @@ HELDOUT_IDS = ["timeout-4", "timeout-5", "plain-6", "omit-9", "omit-10"]
 
 SEED = Harness.build(
     parent=None, system_prompt="You handle refunds.", procedures=[], guards=[],
-    tool_allowlist=["get_charge", "list_refunds", "refund"], created_by="seed",
+    tool_allowlist=["payments_get_charge", "payments_list_refunds", "payments_refund"], created_by="seed",
 )  # fmt: skip
 
 
@@ -58,7 +58,7 @@ class RoutingChat:
         if "IMPROVED" in user:
             return FakeTurn(json.dumps({"candidates": [
                 {"kind": "procedure", "name": "finish the refund", "when": "a refund is owed",
-                 "steps": ["get_charge", "refund"]},
+                 "steps": ["payments_get_charge", "payments_refund"]},
             ]}))  # fmt: skip
         return FakeTurn(json.dumps({"candidates": [{"kind": "prompt_edit", "text": "Think harder."}]}))
 
@@ -199,3 +199,21 @@ def test_fixes_for_two_clusters_are_composed_when_the_composite_does_better() ->
         and result.harness.procedures
     )
     assert any("composite_of" in d["context"] for d in store.decisions)
+
+
+def test_audit_cases_are_never_run() -> None:
+    class Recording(FakeRunCase):
+        def __init__(self) -> None:
+            super().__init__()
+            self.seen: set[str] = set()
+
+        def __call__(self, harness: Any, case: Any, model: Any, store: Any, *, run_id: str) -> Trace:
+            self.seen.add(case.id)
+            return super().__call__(harness, case, model, store, run_id=run_id)
+
+    run = Recording()
+    lab = _lab(RoutingChat(), Signer.generate())
+    lab.cases = [*CASES, FakeCase("timeout-99", "audit")]
+    lab.run_case = run
+    evolve(MemStore(), None, 1, lab=lab, seed=SEED)
+    assert run.seen and "timeout-99" not in run.seen

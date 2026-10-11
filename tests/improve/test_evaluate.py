@@ -9,7 +9,12 @@ from ratchet.types import Event, Guard, Harness, Trace
 from .fakes import BLOCK_ALL_REFUNDS, NO_DUP_GUARD, FakeRunCase, fake_cases
 
 SEED = Harness.build(
-    parent=None, system_prompt="p", procedures=[], guards=[], tool_allowlist=["refund"], created_by="seed"
+    parent=None,
+    system_prompt="p",
+    procedures=[],
+    guards=[],
+    tool_allowlist=["payments_refund"],
+    created_by="seed",
 )
 GUARDED = SEED.child(guards=[Guard("g", "d", NO_DUP_GUARD)], created_by="improver")
 

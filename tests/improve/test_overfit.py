@@ -10,7 +10,9 @@ PARENT = Harness.build(parent=None, system_prompt="Base.", procedures=[], guards
 
 
 def _traces():  # type: ignore[no-untyped-def]
-    t = make_trace("timeout-1", [("refund", {"charge_id": "ch_3MoK8", "amount_cents": 3200})], "run-a")
+    t = make_trace(
+        "timeout-1", [("payments_refund", {"charge_id": "ch_3MoK8", "amount_cents": 3200})], "run-a"
+    )
     extra = Event(99, "tool_result", {"result": {"data": {
         "customer": {"name": "Maya Okafor", "email": "maya@fastmail.example"},
         "policy": {"max_refund_cents": 50000, "doc_id": "pol_refund-v2"},

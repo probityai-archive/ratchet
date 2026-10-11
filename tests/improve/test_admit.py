@@ -17,7 +17,8 @@ from .fakes import BLOCK_ALL_REFUNDS, NO_DUP_GUARD, FakeRunCase, FakeSimulator, 
 
 OLD = Guard("g-old", "kept", "def check(call, view, history):\n    return None\n")
 PARENT = Harness.build(
-    parent=None, system_prompt="p", procedures=[], guards=[OLD], tool_allowlist=["get_charge", "refund"],
+    parent=None, system_prompt="p", procedures=[], guards=[OLD],
+    tool_allowlist=["payments_get_charge", "payments_refund"],
     created_by="seed",
 )  # fmt: skip
 HELDOUT = [c for c in fake_cases() if c.split == "heldout"]
@@ -190,5 +191,5 @@ def test_authority_never_grows_without_a_human_signature() -> None:
 
 def test_tampered_candidate_fails_authority() -> None:
     cand = PARENT.child(system_prompt="q", created_by="improver")
-    forged = replace(cand, tool_allowlist=["get_charge"])  # digest no longer matches content
+    forged = replace(cand, tool_allowlist=["payments_get_charge"])  # digest no longer matches content
     assert not check_authority(PARENT, forged).passed
