@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_PYTHON: "3.14"
+  UV_LOCKED: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - run: uv sync --all-groups --all-extras
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run mypy src
+
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      # Same image, credentials and port mapping as docker/compose.yaml; the "image tag matches compose" step fails the
+      # job if the two drift apart.
+      atlas:
+        image: mongodb/mongodb-atlas-local:8.3.9-20260928T091948Z
+        env:
+          MONGODB_INITDB_ROOT_USERNAME: ratchet
+          MONGODB_INITDB_ROOT_PASSWORD: ratchet-local-dev
+        ports:
+          - 127.0.0.1:27018:27017
+        options: >-
+          --hostname ratchet-atlas
+          --ulimit nofile=1048576:1048576
+          --health-cmd "mongosh -u ratchet -p ratchet-local-dev --quiet --eval 1"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+          --health-start-period 20s
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: image tag matches compose
+        run: |
+          want=$(sed -n 's/^ *image: *//p' docker/compose.yaml | head -1)
+          have=$(sed -n 's/^ *image: *\(mongodb\/mongodb-atlas-local:[^ ]*\).*$/\1/p' .github/workflows/ci.yml | head -1)
+          echo "compose: $want  workflow: $have"
+          test -n "$want" && test "$want" = "$have"
+      - name: wait until mongot answers search-index calls
+        run: |
+          id=$(docker ps --filter ancestor="$(sed -n 's/^ *image: *//p' docker/compose.yaml | head -1)" --format '{{.ID}}' | head -1)
+          test -n "$id"
+          for i in $(seq 1 90); do
+            if docker exec "$id" mongosh -u ratchet -p ratchet-local-dev --quiet --eval "db.getSiblingDB('healthprobe').nothing.aggregate([{\$listSearchIndexes:{}}]).toArray().length" >/dev/null 2>&1; then
+              echo "search ready after $((i * 5)) s"; exit 0
+            fi
+            sleep 5
+          done
+          docker logs --tail 50 "$id"
+          exit 1
+      - run: uv sync --all-groups --all-extras
+      # Default selection: sandbox tests (hackathon cluster secrets) and live tests (VOYAGE_API_KEY) are deselected.
+      # The kill_parent escape test runs in its own job because it signals the pytest process itself on a kernel
+      # without Landlock signal scoping.
+      - name: pytest
+        run: >-
+          uv run --with pytest-timeout python -m pytest -q -W error --timeout=120 -rfEs --tb=short
+          -m "not sandbox and not live"
+          --deselect "tests/agent/test_guards.py::test_sandbox_refuses_escape[kill_parent]"
+          --cov=src/ratchet --cov-report=term-missing:skip-covered
+
+  sandbox-signal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - run: uv sync --all-groups --all-extras
+      - run: >-
+          uv run --with pytest-timeout python -m pytest -q -W error --timeout=120
+          "tests/agent/test_guards.py::test_sandbox_refuses_escape[kill_parent]"
