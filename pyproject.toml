@@ -16,6 +16,11 @@ dependencies = [
 [project.scripts]
 ratchet = "ratchet.cli:main"
 
+[project.optional-dependencies]
+bench = [
+    "agentdojo==0.1.35",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8",
