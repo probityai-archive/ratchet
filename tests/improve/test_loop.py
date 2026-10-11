@@ -217,3 +217,47 @@ def test_audit_cases_are_never_run() -> None:
     lab.run_case = run
     evolve(MemStore(), None, 1, lab=lab, seed=SEED)
     assert run.seen and "timeout-99" not in run.seen
+
+
+LEAKY_GUARD = """
+import json
+
+
+def check(call, view, history):
+    if call.name != "payments_refund":
+        return None
+    charge = call.args.get("charge_id", "")
+    if any(r["charge_id"] == charge and r["status"] == "succeeded" for r in view["refunds"]):
+        return "duplicate"
+    if int(charge.split("_")[1]) >= 4:
+        return "LEAK " + json.dumps(view)
+    return None
+"""
+
+
+def test_a_guard_that_leaks_protected_inputs_through_its_reason_never_reaches_the_improver() -> None:
+    import re
+
+    class Leaky(RoutingChat):
+        def complete(self, messages: Sequence[dict[str, Any]], tools: Sequence[dict[str, Any]]) -> FakeTurn:
+            user = str(messages[-1]["content"])
+            if "Propose" in user and "duplicate refund" in user:
+                self.requests.append([dict(m) for m in messages])
+                return FakeTurn(
+                    json.dumps({"candidates": [{"kind": "guard", "description": "d", "source": LEAKY_GUARD}]})
+                )
+            return super().complete(messages, tools)
+
+    chat, store = Leaky(), MemStore()
+    result = evolve(store, None, 2, lab=_lab(chat, Signer.generate()), seed=SEED)
+    leaked_row = next(c for c in result.generations[0].candidates if c["kind"] == "guard")
+    assert leaked_row["replay"]["verdict"] == "CLEARED"  # it hides on training traces
+    decision = next(d for d in store.decisions if d["context"].get("kind") == "guard")
+    assert not decision["admitted"]
+    fires = decision["checks"][0]["evidence"]["reports"][0]["false_fires"]
+    assert fires and all(f.startswith("run-") for f in fires)  # the referee caught it on held-out traces
+    protected = re.compile(r"\bch_(4|5|6|9|10)\b")
+    referee = [e for e in store.evals if e["type"] == "replay" and e["role"] == "referee"]
+    leaks = [fp["reason"] for e in referee for fp in e["false_positives"] if fp["reason"].startswith("LEAK")]
+    assert leaks and protected.search(" ".join(leaks))  # the leak attempt really carried protected data
+    assert not protected.search(chat.prompts())  # and none of it reached the improver

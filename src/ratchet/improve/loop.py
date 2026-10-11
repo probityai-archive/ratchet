@@ -337,6 +337,8 @@ def _decide(
     run to confirm; only the final decision is signed and stored. Returns it and the confirming run."""
     require_same(g.evaluator, evaluator_identity(lab.cases, lab.model_config, lab.suite_digest))
     composed = _composed_replay(g, lab, harness, targets)
+    if composed is not None:
+        _persist_replay(store, g, composed)
     kw: dict[str, Any] = {
         "parent_runs": g.parent_runs,
         "cand_eval": report,
@@ -386,7 +388,7 @@ def _composed_replay(
 
 
 def _referee_replays(
-    tried: list[_Tried], g: _Gen, clusters: dict[str, FailureCluster], lab: Lab
+    store: ImproveStore, tried: list[_Tried], g: _Gen, clusters: dict[str, FailureCluster], lab: Lab
 ) -> dict[str, ReplayReport]:
     """Rule 1 on the referee's side: every passing trace of the parent and every benign-twin trace,
     held-out included."""
@@ -396,7 +398,14 @@ def _referee_replays(
         for guard in t.candidate.new_guards(g.parent):
             cl = clusters[t.candidate.cluster_id]
             out[guard.id] = replay(guard, cl.members, cl.traces, passing, g.walks, lab.runner, benign)
+            _persist_replay(store, g, out[guard.id])
     return out
+
+
+def _persist_replay(store: ImproveStore, g: _Gen, report: ReplayReport) -> None:
+    """Protected replay detail is evaluator-side evidence: stored, never shown to the proposer."""
+    store.put_eval({"type": "replay", "role": "referee", "generation": g.gen, "parent": g.parent.version,
+                    **report.to_payload()})  # fmt: skip
 
 
 def _promote(
@@ -647,7 +656,7 @@ def _evaluate_and_admit(
         workers=lab.workers,
         repeats=lab.repeats,
     )
-    referee = _referee_replays(shortlist, g, {c.id: c for c in clusters}, lab)
+    referee = _referee_replays(store, shortlist, g, {c.id: c for c in clusters}, lab)
     for t, report in zip(shortlist, reports, strict=True):
         t.report = report
         _persist_eval(store, report, {"generation": g.gen, "role": "candidate", "candidate": t.candidate.id})
