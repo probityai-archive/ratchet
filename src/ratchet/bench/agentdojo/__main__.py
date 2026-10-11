@@ -20,6 +20,8 @@ from ratchet.bench.agentdojo.experiment import (
     Settings,
     admitted_changes,
     baseline,
+    decisions,
+    evaluation_rows,
     evolve_from,
     harness_from,
     lineage,
@@ -27,7 +29,6 @@ from ratchet.bench.agentdojo.experiment import (
     read_jsonl,
     recorded_lineage,
     suite_digest,
-    version_metrics,
 )
 from ratchet.bench.agentdojo.report import document, render
 from ratchet.bench.agentdojo.run import DojoRunner, JsonStore
@@ -123,7 +124,8 @@ def write_results(
         "status": status,
         "provenance": prov,
         "versions": versions,
-        "metrics": version_metrics(dojo, out, versions),
+        "metrics": evaluation_rows(dojo, out),
+        "decisions": decisions(out),
         "admitted": admitted_changes(out, versions[1:]),
         "generations": records,
         "notes": NOTES,

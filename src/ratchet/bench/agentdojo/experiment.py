@@ -233,17 +233,16 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def version_metrics(dojo: DojoSuite, out: Path, versions: list[str]) -> list[dict[str, Any]]:
-    """One row per recorded evaluation of each version, in run order, with metrics per split present.
+def evaluation_rows(dojo: DojoSuite, out: Path) -> list[dict[str, Any]]:
+    """One row per recorded evaluation, in run order, with metrics per split present.
 
-    Every evaluation is listed (baseline, the loop's two parent runs per generation, candidate, composite
-    and confirmation runs), so no favourable run can be picked and an unfavourable one dropped.
+    Every evaluation is listed: the baseline, the loop's two parent runs per generation, and every
+    candidate, composite and confirmation run, admitted or not, so no favourable run can be picked and
+    an unfavourable one dropped.
     """
     evals = [e for e in read_jsonl(out / "evals.jsonl") if e.get("type") == "eval"]
     rows: list[dict[str, Any]] = []
     for e in evals:
-        if e.get("harness_version") not in versions:
-            continue
         splits: list[Split] = [sp for sp in ("train", "heldout") if e[sp]["total"]]
         per: dict[str, DojoMetrics] = {sp: metrics_from_rows(e["results"], dojo, sp) for sp in splits}
         rows.append(
@@ -256,6 +255,24 @@ def version_metrics(dojo: DojoSuite, out: Path, versions: list[str]) -> list[dic
             }
         )
     return rows
+
+
+def decisions(out: Path) -> list[dict[str, Any]]:
+    """Every signed admission decision of a run: the candidate, its kind, the verdict and failed checks."""
+    kinds: dict[str, str] = {}
+    for rec in read_jsonl(out / "evals.jsonl"):
+        for c in rec.get("candidates") or [] if rec.get("type") == "generation" else []:
+            kinds[str(c.get("harness_version"))] = str(c.get("kind"))
+    return [
+        {
+            "decision_id": d["decision_id"],
+            "candidate": d.get("candidate"),
+            "kind": kinds.get(str(d.get("candidate")), "composite"),
+            "admitted": bool(d.get("admitted")),
+            "failed": [c["name"] for c in d.get("checks", []) if not c.get("passed")],
+        }
+        for d in read_jsonl(out / "decisions.jsonl")
+    ]
 
 
 def admitted_changes(out: Path, versions: list[str]) -> dict[str, dict[str, Any]]:

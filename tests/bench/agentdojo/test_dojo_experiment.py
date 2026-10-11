@@ -16,12 +16,13 @@ from ratchet.bench.agentdojo.experiment import (
     _uncommitted,
     admitted_changes,
     baseline,
+    decisions,
+    evaluation_rows,
     evolve_from,
     harness_from,
     lineage,
     provenance,
     suite_digest,
-    version_metrics,
 )
 from ratchet.bench.agentdojo.run import DojoRunner, FirstToolCallOnly, JsonStore, seed_harness
 
@@ -75,15 +76,39 @@ def test_baseline_records_everything_and_metrics_read_it(tmp_path: Path, banking
     store, runner = JsonStore(out), DojoRunner(banking)
     v0, report = baseline(banking, runner, GroundTruthModel(PLAN), store, workers=4)
     assert report.count() == len(banking.cases)
-    table = version_metrics(banking, out, [v0.version, "absent"])
+    table = evaluation_rows(banking, out)
     assert [(r["version"], r["role"]) for r in table] == [(v0.version, "baseline")]
     train = table[0]["train"]
     # user_task_4 is the only task the plan solves: its clean case and its attacked ones pass.
     assert train["utility"]["hits"] == 1 and train["targeted_attack_success"]["hits"] == 0
     assert admitted_changes(out, [v0.version])[v0.version]["guards"] == []
     assert lineage(v0, None) == [v0.version]
-    assert version_metrics(banking, tmp_path / "empty", [v0.version]) == []
-    assert version_metrics(banking, out, ["absent"]) == []
+    assert evaluation_rows(banking, tmp_path / "empty") == []
+    assert decisions(out) == []
+    with (out / "evals.jsonl").open("a") as f:
+        gen = {"type": "generation", "candidates": [{"harness_version": "c1", "kind": "guard"}]}
+        f.write(json.dumps(gen) + "\n")
+    checks = [{"name": "replay", "passed": True}, {"name": "heldout", "passed": False}]
+    for did, cand in (("p->c1", "c1"), ("p->c2", "c2")):
+        record = {"decision_id": did, "candidate": cand, "admitted": False, "checks": checks}
+        with (out / "decisions.jsonl").open("a") as f:
+            f.write(json.dumps(record) + "\n")
+    assert decisions(out) == [
+        {
+            "decision_id": "p->c1",
+            "candidate": "c1",
+            "kind": "guard",
+            "admitted": False,
+            "failed": ["heldout"],
+        },
+        {
+            "decision_id": "p->c2",
+            "candidate": "c2",
+            "kind": "composite",
+            "admitted": False,
+            "failed": ["heldout"],
+        },
+    ]
 
 
 def test_evolve_runs_one_generation_with_a_silent_improver(tmp_path: Path, banking: DojoSuite) -> None:

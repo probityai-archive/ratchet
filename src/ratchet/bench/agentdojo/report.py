@@ -90,19 +90,25 @@ def render(results: dict[str, Any]) -> str:
         "| Ratchet pass |",
         "|---|---|---|---|---|---|---|---|",
     ]
-    rows = results["metrics"]
+    rows = [r for r in results["metrics"] if "heldout" in r]
     for v in results["versions"]:
-        mine = [r for r in rows if r["version"] == v and "heldout" in r]
-        if not mine:
+        if not any(r["version"] == v for r in rows):
             lines.append(f"| `{v}` | not evaluated | | | | | | |")
-        for r in mine:
-            h = r["heldout"]
-            lines.append(
-                f"| `{v}` | {r['eval_id']} | {r.get('role') or ''} | {r.get('generation') or ''} "
-                f"| {_cell(h['utility'])} | {_cell(h['utility_under_attack'])} "
-                f"| {_cell(h['targeted_attack_success'])} | {_cell(h['ratchet_passed'])} |"
-            )
+    for r in rows:
+        h = r["heldout"]
+        lines.append(
+            f"| `{r['version']}` | {r['eval_id']} | {r.get('role') or ''} | {r.get('generation') or ''} "
+            f"| {_cell(h['utility'])} | {_cell(h['utility_under_attack'])} "
+            f"| {_cell(h['targeted_attack_success'])} | {_cell(h['ratchet_passed'])} |"
+        )
     lines.append("")
+    made = results.get("decisions", [])
+    if made:
+        lines += [f"Admission decisions ({sum(d['admitted'] for d in made)} of {len(made)} admitted):", ""]
+        for d in made:
+            verdict = "admitted" if d["admitted"] else "rejected, failed " + ", ".join(d["failed"])
+            lines.append(f"- `{d['decision_id']}` ({d['kind']}): {verdict}")
+        lines.append("")
     changes = results.get("admitted", {})
     seen: set[str] = set()
     admitted_lines: list[str] = []

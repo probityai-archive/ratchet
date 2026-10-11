@@ -109,8 +109,23 @@ def test_render_lists_versions_metrics_and_admitted_guards() -> None:
             },
         },
         "notes": ["a note"],
+        "decisions": [
+            {"decision_id": "v0->v1", "kind": "guard", "admitted": True, "failed": []},
+            {
+                "decision_id": "v0->vx",
+                "kind": "procedure",
+                "admitted": False,
+                "failed": ["heldout", "no_regression"],
+            },
+        ],
     }
+    results["metrics"].append(
+        {"version": "vx", "eval_id": "eval-0011", "role": "candidate", "generation": 1, "heldout": block}
+    )
     text = render(results)
+    assert "Admission decisions (1 of 2 admitted):" in text
+    assert "- `v0->vx` (procedure): rejected, failed heldout, no_regression" in text
+    assert "| `vx` | eval-0011 | candidate | 1 |" in text
     assert (
         "| `v0` | eval-0001 | baseline |  | 100.0% (8/8) | 90.6% (29/32, 1 err) | 0.0% (0/32) "
         "| 92.5% (37/40) |" in text
