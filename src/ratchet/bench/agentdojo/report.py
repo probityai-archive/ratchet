@@ -1,4 +1,4 @@
-"""Render a run's `results.json` as the Markdown summary table kept in `docs/results/agentdojo.md`."""
+"""Render runs' `results.json` as Markdown: one section per run, and the document over many runs."""
 
 from __future__ import annotations
 
@@ -77,3 +77,50 @@ def render(results: dict[str, Any]) -> str:
     for note in results.get("notes", []):
         lines.append(f"- {note}")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _heldout_cells(row: dict[str, Any] | None) -> str:
+    if row is None or "heldout" not in row:
+        return "| | | "
+    h = row["heldout"]
+    cells = (h["utility"], h["utility_under_attack"], h["targeted_attack_success"])
+    return "".join(f"| {_cell(c)} " for c in cells)
+
+
+def overview_row(results: dict[str, Any]) -> str:
+    """Suite, models, the baseline's held-out metrics and the newest version's latest held-out run."""
+    p = results["provenance"]
+    rows = [r for r in results["metrics"] if "heldout" in r]
+    base = next((r for r in rows if r.get("role") == "baseline"), None)
+    last_version = results["versions"][-1] if results["versions"] else None
+    newest = [r for r in rows if r["version"] == last_version and len(results["versions"]) > 1]
+    latest = newest[-1] if newest else None
+    gens = len(results.get("generations", []))
+    label = f"`{last_version}` ({latest['eval_id']})" if latest else "none promoted"
+    return (
+        f"| {p['suite']} | `{p['model']}` | {results.get('status', '')}, {gens} gen "
+        + _heldout_cells(base)
+        + f"| {label} "
+        + _heldout_cells(latest)
+        + "|"
+    )
+
+
+def document(all_results: list[dict[str, Any]], preamble: str = "") -> str:
+    lines = [
+        "# AgentDojo results",
+        "",
+        preamble.strip(),
+        "",
+        "## Overview (held-out cases only)",
+        "",
+        "| Suite | Agent model | Status | v0 utility | v0 utility under attack | v0 targeted ASR "
+        "| Newest admitted version | Its utility | Its utility under attack | Its targeted ASR |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+        *[overview_row(r) for r in all_results],
+        "",
+        "## Runs",
+        "",
+    ]
+    body = "\n".join(render(r) for r in all_results)
+    return "\n".join(lines).replace("\n\n\n", "\n\n") + body

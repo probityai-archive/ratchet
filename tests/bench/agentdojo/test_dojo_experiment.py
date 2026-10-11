@@ -127,6 +127,23 @@ def test_summarize_rebuilds_results_from_the_run_files(
         cli.summarize(s.out)
 
 
+def test_report_writes_one_document_over_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Settings, "client", lambda self, model: GroundTruthModel(PLAN))
+    monkeypatch.setattr(cli, "REFERENCE_CLONE", tmp_path / "no-clone")
+    s = _settings(tmp_path, max_users=1, workers=4)
+    cli.run("baseline", s, log=lambda _m: None)
+    pre = tmp_path / "pre.md"
+    pre.write_text("Intro text.")
+    doc = tmp_path / "doc.md"
+    assert cli.main(["report", "--out", str(doc), "--runs", str(s.out), "--preamble", str(pre)]) == 0
+    text = doc.read_text()
+    assert text.startswith("# AgentDojo results\n\nIntro text.")
+    assert "| banking | `gpt-5.6-luna` | complete, 0 gen | " in text and "none promoted" in text
+    assert "### banking (v1.2.2)" in text
+    with pytest.raises(SystemExit):
+        cli.parse(["report"])
+
+
 def seed_harness_version(results: dict[str, object]) -> str:
     versions = results["versions"]
     assert isinstance(versions, list)

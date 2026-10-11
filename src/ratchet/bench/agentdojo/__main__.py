@@ -26,7 +26,7 @@ from ratchet.bench.agentdojo.experiment import (
     suite_digest,
     version_metrics,
 )
-from ratchet.bench.agentdojo.report import render
+from ratchet.bench.agentdojo.report import document, render
 from ratchet.bench.agentdojo.run import DojoRunner, JsonStore
 
 REFERENCE_CLONE = Path.home() / "Documents" / "git-clones" / "agentdojo"
@@ -34,9 +34,11 @@ REFERENCE_CLONE = Path.home() / "Documents" / "git-clones" / "agentdojo"
 
 def parse(argv: Sequence[str]) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog="python -m ratchet.bench.agentdojo")
-    ap.add_argument("command", choices=["baseline", "evolve", "summarize"])
+    ap.add_argument("command", choices=["baseline", "evolve", "summarize", "report"])
     ap.add_argument("--suite", default="banking")
-    ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--out", type=Path, help="run directory (report: the Markdown document to write)")
+    ap.add_argument("--runs", type=Path, nargs="*", default=[], help="report: run directories, in order")
+    ap.add_argument("--preamble", type=Path, default=None, help="report: Markdown placed above the tables")
     ap.add_argument("--model", default="gpt-5.6-luna")
     ap.add_argument("--improver-model", default="gpt-5.6-terra")
     ap.add_argument("--benchmark-version", default=DEFAULT_VERSION)
@@ -45,7 +47,10 @@ def parse(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--generations", type=int, default=2)
     ap.add_argument("--max-users", type=int, default=None)
-    return ap.parse_args(list(argv))
+    args = ap.parse_args(list(argv))
+    if args.out is None:
+        ap.error("--out is required")
+    return args
 
 
 def settings_from(args: argparse.Namespace, env: dict[str, str]) -> Settings:
@@ -142,6 +147,11 @@ def summarize(out: Path) -> dict[str, Any]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(sys.argv[1:] if argv is None else argv)
+    if args.command == "report":
+        preamble = args.preamble.read_text() if args.preamble else ""
+        args.out.write_text(document([summarize(r) for r in args.runs], preamble))
+        print(args.out.read_text())
+        return 0
     if args.command == "summarize":
         results = summarize(args.out)
     else:

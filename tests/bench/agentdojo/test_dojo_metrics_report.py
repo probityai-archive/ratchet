@@ -4,7 +4,7 @@ from typing import Any
 
 from ratchet.bench.agentdojo.cases import DojoSuite
 from ratchet.bench.agentdojo.metrics import Rate, metrics, metrics_from_rows
-from ratchet.bench.agentdojo.report import render
+from ratchet.bench.agentdojo.report import document, overview_row, render
 from ratchet.bench.agentdojo.world import ATTACK_SUCCEEDED, UTILITY_MISSED
 from ratchet.improve.evaluate import CaseResult, EvalReport
 from ratchet.types import Cost
@@ -125,3 +125,27 @@ def test_render_lists_versions_metrics_and_admitted_guards() -> None:
     results["provenance"]["agentdojo_reference_clone_commit"] = None
     text = render(results)
     assert "No candidate was admitted" in text and "reference clone" not in text
+
+
+def test_overview_names_the_newest_version_and_its_latest_heldout_run() -> None:
+    block = {"utility": _m(1, 2), "utility_under_attack": _m(3, 4), "targeted_attack_success": _m(1, 4),
+             "ratchet_passed": _m(3, 6)}  # fmt: skip
+    results = {
+        "provenance": {"suite": "slack", "model": "m"},
+        "status": "in progress",
+        "versions": ["v0", "v1"],
+        "generations": [{}],
+        "metrics": [
+            {"version": "v0", "eval_id": "e1", "role": "baseline", "heldout": block},
+            {"version": "v1", "eval_id": "e7", "role": "candidate", "heldout": block},
+            {"version": "v1", "eval_id": "e9", "role": "confirm", "heldout": block},
+        ],
+    }
+    row = overview_row(results)
+    assert row.startswith("| slack | `m` | in progress, 1 gen | 50.0% (1/2) | 75.0% (3/4) | 25.0% (1/4) ")
+    assert "`v1` (e9)" in row
+    results["versions"] = ["v0"]
+    assert "none promoted | | | |" in overview_row(results)
+    results["metrics"] = []
+    assert overview_row(results).startswith("| slack | `m` | in progress, 1 gen | | | | none promoted")
+    assert document([], "pre").startswith("# AgentDojo results\n\npre\n")
