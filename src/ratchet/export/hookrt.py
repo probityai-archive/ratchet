@@ -35,6 +35,8 @@ from typing import IO, Any
 
 RESULT_TEXT_LIMIT = 4096
 GUARD_ERROR_REASON = "guard error"
+RUNTIME_BEGIN = "# >>> ratchet hook runtime (verbatim ratchet/export/hookrt.py) >>>"
+RUNTIME_END = "# <<< ratchet hook runtime <<<"
 
 
 # --- transcript parsing -----------------------------------------------------------------------------------
@@ -312,9 +314,22 @@ def evaluate_once(
 
 @dataclass(frozen=True)
 class HookConfig:
+    """`hook_file` and `runtime_sha256` are set in a generated hook, which then re-hashes its own embedded
+    runtime at every call; they are None when this module is imported rather than embedded."""
+
     spec: SandboxSpec
     guard_sha256: str
     child_sha256: str
+    runtime_sha256: str | None = None
+    hook_file: str | None = None
+
+
+def embedded_runtime(text: str) -> str | None:
+    """The runtime source pasted between the markers of a generated hook, or None without markers."""
+    begin, end = text.find(RUNTIME_BEGIN + "\n"), text.find("\n" + RUNTIME_END)
+    if begin < 0 or end < begin:
+        return None
+    return text[begin + len(RUNTIME_BEGIN) + 1 : end].rstrip("\n") + "\n"
 
 
 def _sha256(text: str) -> str:
@@ -328,6 +343,10 @@ def decide(config: HookConfig, event: Mapping[str, Any]) -> Verdict:
         return Verdict(None, "guard source does not match its recorded digest")
     if _sha256(spec.child_source) != config.child_sha256:
         return Verdict(None, "sandbox child does not match its recorded digest")
+    if config.hook_file is not None:
+        runtime = embedded_runtime(Path(config.hook_file).read_text(encoding="utf-8"))
+        if runtime is None or _sha256(runtime) != config.runtime_sha256:
+            return Verdict(None, "hook runtime does not match its recorded digest")
     if event.get("hook_event_name") != "PreToolUse":
         return Verdict(None, f"installed on {event.get('hook_event_name')!r}, expected PreToolUse")
     name, args = event.get("tool_name"), event.get("tool_input")

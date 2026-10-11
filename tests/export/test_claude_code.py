@@ -26,11 +26,13 @@ from ratchet.export.claude_code import (
     render_hook,
     settings_entry,
     text_sha256,
+    tuple_literal,
     verify_hook,
 )
+from ratchet.export.hookrt import parse_transcript
 from ratchet.improve.admit import Check, Decision
 from ratchet.improve.receipt import Signer, public_key_bytes, receipt
-from ratchet.types import Guard, Harness, ToolCall, sha256_hex
+from ratchet.types import Event, Guard, Harness, ToolCall, sha256_hex
 
 from .synth import Session, hook_event
 
@@ -105,11 +107,23 @@ def test_admitted_guard_refuses_what_the_receipt_does_not_admit(signer: Signer) 
 
 @pytest.mark.parametrize(
     "text",
-    ["plain", "with '''triple''' quotes", "ends in a backslash\\", "ends in a quote'", 'tab\there "q"'],
+    [
+        "plain",
+        "a\nb",
+        'two\n"""quotes"""',
+        "both\n\"\"\"\n'''",
+        "ends in a backslash\n\\",
+        'ends in a quote\n"',
+        'tab\there "q"',
+    ],
 )
 def test_py_literal_is_exact(text: str) -> None:
     assert ast.literal_eval(py_literal(text)) == text
-    assert py_literal("a\nb") == "r'''a\nb'''"
+    assert py_literal("a\nb") == 'r"""a\nb"""'
+    assert py_literal('x\n"""') == "r'''x\n\"\"\"'''"
+    assert py_literal("one line") == '"one line"'
+    assert tuple_literal([]) == "()" and tuple_literal(["a"]) == '("a",)'
+    assert tuple_literal(["a", "b"]) == '("a", "b")'
 
 
 def render(signer: Signer, source: str = NO_RM, limits: GuardLimits | None = None) -> str:
@@ -139,7 +153,13 @@ def test_verify_hook_catches_every_kind_of_edit(signer: Signer) -> None:
         verify_hook(text.replace('"statistics",', '"statistics", "os",', 1))
     head = read_header(text)
     with pytest.raises(ExportError, match="GUARD_SHA256"):
-        verify_hook(text.replace(f"GUARD_SHA256 = {head['guard_sha256']!r}", f"GUARD_SHA256 = {'0' * 64!r}"))
+        verify_hook(text.replace(f'GUARD_SHA256 = "{head["guard_sha256"]}"', f'GUARD_SHA256 = "{"0" * 64}"'))
+    with pytest.raises(ExportError, match="RUNTIME_SHA256"):
+        verify_hook(
+            text.replace(
+                f'RUNTIME_SHA256 = "{head["hook_runtime_sha256"]}"', f'RUNTIME_SHA256 = "{"0" * 64}"'
+            )
+        )
     with pytest.raises(ExportError, match="missing"):
         verify_hook(text.replace("# decided_at:", "# decided:"))
     with pytest.raises(ExportError, match="markers"):
@@ -165,20 +185,49 @@ def test_installed_hook_decides_like_the_guard_runtime(signer: Signer, tmp_path:
     reason = json.loads(blocked.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
     assert reason == "blocked by guard no-rm: rm is not allowed (3 earlier events)"
     assert blocked.stderr == reason + "\n"
+    history = [
+        Event(e["seq"], e["kind"], e["payload"], e["ts"])
+        for e in parse_transcript(transcript.text().splitlines()).events[:3]
+    ]
     with GuardRuntime(workers=1) as rt:
-        direct = rt.check(h.guards[0], ToolCall("Bash", {"command": "rm -rf a"}, "c2"), {}, [])
-    assert direct.reason == "rm is not allowed (0 earlier events)"
+        direct = rt.check(h.guards[0], ToolCall("Bash", {"command": "rm -rf a"}, "c2"), {}, history)
+    assert reason == f"blocked by guard no-rm: {direct.reason}"
 
     allowed = run_hook_file(out, hook_event(path, "c1", "ls"))
     assert (allowed.returncode, allowed.stdout, allowed.stderr) == (0, "", "")
 
 
-def test_tampered_hook_denies_every_call(signer: Signer, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ('startswith("rm ")', 'startswith("never ")', "guard source does not match its recorded digest"),
+        (
+            "RESULT_TEXT_LIMIT = 4096",
+            "RESULT_TEXT_LIMIT = 9",
+            "hook runtime does not match its recorded digest",
+        ),
+        ("# <<< ratchet hook runtime <<<", "", "hook runtime does not match its recorded digest"),
+        ('"statistics",', '"statistics", "os",', "sandbox child does not match its recorded digest"),
+    ],
+)
+def test_tampered_hook_denies_every_call(
+    signer: Signer, tmp_path: Path, old: str, new: str, message: str
+) -> None:
     path = tmp_path / "hook.py"
-    path.write_text(render(signer).replace('startswith("rm ")', 'startswith("never ")'), encoding="utf-8")
+    path.write_text(render(signer).replace(old, new, 1), encoding="utf-8")
     result = run_hook_file(path, hook_event(None, "c", "ls"))
     assert result.returncode == 2
-    assert "guard source does not match its recorded digest" in result.stderr
+    assert message in result.stderr
+
+
+def test_generated_hook_is_lint_and_format_clean(signer: Signer, tmp_path: Path) -> None:
+    path = tmp_path / "hook.py"
+    path.write_text(render(signer), encoding="utf-8")
+    for args in (["check", "--no-cache", str(path)], ["format", "--no-cache", "--check", str(path)]):
+        done = subprocess.run(
+            [sys.executable, "-m", "ruff", *args], capture_output=True, text=True, check=False
+        )
+        assert done.returncode == 0, done.stdout + done.stderr
 
 
 def test_settings_entry_blocks_when_the_hook_cannot_start() -> None:

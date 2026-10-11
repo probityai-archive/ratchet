@@ -263,3 +263,18 @@ def test_block_message_matches_the_worker_format() -> None:
     assert block_message("g", Verdict(None)) is None
     assert block_message("g", Verdict("why")) == "blocked by guard g: why"
     assert block_message("g", Verdict(None, "boom")) == "blocked by guard g: guard error: boom"
+
+
+def test_decide_rehashes_the_embedded_runtime(tmp_path: Path) -> None:
+    runtime = Path(hookrt.__file__).read_text(encoding="utf-8")
+    hook = tmp_path / "hook.py"
+    hook.write_text(f"{hookrt.RUNTIME_BEGIN}\n{runtime}\n\n{hookrt.RUNTIME_END}\nX = 1\n", encoding="utf-8")
+    good = config(ALLOW_GUARD)
+    pinned = HookConfig(good.spec, good.guard_sha256, good.child_sha256, hookrt._sha256(runtime), str(hook))
+    event = hook_event(None, "c", "ls")
+    assert decide(pinned, event) == Verdict(None)
+    hook.write_text(hook.read_text().replace("RESULT_TEXT_LIMIT = 4096", "RESULT_TEXT_LIMIT = 1"))
+    assert decide(pinned, event).error == "hook runtime does not match its recorded digest"
+    hook.write_text("no markers\n")
+    assert hookrt.embedded_runtime(hook.read_text()) is None
+    assert decide(pinned, event).error == "hook runtime does not match its recorded digest"
