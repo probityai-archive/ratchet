@@ -75,7 +75,17 @@ def cmd_probe(args: argparse.Namespace) -> int:
 def _candidate(args: argparse.Namespace, store: Any) -> tuple[Harness, dict[str, Any]]:
     if args.candidate_file:
         raw = json.loads(Path(args.candidate_file).read_text(encoding="utf-8"))
-        return harness_from(raw.get("harness", raw)), {"source": args.candidate_file}
+        extra: dict[str, Any] = {"source": args.candidate_file}
+        decision = raw.get("decision")
+        if decision:
+            extra |= {
+                "decision_id": str(decision.get("_id")),
+                "decided_at": decision.get("decided_at"),
+                "derived_on": derived_on(decision),
+                "evaluator_version": (decision.get("evaluator") or {}).get("version"),
+                "store": raw.get("store"),
+            }
+        return harness_from(raw.get("harness", raw)), extra
     if store is None:
         raise SystemExit("--candidate needs RATCHET_MONGODB_URI (or pass --candidate-file)")
     admitted = store.decisions({"admitted": True})

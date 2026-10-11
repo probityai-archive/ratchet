@@ -329,3 +329,21 @@ def test_cli_run_single_tool_call_flag(tmp_path: Path, monkeypatch: pytest.Monke
     assert cli.main(args) == 0
     meta = json.loads(out.read_text(encoding="utf-8"))["meta"]
     assert meta["single_tool_call"] is True and meta["truncated_turns"] == 0
+
+
+def test_candidate_file_carries_its_decision(tmp_path: Path) -> None:
+    import argparse
+
+    h = candidate()
+    f = tmp_path / "c.json"
+    decision = {
+        "_id": "d9",
+        "decided_at": "t",
+        "evaluator": {"version": "e", "model_config": {"model": "luna"}},
+    }
+    f.write_text(
+        json.dumps({"harness": asdict(h), "decision": decision, "store": "atlas/db"}), encoding="utf-8"
+    )
+    got, extra = cli._candidate(argparse.Namespace(candidate_file=str(f), candidate="latest"), None)
+    assert got == h
+    assert extra["decision_id"] == "d9" and extra["derived_on"] == "luna" and extra["store"] == "atlas/db"
