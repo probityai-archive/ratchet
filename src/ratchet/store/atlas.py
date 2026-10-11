@@ -227,8 +227,13 @@ class Store:
             self._search_ready = True
 
     def _c(self, name: str) -> Collection[Doc]:
+        """A collection for writing: the schema is created first, once per store."""
         if not self._schema_ready:
             self.setup(wait_search=False)
+        return self.db[name]
+
+    def _r(self, name: str) -> Collection[Doc]:
+        """A collection for reading: never creates or changes schema, so a read cannot fail on index setup."""
         return self.db[name]
 
     @property
@@ -260,7 +265,7 @@ class Store:
         return False
 
     def get_harness(self, version: str) -> Harness | None:
-        doc = self._c("harness_versions").find_one({"_id": version})
+        doc = self._r("harness_versions").find_one({"_id": version})
         if doc is None:
             return None
         harness = _harness_from_doc(doc)
@@ -294,7 +299,7 @@ class Store:
             },
         ]
         roots: list[LineageNode] = []
-        for doc in self._c("harness_versions").aggregate(pipeline):
+        for doc in self._r("harness_versions").aggregate(pipeline):
             nodes = {doc["_id"]: self._node(doc)}
             for d in sorted(doc["descendants"], key=lambda x: (x["depth"], x["created_at"], x["_id"])):
                 nodes[d["_id"]] = self._node(d)
@@ -329,7 +334,7 @@ class Store:
                 }
             },
         ]
-        for doc in self._c("harness_versions").aggregate(pipeline):
+        for doc in self._r("harness_versions").aggregate(pipeline):
             return [version, *[a["_id"] for a in sorted(doc["ancestors"], key=lambda a: a["depth"])]]
         return []
 
@@ -374,7 +379,7 @@ class Store:
         return res.upserted_id is not None
 
     def get_run(self, run_id: str) -> Doc | None:
-        return self._c("runs").find_one({"_id": run_id})
+        return self._r("runs").find_one({"_id": run_id})
 
     def put_trace(self, trace: Trace) -> bool:
         """Store a trace. Returns True when newly written. Same trace twice is a no-op."""
@@ -421,14 +426,14 @@ class Store:
         return True
 
     def get_trace(self, run_id: str, case_id: str) -> Trace | None:
-        header = self._c("traces").find_one({"_id": trace_id(run_id, case_id)})
+        header = self._r("traces").find_one({"_id": trace_id(run_id, case_id)})
         return None if header is None else self._load_trace(header)
 
     def traces(
         self, filter: Mapping[str, Any] | None = None, *, limit: int = 0, newest_first: bool = False
     ) -> list[Trace]:
         """Traces matching a MongoDB filter over header fields (run_id, case_id, harness_version, passed)."""
-        cursor = self._c("traces").find(dict(filter or {}))
+        cursor = self._r("traces").find(dict(filter or {}))
         cursor = cursor.sort("created_at", -1 if newest_first else 1)
         if limit:
             cursor = cursor.limit(limit)
@@ -438,7 +443,7 @@ class Store:
         if "events" in header:
             events = header["events"]
         else:
-            chunks = self._c("trace_chunks").find({"trace_id": header["_id"]}).sort("n", 1)
+            chunks = self._r("trace_chunks").find({"trace_id": header["_id"]}).sort("n", 1)
             events = [e for chunk in chunks for e in chunk["events"]]
         return _trace_from_parts(header, events)
 
@@ -453,10 +458,10 @@ class Store:
         return self._put_record("decisions", decision, decision_id)
 
     def evals(self, filter: Mapping[str, Any] | None = None) -> list[Doc]:
-        return list(self._c("evals").find(dict(filter or {})).sort("created_at", 1))
+        return list(self._r("evals").find(dict(filter or {})).sort("created_at", 1))
 
     def decisions(self, filter: Mapping[str, Any] | None = None) -> list[Doc]:
-        return list(self._c("decisions").find(dict(filter or {})).sort("created_at", 1))
+        return list(self._r("decisions").find(dict(filter or {})).sort("created_at", 1))
 
     def put_case(self, case: Any) -> str:
         """Store a case. Held-out cases go to the separate held-out database; the rest to `cases`.
@@ -473,7 +478,7 @@ class Store:
 
     def cases(self, split: str = "train") -> list[Doc]:
         """Cases of one split. Reading "heldout" needs a role that can read the held-out database."""
-        coll = self.heldout[atlas_setup.HELDOUT_COLLECTION] if split == "heldout" else self._c("cases")
+        coll = self.heldout[atlas_setup.HELDOUT_COLLECTION] if split == "heldout" else self._r("cases")
         return list(coll.find({"split": split}).sort("_id", 1))
 
     def _put_record(self, collection: str | Collection[Doc], record: Any, record_id: str | None) -> str:
@@ -652,7 +657,7 @@ class Store:
         `$search` at different moments, so a hybrid query right after a write can see only one list.
         """
         self._ensure_search()
-        coll = self._c("failures")
+        coll = self._r("failures")
         want = coll.count_documents({})
         deadline = time.monotonic() + timeout_s
         while True:
@@ -700,7 +705,7 @@ class Store:
                 harness_version=d.get("harness_version"),
                 score=float(d["score"]),
             )
-            for d in self._c("failures").aggregate(pipeline)
+            for d in self._r("failures").aggregate(pipeline)
             if d["_id"] != exclude_id
         ]
         return out[:k]
@@ -720,7 +725,7 @@ class Store:
 
     def resume(self, run_id: str) -> Doc | None:
         """The last checkpointed state for a run, or None when the run never checkpointed."""
-        doc = self._c("checkpoints").find_one({"_id": run_id})
+        doc = self._r("checkpoints").find_one({"_id": run_id})
         return None if doc is None else dict(doc["state"])
 
     # -- change streams ----------------------------------------------------------------------------
@@ -738,7 +743,7 @@ class Store:
         if collection not in WATCHABLE:
             raise ValueError(f"cannot watch {collection!r}; choose one of {', '.join(WATCHABLE)}")
         deadline = None if timeout_s is None else time.monotonic() + timeout_s
-        with self._c(collection).watch(
+        with self._r(collection).watch(
             pipeline or [], full_document="updateLookup", resume_after=resume_after, max_await_time_ms=poll_ms
         ) as stream:
             while deadline is None or time.monotonic() < deadline:

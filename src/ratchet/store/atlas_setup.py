@@ -12,6 +12,8 @@ import argparse
 import os
 import sys
 import time
+from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from pymongo import ASCENDING, DESCENDING, MongoClient
@@ -89,13 +91,16 @@ SEARCH_INDEXES: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
 )
 
 
-def _search_service_up(db: Database[dict[str, Any]], timeout_s: float, poll_s: float = 1.0) -> None:
-    """Wait for the search service. A local cluster answers mongod before mongot is ready."""
+def _retry_unreachable[T](call: Callable[[], T], timeout_s: float, poll_s: float = 1.0) -> T:
+    """Run one search-index management call, retrying while the search service is unreachable (code 508).
+
+    A local cluster answers mongod before mongot is ready, and Atlas's index management service can drop a
+    single request; any other error, or the deadline, is raised.
+    """
     deadline = time.monotonic() + timeout_s
     while True:
         try:
-            list(db["failures"].list_search_indexes())
-            return
+            return call()
         except OperationFailure as exc:
             if exc.code != _SEARCH_UNREACHABLE or time.monotonic() > deadline:
                 raise
@@ -110,8 +115,12 @@ def _wait_dropped(db: Database[dict[str, Any]], collection: str, name: str, time
         time.sleep(0.5)
 
 
-def _existing_search_indexes(db: Database[dict[str, Any]], collection: str) -> dict[str, dict[str, Any]]:
-    return {i["name"]: dict(i) for i in db[collection].list_search_indexes()}
+def _existing_search_indexes(
+    db: Database[dict[str, Any]], collection: str, timeout_s: float = 60.0
+) -> dict[str, dict[str, Any]]:
+    return _retry_unreachable(
+        lambda: {i["name"]: dict(i) for i in db[collection].list_search_indexes()}, timeout_s
+    )
 
 
 def ensure_schema(
@@ -126,16 +135,16 @@ def ensure_schema(
             db.create_collection(name)
     for collection, keys, options in BTREE_INDEXES:
         db[collection].create_index(keys, **options)
-    _search_service_up(db, timeout_s)
     for collection, name, kind, definition in search_indexes:
-        existing = _existing_search_indexes(db, collection)
+        existing = _existing_search_indexes(db, collection, timeout_s)
+        model = SearchIndexModel(definition=definition, name=name, type=kind)
         if name not in existing:
-            db[collection].create_search_index(SearchIndexModel(definition=definition, name=name, type=kind))
+            _retry_unreachable(partial(db[collection].create_search_index, model), timeout_s)
         elif existing[name].get("latestDefinition") != definition:
             # updateSearchIndex does not know the index type on every deployment, so replace the index
-            db[collection].drop_search_index(name)
+            _retry_unreachable(partial(db[collection].drop_search_index, name), timeout_s)
             _wait_dropped(db, collection, name, timeout_s)
-            db[collection].create_search_index(SearchIndexModel(definition=definition, name=name, type=kind))
+            _retry_unreachable(partial(db[collection].create_search_index, model), timeout_s)
 
 
 def ensure_heldout(heldout_db: Database[dict[str, Any]]) -> None:
