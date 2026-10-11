@@ -24,7 +24,7 @@ cmd = "ratchet show trace {{BAD_TRACE}}"
 hold = 3.5
 captions = [
   { at = 0.0, text = "Live models. Passing tests does not show what a patch would block." },
-  { at = 3.0, text = "The unchanged harness fails a held-out refund trap with a lost reply." },
+  { at = 3.0, text = "A refund call times out. The agent checks before retrying, then mails the notice to the wrong address." },
 ]
 
 [[step]]
@@ -46,7 +46,7 @@ cmd_45 = "ratchet replay {{REJECTED_CAND}} {{REFUSED_CAND}} --max-columns 2"
 hold = 6.0
 captions = [
   { at = 0.0, text = "Ratchet replays each proposed guard over {{REPLAY_TRACES}} recorded traces, with no model call." },
-  { at = 4.0, text = "One guard fails replay and is rejected. The other clears replay and goes on to fresh runs." },
+  { at = 4.0, text = "It shows what each guard would block. A guard that blocks a legitimate run is rejected." },
 ]
 
 [[step]]
