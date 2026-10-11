@@ -34,7 +34,7 @@ def _config(path: Path, **fields: object) -> None:
 
 def test_report_counts_every_run_and_lists_stopped_ones(tmp_path: Path) -> None:
     trial = tmp_path / "runs" / "retail" / "h1" / "heldout-trial-1"
-    _config(trial)
+    _config(trial, note="first trial")
     JsonlStore(trial).put_eval(_eval("h1", [("x", "heldout", True), ("y", "heldout", False)]))
     evo = tmp_path / "evolve" / "retail" / "run-1"
     _config(evo, improver_model="i")
@@ -72,6 +72,7 @@ def test_report_counts_every_run_and_lists_stopped_ones(tmp_path: Path) -> None:
     assert "`runs/retail/h1/all-trial-9`: rate limits" in text
     assert "| run-1 | `h1->h2` | False | heldout |" in text
     assert "parent_run_2" in text and "note: n" in text and "airline" not in text
+    assert "Note: first trial" in text
 
 
 def test_report_command_writes_the_page(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
