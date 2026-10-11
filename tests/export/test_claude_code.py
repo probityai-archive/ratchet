@@ -148,7 +148,7 @@ def test_verify_hook_catches_every_kind_of_edit(signer: Signer) -> None:
     with pytest.raises(ExportError, match="guard_sha256"):
         verify_hook(text.replace('startswith("rm ")', 'startswith("rmdir ")'))
     with pytest.raises(ExportError, match="hook_runtime_sha256"):
-        verify_hook(text.replace("RESULT_TEXT_LIMIT = 4096", "RESULT_TEXT_LIMIT = 4097"))
+        verify_hook(text.replace('GUARD_ERROR_REASON = "guard error"', 'GUARD_ERROR_REASON = "ok"'))
     with pytest.raises(ExportError, match="sandbox_child_sha256"):
         verify_hook(text.replace('"statistics",', '"statistics", "os",', 1))
     head = read_header(text)
@@ -202,8 +202,8 @@ def test_installed_hook_decides_like_the_guard_runtime(signer: Signer, tmp_path:
     [
         ('startswith("rm ")', 'startswith("never ")', "guard source does not match its recorded digest"),
         (
-            "RESULT_TEXT_LIMIT = 4096",
-            "RESULT_TEXT_LIMIT = 9",
+            'GUARD_ERROR_REASON = "guard error"',
+            'GUARD_ERROR_REASON = "ok"',
             "hook runtime does not match its recorded digest",
         ),
         ("# <<< ratchet hook runtime <<<", "", "hook runtime does not match its recorded digest"),

@@ -91,10 +91,11 @@ def _signers(envelope: bytes, trusted: Mapping[str, Ed25519PublicKey]) -> list[s
     return signed
 
 
-def admitted_guard(
-    harness: Harness, guard_id: str, envelope: bytes, trusted: Mapping[str, Ed25519PublicKey]
-) -> tuple[Guard, Provenance]:
-    """The guard and its provenance, or ExportError when the receipt does not admit this harness."""
+def verify_admission(
+    harness: Harness, envelope: bytes, trusted: Mapping[str, Ed25519PublicKey]
+) -> dict[str, Any]:
+    """The decision payload, or ExportError unless it verifies under a trusted key and admits exactly
+    this harness."""
     try:
         decision = verify(envelope, trusted)
     except ReceiptError as exc:
@@ -107,6 +108,14 @@ def admitted_guard(
         raise ExportError(
             f"the decision admits {decision.get('candidate')!r}, not harness {harness.version!r}"
         )
+    return decision
+
+
+def admitted_guard(
+    harness: Harness, guard_id: str, envelope: bytes, trusted: Mapping[str, Ed25519PublicKey]
+) -> tuple[Guard, Provenance]:
+    """The guard and its provenance, or ExportError when the receipt does not admit this harness."""
+    decision = verify_admission(harness, envelope, trusted)
     guard = next((g for g in harness.guards if g.id == guard_id), None)
     if guard is None:
         raise ExportError(f"harness {harness.version} has no guard {guard_id!r}")

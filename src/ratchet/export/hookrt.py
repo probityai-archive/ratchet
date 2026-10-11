@@ -9,8 +9,10 @@ Transcript mapping (one JSONL line per content block, as Claude Code writes them
   each tool_use               ->  Event "tool_call"  {"call": {"name", "args", "call_id"}, "view"}
   user tool_result            ->  Event "tool_result" {"result": {"call_id", "ok", "data", "error"},
                                                        "decisions": []}
-User prompts, thinking blocks, attachments and system lines carry no event; the shapes above are the ones
-the Ratchet worker records. Tool result text is cut to RESULT_TEXT_LIMIT characters.
+User prompts, thinking blocks, attachments and system lines carry no event: the contract's event kinds
+have none for them, and the shapes above are the ones the Ratchet worker records. Tool results are kept
+whole: cutting each to 4096 characters shrank the largest local session's history from 27.0 to 25.9 MB,
+too little to justify hiding text from a guard.
 
 The guard's `view` for a coding session is {"cwd", "git_branch"}: where the agent is and which branch is
 checked out (detached HEAD is "HEAD", outside a repository ""). Replay reads both from the transcript line
@@ -33,7 +35,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import IO, Any
 
-RESULT_TEXT_LIMIT = 4096
 GUARD_ERROR_REASON = "guard error"
 RUNTIME_BEGIN = "# >>> ratchet hook runtime (verbatim ratchet/export/hookrt.py) >>>"
 RUNTIME_END = "# <<< ratchet hook runtime <<<"
@@ -108,7 +109,7 @@ def _result_text(content: Any) -> str:
         text = "\n".join(parts)
     else:
         text = ""
-    return text[:RESULT_TEXT_LIMIT]
+    return text
 
 
 def _assistant(t: Transcript, entry: dict[str, Any], message: dict[str, Any], line: int, ts: float) -> None:

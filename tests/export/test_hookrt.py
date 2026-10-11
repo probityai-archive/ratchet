@@ -11,7 +11,6 @@ import pytest
 from ratchet.agent.guards import CHILD_PATH, GUARD_ERROR_REASON, GuardLimits
 from ratchet.export import hookrt
 from ratchet.export.hookrt import (
-    RESULT_TEXT_LIMIT,
     HookConfig,
     SandboxSpec,
     Verdict,
@@ -92,13 +91,13 @@ def test_parse_tolerates_odd_values() -> None:
     )
     s.lines.append({"type": "user", "message": {"content": [{"type": "tool_result", "content": 7}]}})
     s.lines.append({"type": "assistant", "message": {"content": [{"type": "text", "text": "x" * 9}]}})
-    s.result("c", "y" * (RESULT_TEXT_LIMIT + 50))
+    s.result("c", "y" * 100_000)
     t = parse_transcript(s.text().encode("utf-8").splitlines())
     assert t.calls[0].call == {"name": "", "args": {}, "call_id": ""}
     assert t.calls[0].view == {"cwd": "", "git_branch": ""}
     assert t.events[0]["ts"] == 0.0
     assert t.events[2]["payload"]["result"]["data"] == {"content": ""}
-    assert len(t.events[4]["payload"]["result"]["data"]["content"]) == RESULT_TEXT_LIMIT
+    assert len(t.events[4]["payload"]["result"]["data"]["content"]) == 100_000
 
 
 def test_history_before_finds_the_call_by_id_then_by_content() -> None:
@@ -273,7 +272,9 @@ def test_decide_rehashes_the_embedded_runtime(tmp_path: Path) -> None:
     pinned = HookConfig(good.spec, good.guard_sha256, good.child_sha256, hookrt._sha256(runtime), str(hook))
     event = hook_event(None, "c", "ls")
     assert decide(pinned, event) == Verdict(None)
-    hook.write_text(hook.read_text().replace("RESULT_TEXT_LIMIT = 4096", "RESULT_TEXT_LIMIT = 1"))
+    hook.write_text(
+        hook.read_text().replace('GUARD_ERROR_REASON = "guard error"', 'GUARD_ERROR_REASON = "x"')
+    )
     assert decide(pinned, event).error == "hook runtime does not match its recorded digest"
     hook.write_text("no markers\n")
     assert hookrt.embedded_runtime(hook.read_text()) is None
