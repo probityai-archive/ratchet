@@ -23,6 +23,9 @@ def test_store_round_trips_traces_and_dedupes_harnesses(tmp_path: Path) -> None:
     assert len(store.put_decision({"b": b"\x01"})) == 32
     assert store.read("evals") == [{"eval_id": "e1", "report": {"a": [1, 2]}}]
     assert store.read("decisions")[0]["decision"] == {"b": "01"}
+    store.put_decision({"v": 1}, decision_id="d")
+    store.put_decision({"v": 2}, decision_id="d")
+    assert store.decision("d") == {"v": 2} and store.decision("missing") is None
 
 
 def test_unserialisable_values_are_refused() -> None:

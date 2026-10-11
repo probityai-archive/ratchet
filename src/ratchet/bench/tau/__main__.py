@@ -29,6 +29,7 @@ from ratchet.bench.tau.metrics import by_task, summary
 from ratchet.bench.tau.runner import TauRunner, configure_user_endpoint, seed_harness, tau_bench_commit
 from ratchet.bench.tau.store import JsonlStore
 from ratchet.bench.tau.tasks import DEFAULT_SEED, DOMAINS, Domain, TauCase, default_cases, split_record
+from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.evaluate import evaluate_many
 from ratchet.improve.loop import Lab, evolve
 from ratchet.improve.receipt import Signer
@@ -117,11 +118,24 @@ def _config(args: argparse.Namespace, cases: list[TauCase], **extra: Any) -> dic
     }
 
 
+# The shared endpoint rate-limits under load ("All credentials ... are cooling down"); a benchmark run waits
+# that out instead of scoring an infrastructure error as an agent failure.
+def _client(base_url: str, api_key: str, model: str, temperature: float | None = None) -> ModelClient:
+    cfg = ModelConfig(
+        base_url=base_url,
+        model=model,
+        api_key=api_key,
+        temperature=temperature,
+        max_attempts=12,
+        max_backoff_total_s=900.0,
+        backoff_cap_s=60.0,
+    )
+    return ModelClient(cfg)
+
+
 def _agent(args: argparse.Namespace, base_url: str, api_key: str) -> ModelClient:
     configure_user_endpoint(base_url, api_key)
-    return ModelClient(
-        ModelConfig(base_url=base_url, model=args.agent_model, api_key=api_key, temperature=args.temperature)
-    )
+    return _client(base_url, api_key, args.agent_model, args.temperature)
 
 
 def cmd_trial(args: argparse.Namespace) -> int:
@@ -173,7 +187,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     )
     (root / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     model = _agent(args, base_url, api_key)
-    improver = ModelClient(ModelConfig(base_url=base_url, model=args.improver_model, api_key=api_key))
+    improver = _client(base_url, api_key, args.improver_model)
     # One `trial` of evolve's evaluations is about len(cases) runs; the counter just shows progress.
     runner = RecordingRunner(TauRunner(user_model=args.user_model), store, len(cases))
     signer = Signer.from_env() if os.environ.get("RATCHET_SIGNING_KEY") else Signer.generate()
@@ -185,6 +199,9 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
+    # Activation follows the same rules as the Atlas activator (stored, admitting, signed decision; compare
+    # and swap on the active pointer) over this run's own decision log.
+    activator = MemoryActivator(store.decision)
     started = time.perf_counter()
     with GuardRuntime() as runtime:
         lab = Lab(
@@ -193,6 +210,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
             simulator=RecordedViews(),
             runner=SandboxRunner(runtime),
             signer=signer,
+            activator=activator,
             improver=improver,
             workers=args.workers,
             max_clusters=args.max_clusters,
@@ -211,6 +229,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "instructions": result.instructions.version,
         "generations": [r.to_payload() for r in result.generations],
         "keyid": signer.keyid,
+        "active": list(activator.active()),
         "wall_s": round(time.perf_counter() - started, 1),
     }
     (root / "result.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")

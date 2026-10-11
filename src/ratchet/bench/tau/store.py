@@ -79,5 +79,10 @@ class JsonlStore:
         self._append("decisions", {"decision_id": rid, "decision": decision})
         return rid
 
+    def decision(self, decision_id: str) -> dict[str, Any] | None:
+        """The last decision stored under `decision_id` (what an activator checks before it activates)."""
+        found = [r["decision"] for r in self.read("decisions") if r["decision_id"] == decision_id]
+        return found[-1] if found else None
+
     def traces(self) -> list[Trace]:
         return [trace_from(r) for r in self.read("traces")]

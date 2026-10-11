@@ -124,5 +124,6 @@ def test_evolve_wires_the_lab_and_writes_the_result(
     assert seen["generations"] == 2 and seen["lab"].max_evals == 2
     assert seen["lab"].suite_digest == result["config"]["split_record"]["digest"]
     assert "hello" in (root / "log.txt").read_text()
+    assert result["active"] == [None, 0]
     with pytest.raises(SystemExit):
         cli.main(args)
