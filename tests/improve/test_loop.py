@@ -5,7 +5,6 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from ratchet.improve.evaluate import evaluate
 from ratchet.improve.loop import Lab, compose, evolve
 from ratchet.improve.receipt import Signer, verify
 from ratchet.types import Harness, Trace
@@ -26,8 +25,9 @@ CASES = [
     FakeCase("omit-7", "train"),
     FakeCase("timeout-4", "heldout"), FakeCase("timeout-5", "heldout"),
     FakeCase("plain-6", "heldout", kind="benign_twin"), FakeCase("omit-9", "heldout"),
+    FakeCase("omit-10", "heldout"),
 ]  # fmt: skip
-HELDOUT_IDS = ["timeout-4", "timeout-5", "plain-6", "omit-9"]
+HELDOUT_IDS = ["timeout-4", "timeout-5", "plain-6", "omit-9", "omit-10"]
 
 SEED = Harness.build(
     parent=None, system_prompt="You handle refunds.", procedures=[], guards=[],
@@ -108,7 +108,7 @@ def test_two_generations_ratchet_both_levels() -> None:
     assert guard_row["status"] == "admitted"
     assert guard_row["replay"]["passed"] and guard_row["replay"]["targets_hit"] == 2
     assert g1.promoted is not None
-    assert g1.level1["child_score"]["heldout_passed"] > g1.level1["parent_rerun_heldout_passed"]
+    assert g1.level1["child_score"]["heldout_passed"] >= g1.level1["parent_run_2_heldout_passed"] + 2
     assert g1.level1["rates"]["candidate"]["false_intervention_rate"] == 0.0
     assert g1.replay["checks"] > 0 and g1.replay["checks_per_s"] > 0
     # Level 2 makes no claim without a challenger, and drafts one from what it saw.
@@ -138,10 +138,15 @@ def test_two_generations_ratchet_both_levels() -> None:
     assert all(
         d["visible_case_ids"] == ["omit-7", "plain-3", "timeout-1", "timeout-2"] for d in store.decisions
     )
-    assert all(d["suite_digest"] == "suite" for d in store.decisions)
+    versions = {d["evaluator"]["version"] for d in store.decisions}
+    assert len(versions) == 1 and all(
+        d["evaluator"]["components"]["suite_file"] == "suite" for d in store.decisions
+    )
     roles = {e.get("role") for e in store.evals if e["type"] == "eval"}
-    assert {"parent", "parent_rerun", "candidate"} <= roles
-    assert {e["type"] for e in store.evals} >= {"eval", "generation", "improver_instructions"}
+    assert {"parent_run_1", "parent_run_2", "candidate", "confirm"} <= roles
+    assert {e["type"] for e in store.evals} >= {"eval", "generation", "improver_instructions", "evaluator"}
+    l2 = fs["challenger"]
+    assert l2["slots"] == 4 and l2["invalid"] == 0 and l2["empty"] == 0 and fs["champion"]["rejected"] == 1
     assert logs and result.harness.version in store.harnesses
 
 
@@ -154,7 +159,7 @@ def test_the_improver_never_sees_heldout_cases() -> None:
         assert case_id not in text
 
 
-def test_parent_eval_is_reused_and_meta_failure_is_tolerated() -> None:
+def test_meta_failure_is_tolerated() -> None:
     class NoMeta(RoutingChat):
         def complete(self, messages: Sequence[dict[str, Any]], tools: Sequence[dict[str, Any]]) -> FakeTurn:
             if "maintain the instructions" in str(messages[0]["content"]):
@@ -162,10 +167,8 @@ def test_parent_eval_is_reused_and_meta_failure_is_tolerated() -> None:
                 return FakeTurn("no json here")
             return super().complete(messages, tools)
 
-    run = FakeRunCase()
-    pe = evaluate(SEED, CASES, run, None)
     lab = _lab(NoMeta(), Signer.generate())
-    result = evolve(MemStore(), None, 1, lab=lab, seed=SEED, parent_eval=pe)
+    result = evolve(MemStore(), None, 1, lab=lab, seed=SEED)
     assert result.generations[0].level2["next_challenger"] is None
     assert result.generations[0].level1["parent_score"]["train_total"] == 4
 
@@ -191,7 +194,7 @@ def test_fixes_for_two_clusters_are_composed_when_the_composite_does_better() ->
     result = evolve(store, None, 1, lab=_lab(Both(), Signer.generate(), max_clusters=4), seed=SEED)
     g1 = result.generations[0]
     assert (
-        g1.level1["child_score"]["heldout_passed"] == 4
+        g1.level1["child_score"]["heldout_passed"] == 5
         and result.harness.guards
         and result.harness.procedures
     )

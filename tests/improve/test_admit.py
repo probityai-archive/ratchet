@@ -38,12 +38,15 @@ def _admit(cand: Harness, pe: EvalReport | None = None, ce: EvalReport | None = 
     pe = pe or evaluate(PARENT, fake_cases(), FakeRunCase(), None)
     rerun = kw.pop("rerun", None) or evaluate(PARENT, HELDOUT, FakeRunCase(), None)
     ce = ce or evaluate(cand, fake_cases(), FakeRunCase(), None)
+    confirm = kw.pop("confirm", "run")
+    if confirm == "run":
+        confirm = evaluate(cand, HELDOUT, FakeRunCase(), None)
     replays = kw.pop("replays", None)
     return admit(
-        PARENT, cand, parent_eval=pe, parent_rerun=rerun, cand_eval=ce,
+        PARENT, cand, parent_runs=(pe, rerun), cand_eval=ce, confirm_eval=confirm,
         replays=_replays(cand, pe) if replays is None else replays,
         literals=training_literals(pe.train_traces()), visible_case_ids=["timeout-1", "timeout-2", "plain-3"],
-        suite_digest="abc", **kw,
+        evaluator={"version": "ev1"}, **kw,
     )  # fmt: skip
 
 
@@ -52,13 +55,12 @@ def test_a_precise_guard_is_admitted_with_evidence_and_a_verifiable_receipt() ->
     d = _admit(cand, context={"generation": 1})
     assert d.admitted, d.to_payload()
     h = d.check("heldout").evidence
-    assert (
-        h["gained"] == ["timeout-4", "timeout-5"]
-        and h["parent_runs_passed"] == [1, 1]
-        and h["noise_floor"] == 1
-    )
-    assert len(h["parent_runs"]) == 2 and h["candidate_cached_calls"] == 0
-    assert d.check("replay").evidence["reports"][0]["targets_hit"] == 2
+    assert h["gained"] == ["timeout-4", "timeout-5"] and h["parent_fresh_passed"] == [1, 1]
+    assert h["discordant"] == [] and h["margin"] == 2 and h["required"] == 3
+    assert h["candidate_fresh_passed"] == 3 and h["confirm_fresh_passed"] == 3 and h["confirmed"]
+    assert len(h["parent_runs"]) == 2 and len(h["candidate_runs"]) == 2
+    rep = d.check("replay").evidence["reports"][0]
+    assert rep["targets_hit"] == 2 and rep["verdict"] == "CLEARED" and rep["coverage"] == "4/4 traces checked"
     assert d.check("benign_twins").passed and d.check("overfit_lint").passed
     assert d.check("cost").evidence["gate"] is False
     assert (
@@ -66,10 +68,26 @@ def test_a_precise_guard_is_admitted_with_evidence_and_a_verifiable_receipt() ->
         and d.rates["candidate"]["false_intervention_rate"] == 0.0
     )
     assert d.rates["parent"]["recovery_rate"] == 0.0
+    assert set(d.report_digests) == {"parent_run_1", "parent_run_2", "candidate_run", "candidate_confirm_run",
+                                     "replay:g-new"}  # fmt: skip
+    assert d.corpus_digests["g-new"] == rep["snapshot_digest"] and d.exceptions == []
     signer = Signer.generate()
     body = verify(receipt(d, signer), {signer.keyid: signer.public_key})
     assert body["admitted"] is True and body["context"] == {"generation": 1}
-    assert body["visible_case_ids"] == ["plain-3", "timeout-1", "timeout-2"] and body["suite_digest"] == "abc"
+    assert body["visible_case_ids"] == ["plain-3", "timeout-1", "timeout-2"] and body["evaluator"] == {
+        "version": "ev1"
+    }
+
+
+def test_unconfirmed_candidate_waits_for_its_confirming_run() -> None:
+    from ratchet.improve.admit import awaiting_confirmation
+
+    cand = PARENT.child(guards=[OLD, Guard("g-new", "d", NO_DUP_GUARD)], created_by="improver")
+    d = _admit(cand, confirm=None)
+    assert not d.admitted and awaiting_confirmation(d)
+    flop = replace(evaluate(PARENT, HELDOUT, FakeRunCase(), None), harness_version=cand.version)
+    d2 = _admit(cand, confirm=flop)
+    assert not d2.admitted and not d2.check("heldout").evidence["confirmed"] and not awaiting_confirmation(d2)
 
 
 def test_overbroad_guard_fails_replay_regression_and_benign_twins() -> None:
@@ -95,28 +113,37 @@ def test_copied_literals_fail_the_overfit_screen() -> None:
     ]
 
 
-def test_gain_must_clear_the_parents_better_run_and_be_fresh() -> None:
+def test_gain_must_clear_the_noise_margin_and_be_fresh() -> None:
     cand = PARENT.child(guards=[OLD, Guard("g-new", "d", NO_DUP_GUARD)], created_by="improver")
     pe = evaluate(PARENT, fake_cases(), FakeRunCase(), None)
     ce = evaluate(cand, fake_cases(), FakeRunCase(), None)
-    lucky = replace(
-        ce, harness_version=PARENT.version, results=[r for r in ce.results if r.split == "heldout"]
+    confirm = evaluate(cand, HELDOUT, FakeRunCase(), None)
+    # The parent's second run disagrees with its first on two cases: D = 2, so the margin is 3.
+    noisy = replace(
+        pe, results=[replace(r, passed=True) if r.case_id in ("timeout-4",) else r for r in pe.results]
     )
-    c = check_heldout(pe, lucky, ce)  # the parent's second run happened to pass everything
-    assert not c.passed and c.evidence["noise_floor"] == 3
-    cached = replace(
-        ce, results=[replace(r, cached_calls=1) if r.case_id == "timeout-4" else r for r in ce.results]
+    noisy = replace(
+        noisy, results=[replace(r, passed=False) if r.case_id == "plain-6" else r for r in noisy.results]
     )
-    c2 = check_heldout(pe, evaluate(PARENT, HELDOUT, FakeRunCase(), None), cached)
-    assert (
-        c2.evidence["excluded_cached_passes"] == ["timeout-4"] and c2.evidence["candidate_passed_fresh"] == 2
-    )
+    c = check_heldout((pe, noisy), ce, confirm)
+    assert c.evidence["discordant"] == ["plain-6", "timeout-4"] and c.evidence["margin"] == 3
+    assert c.evidence["required"] == 4 and not c.passed
+    cached = replace(ce, results=[replace(r, cached_calls=1, mode="CACHED") if r.case_id == "timeout-4" else r
+                                  for r in ce.results])  # fmt: skip
+    rerun = evaluate(PARENT, HELDOUT, FakeRunCase(), None)
+    c2 = check_heldout((pe, rerun), cached, confirm)
+    assert c2.evidence["excluded_non_fresh"] == ["timeout-4"] and c2.evidence["candidate_fresh_passed"] == 2
+    assert not c2.passed
+    recorded = ce.recorded("2026-10-11T12:00:00Z")
+    assert recorded.modes()["RECORDED"] == 6 and not check_heldout((pe, rerun), recorded, confirm).passed
 
 
 def test_missing_replay_and_flat_heldout_reject() -> None:
     cand = PARENT.child(guards=[OLD, Guard("g-new", "d", NO_DUP_GUARD)], created_by="improver")
     ce = evaluate(cand, fake_cases(), FakeRunCase(), None)
-    d = _admit(cand, pe=ce, ce=ce, rerun=evaluate(cand, HELDOUT, FakeRunCase(), None), replays={})
+    d = _admit(
+        cand, pe=ce, ce=ce, rerun=evaluate(cand, HELDOUT, FakeRunCase(), None), replays={}, confirm=None
+    )
     assert not d.admitted
     assert d.check("replay").evidence["reports"][0]["missing"]
     assert not d.check("heldout").passed and d.check("heldout").evidence["same_case_set"]

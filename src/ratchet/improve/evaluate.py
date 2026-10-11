@@ -4,6 +4,10 @@ Every run gets a fresh run id, so a re-run of the same harness on the same case 
 resumed or deduplicated old one. Each result records how many of its model calls were answered fresh and
 how many came from a cache (a model event whose payload says `"cached": true`), and how many times the
 harness intervened (a `guard_block` event for any reason other than malformed arguments).
+
+Modes, labelled on every result: FRESH (every model call was answered fresh; the only mode admission
+counts), CACHED (at least one byte-identical cached response; debugging only), RECORDED (a stored fresh
+result shown again, with the time it was recorded).
 """
 
 from __future__ import annotations
@@ -12,11 +16,12 @@ import time
 import uuid
 from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field
-from typing import Any, Protocol
+from dataclasses import dataclass, field, replace
+from typing import Any, Literal, Protocol
 
 from ratchet.types import Cost, Harness, Split, Trace
 
+Mode = Literal["FRESH", "RECORDED", "CACHED"]
 CaseKind = str  # "trap", "benign_twin" or "must_succeed", as the case suite labels them
 
 
@@ -51,6 +56,8 @@ class CaseResult:
     fresh_calls: int = 0
     cached_calls: int = 0
     error: str | None = None
+    mode: Mode = "FRESH"
+    recorded_at: str | None = None
 
 
 def interventions(trace: Trace) -> int:
@@ -85,6 +92,17 @@ class EvalReport:
         train = {r.case_id for r in self.results if r.split == "train"}
         return [t for t in self.traces if t.case_id in train]
 
+    def recorded(self, recorded_at: str) -> EvalReport:
+        """This report shown again from storage: every result is labelled RECORDED with its timestamp."""
+        results = [replace(r, mode="RECORDED", recorded_at=recorded_at) for r in self.results]
+        return replace(self, results=results)
+
+    def modes(self) -> dict[str, int]:
+        out = {"FRESH": 0, "RECORDED": 0, "CACHED": 0}
+        for r in self.results:
+            out[r.mode] += 1
+        return out
+
     def cost(self) -> Cost:
         rs = [r.cost for r in self.results]
         return Cost(
@@ -105,6 +123,7 @@ class EvalReport:
             "errors": sum(1 for r in self.results if r.error),
             "fresh_calls": sum(r.fresh_calls for r in self.results),
             "cached_calls": sum(r.cached_calls for r in self.results),
+            "modes": self.modes(),
             "cost": {
                 "model_calls": c.model_calls,
                 "input_tokens": c.input_tokens,
@@ -125,6 +144,8 @@ class EvalReport:
                     "interventions": r.interventions,
                     "fresh_calls": r.fresh_calls,
                     "cached_calls": r.cached_calls,
+                    "mode": r.mode,
+                    "recorded_at": r.recorded_at,
                     "error": r.error,
                 }
                 for r in self.results
@@ -156,7 +177,7 @@ def _one(
     fresh, cached = model_calls(trace)
     result = CaseResult(
         case.id, case.split, case.must_succeed, case.kind, o.passed, list(o.reasons), trace.run_id, o.cost,
-        interventions(trace), fresh, cached,
+        interventions(trace), fresh, cached, mode="CACHED" if cached else "FRESH",
     )  # fmt: skip
     return result, trace
 

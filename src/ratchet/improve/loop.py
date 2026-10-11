@@ -28,9 +28,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from ratchet.improve.admit import Decision, admit
+from ratchet.improve.admit import Decision, admit, awaiting_confirmation
 from ratchet.improve.diagnose import FailureCluster, diagnose
 from ratchet.improve.evaluate import CaseLike, EvalReport, RunCase, evaluate_many
+from ratchet.improve.evaluator import evaluator_identity, require_same
 from ratchet.improve.llm import Chat, Meter, ask_json
 from ratchet.improve.overfit import Literals, lint, training_literals
 from ratchet.improve.propose import SEED, Candidate, Instructions, propose, revise_guard
@@ -74,6 +75,7 @@ class Lab:
     max_evals: int = 6
     repair_rounds: int = 1
     suite_digest: str | None = field(default_factory=frozen_suite_digest)
+    model_config: dict[str, Any] = field(default_factory=dict)
     log: Callable[[str], None] = lambda _msg: None
 
 
@@ -83,7 +85,12 @@ class ArmScore:
 
     instructions_version: str
     clusters: list[str] = field(default_factory=list)
+    slots: int = 0
     proposed: int = 0
+    invalid: int = 0
+    duplicates: int = 0
+    empty: int = 0
+    rejected: int = 0
     screened_out: int = 0
     replay_tested: int = 0
     replay_passed: int = 0
@@ -93,13 +100,20 @@ class ArmScore:
 
     @property
     def admission_yield(self) -> float:
-        return self.admitted / self.proposed if self.proposed else 0.0
+        """Admitted over the fixed slots, so invalid, duplicate and empty proposals count against it."""
+        denominator = self.slots or self.proposed
+        return self.admitted / denominator if denominator else 0.0
 
     def to_payload(self) -> dict[str, Any]:
         return {
             "instructions_version": self.instructions_version,
             "clusters": self.clusters,
+            "slots": self.slots,
             "proposed": self.proposed,
+            "invalid": self.invalid,
+            "duplicates": self.duplicates,
+            "empty": self.empty,
+            "rejected": self.rejected,
             "screened_out": self.screened_out,
             "replay_tested": self.replay_tested,
             "replay_passed": self.replay_passed,
@@ -150,6 +164,7 @@ class _Tried:
     lint_hits: list[dict[str, str]] = field(default_factory=list)
     decision: Decision | None = None
     report: EvalReport | None = None
+    confirm: EvalReport | None = None
 
 
 @dataclass
@@ -158,14 +173,19 @@ class _Gen:
 
     gen: int
     parent: Harness
-    parent_eval: EvalReport
-    parent_rerun: EvalReport
+    parent_runs: tuple[EvalReport, EvalReport]
+    evaluator: dict[str, Any]
     walks: WalkCache
     literals: Literals
     visible: list[str]
     benign_ids: set[str]
     rec: GenerationRecord
     meter: Meter
+    task_stats: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
+
+    @property
+    def parent_eval(self) -> EvalReport:
+        return self.parent_runs[0]
 
 
 def _score(r: EvalReport) -> dict[str, int]:
@@ -212,22 +232,41 @@ def _proof_replay(tried: _Tried, g: _Gen, cluster: FailureCluster, train: list[T
     tried.status = "replay_passed" if tried.replay and tried.replay.passed else "replay_failed"
 
 
-def _shortlist(tried: list[_Tried], arms: list[str], budget: int) -> list[_Tried]:
-    """Up to budget/len(arms) per arm: proven guards first (most targets), then procedures, then prompts,
-    round-robin over clusters so one big cluster does not take every slot."""
+Lane = tuple[str, set[str] | None, bool, int]  # arm, cluster ids, whether those ids are excluded, slots
+
+
+def lanes_for(frozen_ids: set[str] | None, budget: int) -> list[Lane]:
+    """Fixed evaluation slots. With a level-2 comparison running, challenger and champion get the same
+    number of slots on the frozen batch, and the champion's work on the other clusters gets the rest."""
+    if not frozen_ids:
+        return [("champion", None, False, budget)]
+    slot = max(1, budget // 3)
+    return [
+        ("challenger", frozen_ids, False, slot),
+        ("champion", frozen_ids, False, slot),
+        ("champion", frozen_ids, True, max(0, budget - 2 * slot)),
+    ]
+
+
+def _shortlist(tried: list[_Tried], lanes: list[Lane]) -> list[_Tried]:
+    """Fill each lane: proven guards first (most targets), then procedures, then prompts, round-robin over
+    clusters so one big cluster does not take every slot."""
     rank = {"guard": 0, "procedure": 1, "prompt_edit": 2}
-    per_arm = max(1, budget // max(1, len(arms)))
     chosen: list[_Tried] = []
-    for arm in arms:
-        pool = [t for t in tried if t.arm == arm and t.status in ("proposed", "replay_passed")]
+    for arm, ids, exclude, slots in lanes:
+        pool = [
+            t for t in tried
+            if t.arm == arm and t.status in ("proposed", "replay_passed") and t not in chosen
+            and (ids is None or (t.candidate.cluster_id in ids) != exclude)
+        ]  # fmt: skip
         pool.sort(key=lambda t: (rank[t.candidate.kind], -len(t.candidate.targets)))
         by_cluster: dict[str, list[_Tried]] = {}
         for t in pool:
             by_cluster.setdefault(t.candidate.cluster_id, []).append(t)
         taken = 0
-        while taken < per_arm and any(by_cluster.values()):
+        while taken < slots and any(by_cluster.values()):
             for queue in by_cluster.values():
-                if queue and taken < per_arm:
+                if queue and taken < slots:
                     chosen.append(queue.pop(0))
                     taken += 1
     return chosen
@@ -280,31 +319,35 @@ def propose_instructions(
 def _decide(
     store: ImproveStore,
     lab: Lab,
+    model: Any,
     g: _Gen,
     harness: Harness,
     report: EvalReport,
     replays: dict[str, ReplayReport],
     context: dict[str, Any],
-) -> Decision:
-    d = admit(
-        g.parent,
-        harness,
-        parent_eval=g.parent_eval,
-        parent_rerun=g.parent_rerun,
-        cand_eval=report,
-        replays=replays,
-        literals=g.literals,
-        visible_case_ids=g.visible,
-        suite_digest=lab.suite_digest,
-        context=context,
-    )
+) -> tuple[Decision, EvalReport | None]:
+    """Admit or reject. A candidate that clears every gate on its first run gets one more fresh held-out
+    run to confirm; only the final decision is signed and stored. Returns it and the confirming run."""
+    require_same(g.evaluator, evaluator_identity(lab.cases, lab.model_config, lab.suite_digest))
+    kw: dict[str, Any] = {"parent_runs": g.parent_runs, "cand_eval": report, "replays": replays,
+                          "literals": g.literals, "visible_case_ids": g.visible, "evaluator": g.evaluator,
+                          "context": context}  # fmt: skip
+    d = admit(g.parent, harness, confirm_eval=None, **kw)
+    confirm: EvalReport | None = None
+    if awaiting_confirmation(d):
+        heldout = [c for c in lab.cases if c.split == "heldout"]
+        confirm = evaluate_many(
+            [harness], heldout, lab.run_case, model, workers=lab.workers, repeats=lab.repeats
+        )[0]
+        _persist_eval(store, confirm, {"generation": g.gen, "role": "confirm", "harness": harness.version})
+        d = admit(g.parent, harness, confirm_eval=confirm, **kw)
     env = receipt(d, lab.signer)
     store.put_decision(
         {**d.to_payload(), "envelope": base64.b64encode(env).decode("ascii"), "keyid": lab.signer.keyid},
         decision_id=f"{d.parent}->{d.candidate}",
     )
     g.rec.decisions.append(f"{d.parent}->{d.candidate}")
-    return d
+    return d, confirm
 
 
 def _referee_replays(
@@ -348,9 +391,10 @@ def _promote(
         0
     ]
     _persist_eval(store, report, {"generation": g.gen, "role": "composite"})
-    d = _decide(
+    d, _ = _decide(
         store,
         lab,
+        model,
         g,
         combo,
         report,
@@ -378,7 +422,6 @@ def evolve(
     lab: Lab,
     seed: Harness,
     instructions: Instructions = SEED,
-    parent_eval: EvalReport | None = None,
 ) -> EvolveResult:
     """Run `generations` rounds of the ratchet from `seed`. Returns the final harness and every record."""
     improver: Chat = lab.improver or model
@@ -390,6 +433,8 @@ def evolve(
     heldout_cases = [c for c in lab.cases if c.split == "heldout"]
     visible = sorted(c.id for c in train_cases)
     benign_ids = {c.id for c in lab.cases if c.kind == "benign_twin"}
+    evaluator = evaluator_identity(lab.cases, lab.model_config, lab.suite_digest)
+    store.put_eval({"type": "evaluator", **evaluator}, eval_id=f"evaluator-{evaluator['version']}")
     store.put_harness(parent)
     _record_instructions(store, champion, seen[champion.version], 0)
     records: list[GenerationRecord] = []
@@ -397,36 +442,25 @@ def evolve(
         started = time.perf_counter()
         meter = Meter()
         rec = GenerationRecord(gen, parent.version)
-        if parent_eval is None or parent_eval.harness_version != parent.version:
-            parent_eval = evaluate_many(
-                [parent], lab.cases, lab.run_case, model, workers=lab.workers, repeats=lab.repeats
-            )[0]
-            _persist_eval(store, parent_eval, {"generation": gen, "role": "parent"})
-        parent_rerun = evaluate_many(
-            [parent], heldout_cases, lab.run_case, model, workers=lab.workers, repeats=lab.repeats
-        )[0]
-        _persist_eval(store, parent_rerun, {"generation": gen, "role": "parent_rerun"})
+        # The parent runs twice, fresh, every generation: the noise floor is measured, never assumed.
+        parent_eval = evaluate_many([parent], lab.cases, lab.run_case, model, workers=lab.workers,
+                                    repeats=lab.repeats)[0]  # fmt: skip
+        _persist_eval(store, parent_eval, {"generation": gen, "role": "parent_run_1"})
+        parent_rerun = evaluate_many([parent], heldout_cases, lab.run_case, model, workers=lab.workers,
+                                     repeats=lab.repeats)[0]  # fmt: skip
+        _persist_eval(store, parent_rerun, {"generation": gen, "role": "parent_run_2"})
         rec.level1 = {
             "parent": parent.version,
+            "evaluator": evaluator["version"],
             "parent_score": _score(parent_eval),
-            "parent_rerun_heldout_passed": len(parent_rerun.passed("heldout")),
+            "parent_run_2_heldout_passed": len(parent_rerun.passed("heldout")),
         }
         lab.log(f"gen {gen}: parent {parent.version} {rec.level1}")
 
         # The firewall: from here to the shortlist, only training traces are read.
         train = parent_eval.train_traces()
-        g = _Gen(
-            gen,
-            parent,
-            parent_eval,
-            parent_rerun,
-            WalkCache(lab.simulator),
-            training_literals(train),
-            visible,
-            benign_ids,
-            rec,
-            meter,
-        )
+        g = _Gen(gen, parent, (parent_eval, parent_rerun), evaluator, WalkCache(lab.simulator),
+                 training_literals(train), visible, benign_ids, rec, meter)  # fmt: skip
         clusters = diagnose(train, lab.simulator, improver, meter)[: lab.max_clusters]
         rec.clusters = [c.to_payload() for c in clusters]
         if not clusters:
@@ -448,15 +482,23 @@ def evolve(
                 arms["challenger"] = (challenger, ArmScore(challenger.version, frozen["cluster_ids"]), batch)
 
         tried, rejected = _propose_all(arms, g, train, lab)
-        reports, referee = _evaluate_and_admit(store, lab, model, g, tried, list(arms), clusters)
+        reports, referee = _evaluate_and_admit(
+            store,
+            lab,
+            model,
+            g,
+            tried,
+            set(frozen["cluster_ids"]) if "challenger" in arms else None,
+            clusters,
+        )
         admitted = [t for t in tried if t.status == "admitted"]
         promoted = _promote(store, lab, model, g, admitted, referee)
         if promoted is not None:
-            parent, parent_eval, decision = promoted
+            parent, child_eval, decision = promoted
             store.put_harness(parent)
             rec.level1 |= {
                 "promoted": parent.version,
-                "child_score": _score(parent_eval),
+                "child_score": _score(child_eval),
                 "rates": decision.rates,
             }
         rec.level1 |= {
@@ -466,7 +508,19 @@ def evolve(
         }
 
         champion, challenger, rec.level2 = _level2(
-            store, arms, frozen, champion, challenger, seen, tried, rejected, improver, meter, gen
+            store,
+            arms,
+            frozen,
+            champion,
+            challenger,
+            seen,
+            tried,
+            rejected,
+            improver,
+            meter,
+            gen,
+            g.task_stats,
+            lab.candidates_per_cluster,
         )
         rec.agent_cost = {"candidates": [_cost(r) for r in reports]}
         _finish(store, rec, started, meter, tried)
@@ -498,6 +552,12 @@ def _propose_all(
                 n=lab.candidates_per_cluster,
             )
             score.proposed += len(prop.candidates)
+            g.task_stats[(arm, cl.id)] = {
+                "valid": len(prop.candidates),
+                "invalid": len(prop.rejected),
+                "duplicates": prop.duplicates,
+                "empty": int(not prop.candidates),
+            }
             rejected += [f"[{arm}] {r['reason']}" for r in prop.rejected]
             tried += [_Tried(c, arm) for c in prop.candidates]
     clusters = {c.id: c for _, _, batch in arms.values() for c in batch}
@@ -539,10 +599,10 @@ def _evaluate_and_admit(
     model: Any,
     g: _Gen,
     tried: list[_Tried],
-    arms: list[str],
+    frozen_ids: set[str] | None,
     clusters: list[FailureCluster],
 ) -> tuple[list[EvalReport], dict[str, ReplayReport]]:
-    shortlist = _shortlist(tried, arms, lab.max_evals)
+    shortlist = _shortlist(tried, lanes_for(frozen_ids, lab.max_evals))
     reports = evaluate_many(
         [t.candidate.harness for t in shortlist],
         lab.cases,
@@ -557,9 +617,10 @@ def _evaluate_and_admit(
         _persist_eval(store, report, {"generation": g.gen, "role": "candidate", "candidate": t.candidate.id})
         new_ids = {x.id for x in t.candidate.new_guards(g.parent)}
         ctx = {"generation": g.gen, "arm": t.arm, **t.candidate.to_payload()}
-        t.decision = _decide(
+        t.decision, t.confirm = _decide(
             store,
             lab,
+            model,
             g,
             t.candidate.harness,
             report,
@@ -585,12 +646,19 @@ def _level2(
     improver: Chat,
     meter: Meter,
     gen: int,
+    task_stats: dict[tuple[str, str], dict[str, int]],
+    slots_per_task: int,
 ) -> tuple[Instructions, Instructions | None, dict[str, Any]]:
     """Score each arm on the frozen batch, keep or drop the challenger, and draft the next one."""
     frozen_ids = set(frozen["cluster_ids"])
     scored: dict[str, ArmScore] = {}
     for arm, (ins, _, _) in arms.items():
-        s = ArmScore(ins.version, sorted(frozen_ids))
+        s = ArmScore(ins.version, sorted(frozen_ids), slots=slots_per_task * len(frozen_ids))
+        for cid in frozen_ids:
+            st = task_stats.get((arm, cid), {})
+            s.invalid += st.get("invalid", 0)
+            s.duplicates += st.get("duplicates", 0)
+            s.empty += st.get("empty", 0)
         for t in tried:
             if t.arm != arm or t.candidate.cluster_id not in frozen_ids:
                 continue
@@ -599,6 +667,7 @@ def _level2(
             s.replay_tested += t.replay is not None
             s.replay_passed += bool(t.replay and t.replay.passed)
             s.evaluated += t.decision is not None
+            s.rejected += t.status.startswith(("rejected", "screened", "replay_failed"))
             if t.status == "admitted" and t.decision is not None:
                 s.admitted += 1
                 s.heldout_gain += len(t.decision.check("heldout").evidence["gained"])

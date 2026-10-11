@@ -120,6 +120,7 @@ class Candidate:
 class Proposal:
     candidates: list[Candidate] = field(default_factory=list)
     rejected: list[dict[str, Any]] = field(default_factory=list)
+    duplicates: int = 0
 
 
 def check_guard_source(source: str) -> str | None:
@@ -276,7 +277,9 @@ def propose(
         )
         if isinstance(made, str):
             out.rejected.append({"cluster_id": cluster.id, "reason": made})
-        elif made.id not in seen:
+        elif made.id in seen or made.harness.version == harness.version:
+            out.duplicates += 1
+        else:
             seen.add(made.id)
             out.candidates.append(made)
     return out
