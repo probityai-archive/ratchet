@@ -432,3 +432,48 @@ def test_store_retries_and_keeps_files(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.delenv("RATCHET_MONGODB_URI")
     with pytest.raises(SystemExit):
         cli.main(["store", str(out)])
+
+
+def _chat_handler(vary: bool) -> Any:
+    count = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        body = json.loads(req.content)
+        count["n"] += 1
+        is_target = body["messages"][-1]["content"].startswith("What is the weather")
+        args = '{"city": "G"}' if not (vary and is_target and count["n"] % 2) else '{"city": "H"}'
+        msg = {"role": "assistant", "content": None, "reasoning_content": "think",
+               "tool_calls": [{"id": f"id{count['n']}", "type": "function",
+                               "function": {"name": "get_weather", "arguments": args}}]}  # fmt: skip
+        return httpx.Response(200, json={"choices": [{"message": msg, "finish_reason": "tool_calls"}],
+                                         "usage": {"completion_tokens": 3}})  # fmt: skip
+
+    return handler
+
+
+def test_determinism_probe_detects_differences() -> None:
+    from ratchet.bench.transfer.run import determinism_probe
+
+    same = determinism_probe("http://h/v1", "k", "m", repeats=3, background=2,
+                             transport=httpx.MockTransport(_chat_handler(False)))  # fmt: skip
+    assert same["identical"] and same["distinct_outputs"] == 1 and same["seed"] == 7
+    diff = determinism_probe("http://h/v1", "k", "m", repeats=4, background=1, seed=None,
+                             transport=httpx.MockTransport(_chat_handler(True)))  # fmt: skip
+    assert not diff["identical"] and diff["distinct_outputs"] == 2
+
+
+def test_cli_determinism_uses_a_case_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict[str, Any]] = []
+
+    def fake_probe(*_a: Any, **kw: Any) -> dict[str, Any]:
+        seen.append(kw)
+        return {"identical": True, "outputs": [{"x": 1}]}
+
+    monkeypatch.setattr(cli, "determinism_probe", fake_probe)
+    out = tmp_path / "d.json"
+    args = ["determinism", "--base-url", "u", "--model", "m", "--case", "ordinary.v1", "--out", str(out)]
+    assert cli.main(args) == 0
+    assert seen[0]["messages"][1]["content"].startswith("Ticket ") and len(seen) == 2
+    assert any(t["function"]["name"] == "read_procedure" for t in seen[0]["tools"])
+    monkeypatch.setattr(cli, "determinism_probe", lambda *_a, **_k: {"identical": False, "outputs": [{}]})
+    assert cli.main(["determinism", "--base-url", "u", "--model", "m"]) == 1

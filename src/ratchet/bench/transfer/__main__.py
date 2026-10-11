@@ -24,6 +24,7 @@ from ratchet.bench.transfer.render import render
 from ratchet.bench.transfer.run import (
     SingleCallModel,
     default_client,
+    determinism_probe,
     endpoint_info,
     harness_from,
     now_iso,
@@ -238,6 +239,53 @@ def cmd_store(args: argparse.Namespace) -> int:
     return _store(uri, args.trace_db, payload, traces)
 
 
+def case_first_request(case_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The first request the worker sends for a case under the seed harness: system prompt, ticket, tools."""
+    from ratchet.agent.seed import seed_harness
+    from ratchet.agent.worker import read_procedure_spec, system_prompt
+    from ratchet.cases.registry import get
+    from ratchet.world import World
+
+    case, harness = get(case_id), seed_harness()
+    allowed = set(harness.tool_allowlist)
+    tools = [t for t in World.from_case(case).tools() if t["function"]["name"] in allowed]
+    messages = [
+        {"role": "system", "content": system_prompt(harness, [])},
+        {"role": "user", "content": f"Ticket {case.ticket_id}\n\n{case.customer_message}"},
+    ]
+    return messages, [*tools, read_procedure_spec(harness)]
+
+
+def cmd_determinism(args: argparse.Namespace) -> int:
+    messages, tools = case_first_request(args.case) if args.case else (None, None)
+    rounds = [
+        determinism_probe(
+            args.base_url,
+            _key(),
+            args.model,
+            repeats=args.repeats,
+            background=args.background,
+            temperature=args.temperature,
+            seed=args.seed,
+            messages=messages,
+            tools=tools,
+            max_tokens=args.max_tokens,
+        )
+        for _ in range(args.rounds)
+    ]
+    across = {json.dumps(r["outputs"][0], sort_keys=True) for r in rounds}
+    out = {"at": now_iso(), "rounds": rounds, "identical_across_rounds": len(across) == 1}
+    text = json.dumps(out, indent=2, sort_keys=True)
+    if args.out:
+        Path(args.out).write_text(text + "\n", encoding="utf-8")
+    ok = all(r["identical"] for r in rounds) and out["identical_across_rounds"]
+    print(
+        f"determinism: rounds={len(rounds)} within-round identical={[r['identical'] for r in rounds]} "
+        f"across-rounds identical={out['identical_across_rounds']}"
+    )
+    return 0 if ok else 1
+
+
 def cmd_render(args: argparse.Namespace) -> int:
     def load(paths: list[str]) -> list[tuple[dict[str, Any], str]]:
         out = []
@@ -278,6 +326,17 @@ def main(argv: list[str] | None = None) -> int:
         help="keep only the first tool call per turn (for checkpoints whose template forbids several)",
     )
     rn.add_argument("--out", required=True)
+    dt = sub.add_parser("determinism")
+    dt.add_argument("--base-url", required=True)
+    dt.add_argument("--model", required=True)
+    dt.add_argument("--repeats", type=int, default=5)
+    dt.add_argument("--background", type=int, default=8)
+    dt.add_argument("--rounds", type=int, default=2)
+    dt.add_argument("--temperature", type=float, default=0.0)
+    dt.add_argument("--seed", type=int, default=7)
+    dt.add_argument("--case", help="use this case's first worker request as the repeated request")
+    dt.add_argument("--max-tokens", type=int, default=2048)
+    dt.add_argument("--out")
     st = sub.add_parser("store")
     st.add_argument("result")
     st.add_argument("--trace-db", default="ratchet_heldout")
@@ -287,7 +346,13 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("--control", action="append", default=[], help="an A/A result file (v0 against v0)")
     rd.add_argument("--note", action="append", default=[], help="KEY=VALUE line for the setup section")
     args = p.parse_args(argv)
-    handlers = {"probe": cmd_probe, "run": cmd_run, "store": cmd_store, "render": cmd_render}
+    handlers = {
+        "probe": cmd_probe,
+        "run": cmd_run,
+        "store": cmd_store,
+        "determinism": cmd_determinism,
+        "render": cmd_render,
+    }
     return handlers[args.cmd](args)
 
 

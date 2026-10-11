@@ -281,3 +281,85 @@ def persist(db: Any, payload: dict[str, Any], traces: Sequence[dict[str, Any]]) 
         {"_id": eval_id}, {**to_jsonable(payload), "_id": eval_id, "stored_at": now_iso()}, upsert=True
     )
     return {"eval_id": eval_id, "traces": len(docs)}
+
+
+def _fingerprint(body: dict[str, Any]) -> dict[str, Any]:
+    """What a determinism check compares: the generated text, reasoning, tool calls (name and arguments; the
+    call ids are random per request) and token counts."""
+    choice = body["choices"][0]
+    msg = choice["message"]
+    calls = [
+        {"name": c["function"]["name"], "arguments": c["function"]["arguments"]}
+        for c in msg.get("tool_calls") or []
+    ]
+    return {
+        "content": msg.get("content"),
+        "reasoning": msg.get("reasoning_content") or msg.get("reasoning"),
+        "tool_calls": calls,
+        "finish_reason": choice.get("finish_reason"),
+        "completion_tokens": (body.get("usage") or {}).get("completion_tokens"),
+    }
+
+
+def determinism_probe(
+    base_url: str,
+    api_key: str,
+    model: str,
+    *,
+    repeats: int = 5,
+    background: int = 8,
+    temperature: float = 0.0,
+    seed: int | None = 7,
+    messages: list[dict[str, Any]] | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    max_tokens: int = 512,
+    transport: httpx.BaseTransport | None = None,
+) -> dict[str, Any]:
+    """Send one tool-calling request `repeats` times at once, alongside `background` different requests so
+    the server batches them with unrelated traffic, and report whether every repeat came back identical."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    tool_list = tools or [PROBE_TOOL]
+
+    def body(msgs: list[dict[str, Any]]) -> dict[str, Any]:
+        req: dict[str, Any] = {
+            "model": model, "messages": msgs, "tools": tool_list, "tool_choice": "auto",
+            "temperature": temperature, "max_tokens": max_tokens,
+        }  # fmt: skip
+        if seed is not None:
+            req["seed"] = seed
+        return req
+
+    target = body(messages or PROBE_MESSAGES)
+    others = [
+        body([{"role": "user", "content": f"Write {i + 3} short sentences about the number {i * 17 + 5}."}])
+        for i in range(background)
+    ]
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    with httpx.Client(timeout=300.0, transport=transport) as http:
+
+        def post(req: dict[str, Any]) -> dict[str, Any]:
+            resp = http.post(url, json=req, headers={"Authorization": f"Bearer {api_key}"})
+            resp.raise_for_status()
+            out: dict[str, Any] = resp.json()
+            return out
+
+        jobs = [target] * repeats + others
+        order = sorted(
+            range(len(jobs)), key=lambda i: (i * 7919) % len(jobs)
+        )  # interleave targets and others
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            futures = {i: pool.submit(post, jobs[i]) for i in order}
+            results = {i: f.result() for i, f in futures.items()}
+    prints = [_fingerprint(results[i]) for i in range(repeats)]
+    distinct = {json.dumps(p, sort_keys=True) for p in prints}
+    return {
+        "model": model,
+        "repeats": repeats,
+        "background": background,
+        "temperature": temperature,
+        "seed": seed,
+        "identical": len(distinct) == 1,
+        "distinct_outputs": len(distinct),
+        "outputs": prints,
+    }
