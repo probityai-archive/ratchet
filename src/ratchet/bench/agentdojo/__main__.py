@@ -11,6 +11,7 @@ import os
 import sys
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -20,25 +21,28 @@ from ratchet.bench.agentdojo.experiment import (
     admitted_changes,
     baseline,
     evolve_from,
+    harness_from,
     lineage,
     provenance,
     read_jsonl,
+    recorded_lineage,
     suite_digest,
     version_metrics,
 )
 from ratchet.bench.agentdojo.report import document, render
 from ratchet.bench.agentdojo.run import DojoRunner, JsonStore
+from ratchet.improve.evaluate import evaluate_many
 
 REFERENCE_CLONE = Path.home() / "Documents" / "git-clones" / "agentdojo"
 
 
 def parse(argv: Sequence[str]) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog="python -m ratchet.bench.agentdojo")
-    ap.add_argument("command", choices=["baseline", "evolve", "summarize", "report"])
+    ap.add_argument("command", choices=["baseline", "evolve", "summarize", "report", "transfer"])
     ap.add_argument("--suite", default="banking")
     ap.add_argument("--out", type=Path, help="run directory (report: the Markdown document to write)")
     ap.add_argument("--runs", type=Path, nargs="*", default=[], help="report: run directories, in order")
-    ap.add_argument("--preamble", type=Path, default=None, help="report: Markdown placed above the tables")
+    ap.add_argument("--source", type=Path, default=None, help="transfer: the run whose versions to test")
     ap.add_argument("--model", default="gpt-5.6-luna")
     ap.add_argument("--improver-model", default="gpt-5.6-terra")
     ap.add_argument("--benchmark-version", default=DEFAULT_VERSION)
@@ -133,27 +137,64 @@ def summarize(out: Path) -> dict[str, Any]:
     )
     if suite_digest(dojo) != prov["suite_digest"]:
         raise SystemExit(f"{out}: the rebuilt suite does not match the run's suite digest")
-    harnesses = read_jsonl(out / "harnesses.jsonl")
-    versions = [harnesses[0]["version"]] if harnesses else []
-    for rec in read_jsonl(out / "evals.jsonl"):
-        promoted = (rec.get("level1") or {}).get("promoted") if rec.get("type") == "generation" else None
-        if promoted and promoted not in versions:
-            versions.append(str(promoted))
-    done = (out / "results.json").is_file() and json.loads((out / "results.json").read_text()).get(
-        "status"
-    ) == "complete"
-    return write_results(out, dojo, prov, versions, "summarize", "complete" if done else "in progress")
+    versions = recorded_lineage(out)
+    previous = json.loads((out / "results.json").read_text()) if (out / "results.json").is_file() else {}
+    done = previous.get("status") == "complete"
+    command = str(previous.get("command") or "summarize")
+    return write_results(out, dojo, prov, versions, command, "complete" if done else "in progress")
+
+
+def transfer(source: Path, s: Settings) -> dict[str, Any]:
+    """Every version a run promoted, run fresh on its held-out cases under a different attack.
+
+    Same suite, split seed and agent model as the source run; only the attack text differs, and the
+    improver never saw it. Held-out cases only."""
+    src = json.loads((source / "provenance.json").read_text())
+    s = replace(s, suite=src["suite"], model=src["model"], seed=src["seed"], max_users=src.get("max_users"))
+    if s.attack == src["attack"]:
+        raise SystemExit(f"--attack must differ from the source run's attack ({src['attack']})")
+    s.out.mkdir(parents=True, exist_ok=True)
+    store = JsonStore(s.out)
+    dojo = build_suite(
+        s.suite,
+        benchmark_version=src["benchmark_version"],
+        attack=s.attack,
+        seed=s.seed,
+        max_users=s.max_users,
+    )
+    prov = {
+        **provenance(s, dojo, REFERENCE_CLONE if REFERENCE_CLONE.is_dir() else None),
+        "transfer_from": source.name,
+        "trained_attack": src["attack"],
+        "improver_model": src["improver_model"],
+    }
+    (s.out / "provenance.json").write_text(json.dumps(prov, indent=2))
+    stored = {h["version"]: harness_from(h) for h in read_jsonl(source / "harnesses.jsonl")}
+    versions = recorded_lineage(source)
+    harnesses = [stored[v] for v in versions]
+    for h in harnesses:
+        store.put_harness(h)
+    held = dojo.by_split("heldout")
+    reports = evaluate_many(harnesses, held, DojoRunner(dojo).run_case, s.client(s.model), workers=s.workers)
+    for r in reports:
+        for t in r.traces:
+            store.put_trace(t)
+        store.put_eval({**r.to_payload(), "role": f"transfer:{s.attack}"})
+    return write_results(s.out, dojo, prov, versions, "transfer", "complete")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(sys.argv[1:] if argv is None else argv)
     if args.command == "report":
-        preamble = args.preamble.read_text() if args.preamble else ""
-        args.out.write_text(document([summarize(r) for r in args.runs], preamble))
+        args.out.write_text(document([summarize(r) for r in args.runs]))
         print(args.out.read_text())
         return 0
     if args.command == "summarize":
         results = summarize(args.out)
+    elif args.command == "transfer":
+        if args.source is None:
+            raise SystemExit("transfer needs --source <run dir>")
+        results = transfer(args.source, settings_from(args, dict(os.environ)))
     else:
         results = run(args.command, settings_from(args, dict(os.environ)))
     print(render(results))

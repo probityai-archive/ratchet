@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -12,9 +13,11 @@ from ratchet.bench.agentdojo.cases import DojoSuite
 from ratchet.bench.agentdojo.experiment import (
     Settings,
     _git_head,
+    _uncommitted,
     admitted_changes,
     baseline,
     evolve_from,
+    harness_from,
     lineage,
     provenance,
     suite_digest,
@@ -37,6 +40,7 @@ def test_settings_build_clients_and_refuse_claude(tmp_path: Path) -> None:
     s = _settings(tmp_path)
     client = s.client("gpt-5.6-luna")
     assert isinstance(client, ModelClient) and client.name == "gpt-5.6-luna"
+    assert client._config.max_backoff_total_s == 900.0
     client.close()
     with pytest.raises(ValueError, match="Claude"):
         s.client("claude-sonnet-4-6")
@@ -49,7 +53,8 @@ def test_provenance_and_digest(tmp_path: Path, banking: DojoSuite) -> None:
     assert p["model"] == "gpt-5.6-luna" and p["seed"] == 0 and p["suite"] == "banking"
     assert p["agentdojo_package_version"] == "0.1.35" and p["agentdojo_reference_clone_commit"] is None
     assert p["suite_digest"] == suite_digest(banking) and len(p["suite_digest"]) == 64
-    assert _git_head(tmp_path) is None
+    assert _git_head(tmp_path) is None and _uncommitted(tmp_path) is None
+    assert isinstance(p["ratchet_uncommitted_source"], list) and p["ratchet_commit"]
     assert _git_head(tmp_path / "missing" / "dir") is None
 
 
@@ -132,16 +137,46 @@ def test_report_writes_one_document_over_runs(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(cli, "REFERENCE_CLONE", tmp_path / "no-clone")
     s = _settings(tmp_path, max_users=1, workers=4)
     cli.run("baseline", s, log=lambda _m: None)
-    pre = tmp_path / "pre.md"
-    pre.write_text("Intro text.")
     doc = tmp_path / "doc.md"
-    assert cli.main(["report", "--out", str(doc), "--runs", str(s.out), "--preamble", str(pre)]) == 0
+    assert cli.main(["report", "--out", str(doc), "--runs", str(s.out)]) == 0
     text = doc.read_text()
-    assert text.startswith("# AgentDojo results\n\nIntro text.")
+    assert text.startswith("# AgentDojo results\n\nAgentDojo v1.2.2 (package 0.1.35), run as a Ratchet world")
+    assert "et al" not in text and "NeurIPS" not in text
     assert "| banking | `gpt-5.6-luna` | complete, 0 gen | " in text and "none promoted" in text
     assert "### banking (v1.2.2)" in text
     with pytest.raises(SystemExit):
         cli.parse(["report"])
+
+
+def test_transfer_reruns_every_version_under_another_attack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Settings, "client", lambda self, model: GroundTruthModel(PLAN))
+    monkeypatch.setattr(cli, "REFERENCE_CLONE", tmp_path / "no-clone")
+    source = _settings(tmp_path, max_users=1, workers=4)
+    first = cli.run("baseline", source, log=lambda _m: None)
+    out = tmp_path / "transfer"
+    monkeypatch.setenv("RATCHET_BASE_URL", "http://x/v1")
+    monkeypatch.setenv("RATCHET_API_KEY", "k")
+    argv = ["transfer", "--out", str(out), "--source", str(source.out), "--attack", "ignore_previous"]
+    assert cli.main(argv) == 0
+    results = json.loads((out / "results.json").read_text())
+    p = results["provenance"]
+    assert p["attack"] == "ignore_previous" and p["trained_attack"] == first["provenance"]["attack"]
+    assert p["transfer_from"] == "run" and results["versions"] == first["versions"]
+    (row,) = results["metrics"]
+    assert row["role"] == "transfer:ignore_previous" and "train" not in row
+    with pytest.raises(SystemExit, match="must differ"):
+        cli.main(["transfer", "--out", str(tmp_path / "t2"), "--source", str(source.out)])
+    with pytest.raises(SystemExit, match="--source"):
+        cli.main(["transfer", "--out", str(tmp_path / "t3")])
+
+
+def test_stored_harness_must_match_its_digest(banking: DojoSuite) -> None:
+    record = dataclasses.asdict(seed_harness(banking))
+    assert harness_from(record) == seed_harness(banking)
+    with pytest.raises(ValueError, match="digest"):
+        harness_from({**record, "system_prompt": "changed"})
 
 
 def seed_harness_version(results: dict[str, object]) -> str:

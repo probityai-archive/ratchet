@@ -1,4 +1,4 @@
-"""AgentDojo (Debenedetti et al., NeurIPS 2024 Datasets and Benchmarks) as a Ratchet world.
+"""The AgentDojo benchmark as a Ratchet world.
 
 One Ratchet case is one AgentDojo episode: a user task, optionally paired with an injection task whose
 attacker text is planted in the environment. The agent runs in Ratchet's worker loop under a harness, its
