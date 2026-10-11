@@ -15,6 +15,7 @@ list disagree.
 | [tau-bench retail: Ratchet results](results/tau-retail.md) | The loop on tau-bench retail with its own database and reward: pass^k by harness and split, with crashed and stopped runs listed. |
 | [Terminal-Bench 2.0: Ratchet results](results/terminal-bench.md) | Run records live under `private/bench/terminal/` (never committed); every number below is read from them and printed with its denominator. |
 | [Cross-model transfer of admitted harness changes](results/transfer.md) | Guards are code. |
+| [Live-model admission under the stochastic gate (v3)](results/v3-live.md) | A real model makes different choices on the same input, so one run per test case cannot tell a real improvement from luck. |
 
 The rule that decides whether a change counts is in [ADMISSION.md](ADMISSION.md),
 and the labels FRESH, RECORDED and CACHED mean what that page says.
