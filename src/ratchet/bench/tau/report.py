@@ -104,6 +104,43 @@ def _results(root: Path, domain: str) -> list[dict[str, Any]]:
     return out
 
 
+def unfinished(root: Path, domain: str, counted: set[tuple[str, str]]) -> list[dict[str, Any]]:
+    """Runs recorded in an evolve store whose evaluation never finished (the run was stopped first).
+
+    `counted` holds (source, harness) pairs already covered by a finished evaluation. Each remaining group
+    is reported as what it is: completed runs of an evaluation that did not complete.
+    """
+    out = []
+    for path in sorted((root / "evolve" / domain).glob("*/traces.jsonl")):
+        source = str(path.parent.relative_to(root))
+        cfg_path = path.parent / "config.json"
+        record = (
+            json.loads(cfg_path.read_text(encoding="utf-8")).get("split_record", {})
+            if cfg_path.exists()
+            else {}
+        )
+        held = set(record.get("heldout", []))
+        runs: dict[str, dict[str, Any]] = {}
+        for t in JsonlStore(path.parent).read("traces"):
+            runs[t["run_id"]] = t
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for t in runs.values():
+            if (source, t["harness_version"]) not in counted:
+                groups.setdefault(t["harness_version"], []).append(t)
+        for version, ts in sorted(groups.items()):
+            h = [t for t in ts if t["case_id"] in held]
+            tr = [t for t in ts if t["case_id"] not in held]
+            out.append(
+                {
+                    "source": source,
+                    "harness": version,
+                    "heldout": (sum(t["outcome"]["passed"] for t in h), len(h)),
+                    "train": (sum(t["outcome"]["passed"] for t in tr), len(tr)),
+                }
+            )
+    return out
+
+
 def render(root: Path, domain: str) -> str:
     rows = [r for r in collect(root) if r["domain"] == domain]
     table = summarize(rows, MAX_K)
@@ -166,6 +203,21 @@ def render(root: Path, domain: str) -> str:
             f"| `{r['harness_version']}` | {held.get('passed', 0)}/{held.get('total', 0)} "
             f"| {train.get('passed', 0)}/{train.get('total', 0)} | {r.get('errors', 0)} |"
         )
+    partial = unfinished(root, domain, {(r["source"], r["harness_version"]) for r in rows})
+    if partial:
+        lines += ["", "## Runs of evaluations that did not finish", ""]
+        lines += [
+            "Completed runs of a harness whose evaluation was stopped before it finished. They are not in "
+            "the pass^k table; the counts are what finished, not a sample chosen afterwards.",
+            "",
+            "| source | harness | held-out passed / runs | train passed / runs |",
+            "|---|---|---|---|",
+        ]
+        for u in partial:
+            lines.append(
+                f"| `{u['source']}` | `{u['harness']}` | {u['heldout'][0]}/{u['heldout'][1]} "
+                f"| {u['train'][0]}/{u['train'][1]} |"
+            )
     decisions = _decisions(root, domain)
     if decisions:
         lines += ["", "## Admission decisions", ""]
