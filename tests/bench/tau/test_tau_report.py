@@ -87,7 +87,9 @@ def test_report_counts_every_run_and_lists_stopped_ones(tmp_path: Path) -> None:
 
 def test_report_command_writes_the_page(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     out = tmp_path / "page.md"
+    (tmp_path / "notes-airline.md").write_text("## Status\n\nhand notes\n")
     assert cli.main(["--out", str(tmp_path), "report", "--domain", "airline", "--write", str(out)]) == 0
     assert out.read_text().startswith("# tau-bench airline")
+    assert "## Status\n\nhand notes" in out.read_text()
     assert cli.main(["--out", str(tmp_path), "report"]) == 0
     assert capsys.readouterr().out.startswith("# tau-bench retail")
