@@ -184,9 +184,19 @@ cluster's access list. Those hand credentials and network access to a third-part
 operator's explicit approval; the procedural write-then-read round trip is built
 (`procedural_roundtrip`) and runs as part of the same command once the runtime is provisioned.
 
-Side effects left in place, all inside the sandbox organization: one organization-level `AUTHORIZED_TOOLS`
-policy (it restricts every agent in the organization to the six tools above), one project policy, one service
-account. Remove with the policy `DELETE` routes and `agentengine service-account delete`.
+Cleanup, done the same day because the organization is shared with other participants: both policies were
+deleted (organization policy by the signed-in CLI session, project policy by the service account). Before: the
+organization policy list held one `AUTHORIZED_TOOLS` policy and the project effective view reported
+`source: "both"`. After: `GET /api/v1/organizations/{id}/policies` returns `{"policies": [], "total": 0}`, which
+is exactly its state before the probe (it was empty), `GET /api/v1/projects/{id}/policies` returns the same, and
+`GET .../policies/effective` returns `{"policies": []}`. The organization rollout endpoint reports 198 projects in the
+organization: 8 converged and 190 `pending_publish`. In the 100 lagging projects it lists (the list is
+truncated), every one is at generation 3 with `received_generation` 0, so none of them had received any policy
+configuration, including ours, when the policies were deleted; the 190 stayed in that state for at least
+two minutes after the delete, which is the platform's own delivery lag, not ours. Only the
+`ratchet-probe` service account remains (project scope). Lesson recorded in the probe: an organization-scope
+policy must not be written to a shared organization; the demonstration needs it only to give the project policy
+something to be narrower than, so run it in an organization of its own.
 
 Reproduce: with `AGENTENGINE_PROJECT_ID`, `AGENTENGINE_ORG_ID` and `AGENTENGINE_ORG_TOOLS` set,
 `uv run python -m ratchet.atlas_features.agent_engine`.
