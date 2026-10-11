@@ -1,0 +1,14 @@
+{
+  "mode": "batch-invariant",
+  "engine": "vLLM 0.26.0",
+  "env": {"VLLM_BATCH_INVARIANT": "1", "modules": "gcc/14.2.0", "pythonpath_overlay": "amd-quark 0.13 (MXFP4 EMULATION backend)"},
+  "checkpoint": "openai/gpt-oss-120b",
+  "checkpoint_snapshot": "b5c939de8f754692c1647ca79fbf85e8c1e70f8a",
+  "served_model_name": "gpt-oss-120b-det",
+  "args": "--max-model-len 65536 --gpu-memory-utilization 0.90 --enable-auto-tool-choice --tool-call-parser openai --reasoning-parser openai_gptoss --safetensors-load-strategy lazy",
+  "attention": "FlashAttention 2 (FA4 refused under batch invariance)",
+  "gpu": "1x NVIDIA B200 (HiPerGator hpg-b200)",
+  "serve_script_sha256": "7c647405fc512f17f479f8db9375a0bb37f639761aa789a8877b59c33c93a870",
+  "concurrency": "any batch size; batch invariance makes a request's output independent of what else is batched",
+  "slurm_job": "45572252"
+}
