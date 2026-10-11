@@ -11,6 +11,7 @@ Pushes inside `$(...)`, backticks, `sh -c`/`bash -c` scripts and `eval` are foun
 mentions a push, in a commit message, an echo, a grep or single quotes, is not a push.
 """
 
+import re
 from typing import Any
 
 PROTECTED = ("main", "master")
@@ -23,6 +24,7 @@ WRAPPERS = ("sudo", "command", "env", "nohup", "time", "exec", "nice")
 SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
 SEPARATORS = ";|&\n()"
 MAX_DEPTH = 8
+REDIRECT = re.compile(r"^(?:\d*|&)(?:>>?|<|>&|<&)(.*)$")
 
 
 def closing(text: str, start: int) -> int:
@@ -35,9 +37,28 @@ def closing(text: str, start: int) -> int:
     return len(text)
 
 
+def substitutions_in(text: str) -> list[str]:
+    """Bodies of `$(...)` and backticks in text where quotes mean nothing, such as an unquoted heredoc."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        if text.startswith("$(", i):
+            end = closing(text, i + 2)
+            out.append(text[i + 2 : end])
+        elif text[i] == "`":
+            end = text.find("`", i + 1)
+            end = len(text) if end < 0 else end
+            out.append(text[i + 1 : end])
+        else:
+            end = i + (2 if text[i] == "\\" else 1) - 1
+        i = end + 1
+    return out
+
+
 class Scanner:
     """Shell words per simple command, plus the bodies of command substitutions. Quotes and backslashes
-    are honoured: nothing inside single quotes runs; `$(...)` and backticks run inside double quotes."""
+    are honoured: nothing inside single quotes runs; `$(...)` and backticks run inside double quotes. A
+    heredoc body is data: with a quoted delimiter nothing in it runs, otherwise only its substitutions."""
 
     def __init__(self, text: str) -> None:
         self.text = text
@@ -46,6 +67,7 @@ class Scanner:
         self.words: list[str] = []
         self.word: list[str] = []
         self.started = False
+        self.heredocs: list[tuple[str, bool, bool]] = []
         i = 0
         quote = ""
         while i < len(text):
@@ -67,8 +89,47 @@ class Scanner:
         self.word.append(c)
         self.started = True
 
+    def heredoc(self, i: int) -> int:
+        """Record the heredoc whose `<<` is at `i`; return the index after its delimiter word."""
+        j = i + 2
+        strip_tabs = self.text.startswith("-", j)
+        j += strip_tabs
+        while j < len(self.text) and self.text[j] in " \t":
+            j += 1
+        start = j
+        while j < len(self.text) and not self.text[j].isspace() and self.text[j] not in SEPARATORS:
+            j += 1
+        raw = self.text[start:j]
+        delimiter = raw.replace("'", "").replace('"', "").replace("\\", "")
+        self.heredocs.append((delimiter, raw != delimiter, strip_tabs))
+        return j
+
+    def bodies(self, i: int) -> int:
+        """Consume the heredoc bodies that start at `i`; return the index after the last delimiter line."""
+        for delimiter, quoted, strip_tabs in self.heredocs:
+            body: list[str] = []
+            while i < len(self.text):
+                end = self.text.find("\n", i)
+                end = len(self.text) if end < 0 else end
+                line = self.text[i:end]
+                i = end + 1
+                if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                    break
+                body.append(line)
+            if not quoted:
+                self.substitutions.extend(substitutions_in("\n".join(body)))
+        self.heredocs = []
+        return i
+
     def step(self, i: int, quote: str) -> tuple[int, str]:
         text, c = self.text, self.text[i]
+        if not quote and text.startswith("<<", i) and not text.startswith("<<<", i):
+            self.end_word()
+            return self.heredoc(i), quote
+        if not quote and c == "\n" and self.heredocs:
+            self.end_word()
+            self.end_command()
+            return self.bodies(i + 1), quote
         if quote == "'":
             if c == "'":
                 return i + 1, ""
@@ -158,8 +219,12 @@ def verdict(args: list[str], branch: str) -> str | None:
     i = 0
     while i < len(args):
         a = args[i]
-        if a in PUSH_VALUE_OPTIONS:
-            i += 2
+        redirect = REDIRECT.match(a)
+        if a in PUSH_VALUE_OPTIONS or (redirect is not None and not redirect.group(1)):
+            i += 2  # an option's value, or a redirection's target, is not a refspec
+            continue
+        if redirect is not None:
+            i += 1
             continue
         if a.split("=", 1)[0] in FORCE_FLAGS or (a.startswith("-") and not a.startswith("--") and "f" in a):
             forced = True

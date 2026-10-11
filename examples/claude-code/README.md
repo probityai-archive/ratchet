@@ -95,5 +95,14 @@ uv run python -m ratchet.export.mcp_gateway --harness harness.json --receipt rec
     --trusted-key <public key hex> -- <mcp server command> [args...]
 ```
 
+For a remote server, put the gateway in front of its Streamable HTTP endpoint and point the client at
+`http://127.0.0.1:8808/`:
+
+```bash
+uv run python -m ratchet.export.mcp_gateway --harness harness.json --receipt receipt.json \
+    --trusted-key <public key hex> --upstream https://example.org/mcp --listen 127.0.0.1:8808
+```
+
 Every `tools/call` is checked against every guard of the admitted harness before it reaches the server. A
-blocked call is answered with an error result carrying the reason.
+blocked call is answered with an error result carrying the reason. Everything else, including streamed
+responses, passes through unchanged.

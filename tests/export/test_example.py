@@ -50,6 +50,17 @@ CASES = [
     ("git push origin\\ main", "f", False),
     ("echo " + "$(" * 10 + "ls" + ")" * 10, "f", True),
     ("git status; git push --force origin master", "main", True),
+    ("cat <<'EOF' > x.py\nprint('git push --force origin main')\nEOF", "main", False),
+    ('cat <<"EOF"\n$(git push -f origin main)\nEOF', "f", False),
+    ("cat <<EOF\n$(git push -f origin main)\nEOF", "f", True),
+    ("cat <<-EOF\n\t`git push -f origin main`\n\tEOF\nls", "f", True),
+    ("python3 - <<'PY'\nprint(1)\nPY\ngit push -f origin main", "f", True),
+    ("cat <<<'git push -f origin main'", "f", False),
+    ("git push -f origin feature > main", "f", False),
+    ("git push -f origin feature 2> main.log", "f", False),
+    ("git push -f origin feature >main", "f", False),
+    ("git push -f origin main 2>&1", "f", True),
+    ("git push -f origin sha1:refs/heads/main > log 2>&1", "f", True),
 ]
 
 
