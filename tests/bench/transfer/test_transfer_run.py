@@ -118,7 +118,7 @@ def test_run_transfer_pairs_fresh_repeats_and_renders() -> None:
     with pytest.raises(ValueError):
         render([], {})
     only = render([], {"Status": "waiting"}, [(payload, "a" * 64)])
-    assert "No transfer run" in only and "- Status: waiting" in only and "## A/A control: m" in only
+    assert "No transfer run" in only and "## A/A control: m, checkpoint default sampling" in only
 
 
 def test_margin_uses_base_noise() -> None:
@@ -153,7 +153,7 @@ def test_cli_run_and_render_with_candidate_file(tmp_path: Path, monkeypatch: pyt
     md = tmp_path / "t.md"
     assert cli.main(["render", str(out), "--out", str(md), "--note", "K=V", "--control", str(out)]) == 0
     text = md.read_text(encoding="utf-8")
-    assert f"{n}/{n}" in text and "## A/A control: m" in text
+    assert f"{n}/{n}" in text and "## A/A control: m, temperature 0.0" in text
     with pytest.raises(SystemExit):
         cli.main(["run", "--base-url", "u", "--model", "m", "--out", str(out)])
 

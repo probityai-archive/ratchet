@@ -165,5 +165,12 @@ def render(
             "",
         ]
         for res, digest in controls:
-            lines += _model_section(res, digest, title=f"A/A control: {res['meta']['model']}")
+            smp = res["meta"].get("sampling")
+            how = (
+                "checkpoint default sampling"
+                if not smp
+                else f"temperature {smp['temperature']}"
+                + ("" if smp["seed"] is None else f", seed {smp['seed']}")
+            )
+            lines += _model_section(res, digest, title=f"A/A control: {res['meta']['model']}, {how}")
     return "\n".join(lines).rstrip() + "\n"
