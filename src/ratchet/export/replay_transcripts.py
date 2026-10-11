@@ -19,7 +19,7 @@ import json
 import sys
 import time
 from collections import Counter
-from collections.abc import Collection, Iterable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, overload
@@ -175,8 +175,10 @@ def replay_transcripts(
     *,
     chunk: int = 20000,
     expect: Collection[str] | None = None,
+    progress: Callable[[TranscriptReplayReport], None] | None = None,
 ) -> TranscriptReplayReport:
-    """Replay `guard` over every tool call in `sessions`, in batches of about `chunk` checks."""
+    """Replay `guard` over every tool call in `sessions`, in batches of about `chunk` checks. `progress`
+    is called after each batch."""
     report = TranscriptReplayReport(
         guard.id,
         sha256_hex(guard.source.encode("utf-8")),
@@ -192,6 +194,8 @@ def replay_transcripts(
         _record(report, sites, decisions)
         items.clear()
         sites.clear()
+        if progress is not None:
+            progress(report)
 
     for label, path in sessions:
         started = time.perf_counter()
@@ -236,6 +240,16 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
+def _progress(report: TranscriptReplayReport) -> None:
+    """Counts only, to stderr."""
+    print(
+        f"sessions {report.sessions} calls {report.calls} "
+        f"fires {len(report.fires)} errors {len(report.errors)}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Exit 0 when the replay meets the expectation (or, without one, ran with no guard error)."""
     args = _parser().parse_args(argv)
@@ -244,7 +258,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.expect is not None:
         expect = [x.strip() for x in args.expect.read_text(encoding="utf-8").splitlines() if x.strip()]
     with GuardRuntime(workers=args.workers) as runtime:
-        report = replay_transcripts(guard, discover(args.paths), runtime, chunk=args.chunk, expect=expect)
+        report = replay_transcripts(
+            guard, discover(args.paths), runtime, chunk=args.chunk, expect=expect, progress=_progress
+        )
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(report.to_payload(), indent=2) + "\n", encoding="utf-8")

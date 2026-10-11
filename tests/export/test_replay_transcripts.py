@@ -131,6 +131,19 @@ def test_summary_carries_counts_and_never_content(tmp_path: Path) -> None:
     assert TranscriptReplayReport("g", "x").checks_per_s == 0.0
 
 
+def test_progress_is_reported_after_each_batch(tmp_path: Path) -> None:
+    seen: list[int] = []
+    with GuardRuntime(workers=1) as rt:
+        replay_transcripts(
+            Guard("no-rm", "", NO_RM),
+            discover([corpus(tmp_path)]),
+            rt,
+            chunk=1,
+            progress=lambda r: seen.append(r.calls),
+        )
+    assert seen == [1, 3, 5]  # the subagent file sorts first: one call, then two, then two
+
+
 def test_command_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = corpus(tmp_path / "corpus")
     guard = tmp_path / "no_rm.py"
