@@ -73,21 +73,22 @@ class DeliveryRecorder:
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def install(self) -> None:
-        requests: Any = importlib.import_module("requests")
-        self._orig = requests.post
+        sessions: Any = importlib.import_module("requests.sessions")
+        self._orig = sessions.Session.request
+        orig = self._orig
 
-        def recording_post(url: str, *args: Any, **kwargs: Any) -> Any:
-            response = self._orig(url, *args, **kwargs)
-            if "raindrop.ai" in url:
-                self._note(url, kwargs.get("json"), response)
+        def recording_request(session: Any, method: str, url: str, *args: Any, **kwargs: Any) -> Any:
+            response = orig(session, method, url, *args, **kwargs)
+            if "raindrop.ai" in str(url):
+                self._note(str(url), kwargs.get("json"), response)
             return response
 
-        requests.post = recording_post
+        sessions.Session.request = recording_request
 
     def uninstall(self) -> None:
-        requests: Any = importlib.import_module("requests")
+        sessions: Any = importlib.import_module("requests.sessions")
         if self._orig is not None:
-            requests.post = self._orig
+            sessions.Session.request = self._orig
             self._orig = None
 
     def _note(self, url: str, payload: Any, response: Any) -> None:

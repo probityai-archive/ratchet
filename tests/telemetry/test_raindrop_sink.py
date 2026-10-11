@@ -446,7 +446,13 @@ def test_key_builds_a_real_sdk_client_lazily(monkeypatch: pytest.MonkeyPatch, tm
 
     monkeypatch.setattr("importlib.import_module", lambda name: FakeModule)
     sink = RaindropSink("secret-key", project_id="demo", ledger_path=tmp_path / "l.json", tracing=True)
-    assert sink.enabled and seen == {"api_key": "secret-key", "project_id": "demo", "tracing_enabled": True}
+    assert sink.enabled
+    assert seen == {
+        "api_key": "secret-key",
+        "project_id": "demo",
+        "tracing_enabled": True,
+        "auto_instrument": False,
+    }
 
 
 def test_client_construction_failure_disables_the_sink(monkeypatch: pytest.MonkeyPatch) -> None:

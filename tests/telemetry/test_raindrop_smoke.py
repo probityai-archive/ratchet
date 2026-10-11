@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import types
 from pathlib import Path
@@ -68,9 +69,7 @@ def test_run_smoke_sends_labelled_events(tmp_path: Path) -> None:
     assert {"task_success", "task_failure", "guard_block", "admitted"} <= names
 
 
-def test_delivery_recorder_notes_raindrop_posts_only() -> None:
-    calls: list[str] = []
-
+def test_delivery_recorder_notes_raindrop_posts_only(monkeypatch: pytest.MonkeyPatch) -> None:
     class Resp:
         status_code = 200
 
@@ -82,37 +81,35 @@ def test_delivery_recorder_notes_raindrop_posts_only() -> None:
                 raise self.body
             return self.body
 
-    def post(url: str, *args: Any, **kwargs: Any) -> Resp:
-        calls.append(url)
-        if "other" in url:
-            return Resp({})
-        if url.endswith("/bad"):
-            return Resp(ValueError("no json"))
-        return Resp({"events": [{"event_id": "e1"}, {"event_id": "e2"}]})
+    class Session:
+        calls: list[str] = []
 
-    fake = types.SimpleNamespace(post=post)
-    import importlib
+        def request(self, method: str, url: str, **kwargs: Any) -> Resp:
+            Session.calls.append(url)
+            if "other" in url:
+                return Resp({})
+            if url.endswith("/bad"):
+                return Resp(ValueError("no json"))
+            return Resp({"events": [{"event_id": "e1"}, {"event_id": "e2"}]})
 
+    original = Session.request
+    fake = types.SimpleNamespace(Session=Session)
     real = importlib.import_module
-    importlib_patch = pytest.MonkeyPatch()
-    importlib_patch.setattr("importlib.import_module", lambda n: fake if n == "requests" else real(n))
-    try:
-        rec = smoke.DeliveryRecorder()
-        rec.install()
-        fake.post("https://api.raindrop.ai/v1/events/track", json=[{"a": 1}, {"a": 2}])
-        fake.post("https://api.raindrop.ai/v1/signals/track", json={"x": 1})
-        fake.post("https://api.raindrop.ai/v1/bad", json=[])
-        fake.post("https://other.example/other", json=[])
-        rec.uninstall()
-        rec.uninstall()
-        assert fake.post is post
-    finally:
-        importlib_patch.undo()
-    assert len(rec.calls) == 3
+    monkeypatch.setattr("importlib.import_module", lambda n: fake if n == "requests.sessions" else real(n))
+    rec = smoke.DeliveryRecorder()
+    rec.install()
+    session = Session()
+    session.request(method="post", url="https://api.raindrop.ai/v1/events/track", json=[{"a": 1}, {"a": 2}])
+    session.request("post", "https://api.raindrop.ai/v1/signals/track", json={"x": 1})
+    session.request("post", "https://api.raindrop.ai/v1/bad", json=[])
+    session.request("post", "https://other.example/other", json=[])
+    rec.uninstall()
+    rec.uninstall()
+    assert Session.request is original
+    assert len(rec.calls) == 3 and len(Session.calls) == 4
     summary = rec.summary()
     assert summary["/v1/events/track"] == {"posts": 1, "statuses": [200], "items": 2}
     assert rec.calls[0]["acknowledged_ids"] == ["e1", "e2"] and rec.calls[2]["acknowledged_ids"] == []
-    assert len(calls) == 4
 
 
 def test_main_without_a_key_exits_2(

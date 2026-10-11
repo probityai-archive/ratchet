@@ -41,6 +41,7 @@ import queue
 import subprocess
 import threading
 import time
+import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -366,8 +367,15 @@ class RaindropSink:
     @staticmethod
     def _make_client(write_key: str, project_id: str | None, tracing: bool) -> Any | None:
         try:
-            module = importlib.import_module("raindrop")
-            return module.Raindrop(api_key=write_key, project_id=project_id, tracing_enabled=tracing)
+            with warnings.catch_warnings():
+                # raindrop-ai 0.0.75 imports traceloop-sdk, whose models still use pydantic's class-based
+                # `Config`. That warning comes from their code, fires once at import, and is the only one
+                # ignored here.
+                warnings.filterwarnings("ignore", message="Support for class-based `config` is deprecated")
+                module = importlib.import_module("raindrop")
+                return module.Raindrop(
+                    api_key=write_key, project_id=project_id, tracing_enabled=tracing, auto_instrument=False
+                )
         except Exception:
             log.exception("raindrop client not created; telemetry is off")
             return None
