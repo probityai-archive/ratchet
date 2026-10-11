@@ -1,0 +1,31 @@
+# Local Atlas (mongod + mongot) for development and tests: Atlas Search and Vector Search work offline.
+# Single-node replica set, so change streams and transactions work. Start: docker compose -f docker/compose.yaml up -d --wait
+services:
+  atlas:
+    image: mongodb/mongodb-atlas-local:8.3.9-20260928T091948Z
+    container_name: ratchet-atlas
+    hostname: ratchet-atlas
+    ports:
+      - "127.0.0.1:27018:27017"
+    environment:
+      MONGODB_INITDB_ROOT_USERNAME: ratchet
+      MONGODB_INITDB_ROOT_PASSWORD: ratchet-local-dev
+    # WiredTiger keeps a file per collection and index; the default limit panics mongod under test load
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    volumes:
+      - ratchet-atlas-data:/data/db
+      - ratchet-atlas-config:/data/configdb
+    # healthy means mongod AND the search service (mongot) answer, so search-index calls work at once
+    healthcheck:
+      test: ["CMD", "mongosh", "-u", "ratchet", "-p", "ratchet-local-dev", "--quiet", "--eval", "db.getSiblingDB('healthprobe').nothing.aggregate([{$$listSearchIndexes:{}}]).toArray().length"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+
+volumes:
+  ratchet-atlas-data:
+  ratchet-atlas-config:
