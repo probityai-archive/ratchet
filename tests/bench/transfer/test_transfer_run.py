@@ -350,3 +350,39 @@ def test_candidate_file_carries_its_decision(tmp_path: Path) -> None:
     got, extra = cli._candidate(argparse.Namespace(candidate_file=str(f), candidate="latest"), None)
     assert got == h
     assert extra["decision_id"] == "d9" and extra["derived_on"] == "luna" and extra["store"] == "atlas/db"
+
+
+def test_sampling_follows_flags_then_derivation_then_default() -> None:
+    from ratchet.bench.transfer.run import sampling_for
+
+    d = {"evaluator": {"model_config": {"temperature": 0.0, "seed": 7}}}
+    assert sampling_for(None, None, d) == {
+        "temperature": 0.0, "temperature_source": "derivation", "seed": 7, "seed_source": "derivation",
+    }  # fmt: skip
+    assert sampling_for(0.5, 3, d)["temperature_source"] == "flag"
+    assert sampling_for(0.5, 3, d)["seed"] == 3
+    assert sampling_for(None, None, None) == {
+        "temperature": 0.0, "temperature_source": "default", "seed": None, "seed_source": "none",
+    }  # fmt: skip
+
+
+def test_seed_transport_adds_seed_to_chat_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ratchet.bench.transfer.run import SeedTransport, default_client
+
+    seen: list[httpx.Request] = []
+
+    def fake_handle(_self: httpx.HTTPTransport, req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        return httpx.Response(200)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", fake_handle)
+    t = SeedTransport(7)
+    t.handle_request(httpx.Request("POST", "http://h/v1/chat/completions", json={"model": "m"}))
+    t.handle_request(httpx.Request("GET", "http://h/v1/models"))
+    assert json.loads(seen[0].content) == {"model": "m", "seed": 7}
+    assert seen[0].headers["content-length"] == str(len(seen[0].content))
+    assert seen[1].method == "GET"
+    with default_client("http://h/v1", "k", "m", temperature=0.0, seed=1) as c:
+        assert c.name == "m"
+    with default_client("http://h/v1", "k", "m") as c:
+        assert c.name == "m"

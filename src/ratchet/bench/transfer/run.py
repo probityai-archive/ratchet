@@ -8,6 +8,7 @@ and digests, the case-suite digest and every per-case result, so the report can 
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -208,9 +209,56 @@ class SingleCallModel:
         return replace(turn, message=message, tool_calls=[first], arg_errors=errors)
 
 
-def default_client(base_url: str, api_key: str, model_name: str) -> ModelClient:
-    config = ModelConfig(base_url=base_url.rstrip("/"), model=model_name, api_key=api_key, timeout_s=300.0)
-    return ModelClient(config)
+class SeedTransport(httpx.HTTPTransport):
+    """Adds a fixed sampling seed to every chat-completions request body; nothing else changes."""
+
+    def __init__(self, seed: int) -> None:
+        super().__init__()
+        self.seed = seed
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/chat/completions"):
+            body = json.loads(request.content)
+            body["seed"] = self.seed
+            content = json.dumps(body).encode("utf-8")
+            headers = [(k, v) for k, v in request.headers.raw if k.lower() != b"content-length"]
+            headers.append((b"content-length", str(len(content)).encode()))
+            request = httpx.Request(request.method, request.url, headers=headers, content=content)
+        return super().handle_request(request)
+
+
+def sampling_for(
+    temperature: float | None, seed: int | None, decision: dict[str, Any] | None
+) -> dict[str, Any]:
+    """The sampling settings for a transfer run: explicit flags first, else the derivation run's own frozen
+    model configuration, else temperature 0 and no seed. The source of each value is recorded."""
+    cfg = ((decision or {}).get("evaluator") or {}).get("model_config") or {}
+    if temperature is not None:
+        t, t_src = temperature, "flag"
+    elif cfg.get("temperature") is not None:
+        t, t_src = float(cfg["temperature"]), "derivation"
+    else:
+        t, t_src = 0.0, "default"
+    if seed is not None:
+        s, s_src = seed, "flag"
+    elif cfg.get("seed") is not None:
+        s, s_src = int(cfg["seed"]), "derivation"
+    else:
+        s, s_src = None, "none"
+    return {"temperature": t, "temperature_source": t_src, "seed": s, "seed_source": s_src}
+
+
+def default_client(
+    base_url: str, api_key: str, model_name: str, *, temperature: float | None = None, seed: int | None = None
+) -> ModelClient:
+    config = ModelConfig(
+        base_url=base_url.rstrip("/"),
+        model=model_name,
+        api_key=api_key,
+        timeout_s=300.0,
+        temperature=temperature,
+    )
+    return ModelClient(config, transport=SeedTransport(seed) if seed is not None else None)
 
 
 def persist(db: Any, payload: dict[str, Any], reports: Sequence[EvalReport]) -> dict[str, Any]:

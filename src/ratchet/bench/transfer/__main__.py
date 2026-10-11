@@ -31,6 +31,7 @@ from ratchet.bench.transfer.run import (
     probe_tool_call,
     result_payload,
     run_transfer,
+    sampling_for,
     trace_summary,
 )
 from ratchet.types import Harness
@@ -84,6 +85,7 @@ def _candidate(args: argparse.Namespace, store: Any) -> tuple[Harness, dict[str,
                 "derived_on": derived_on(decision),
                 "evaluator_version": (decision.get("evaluator") or {}).get("version"),
                 "store": raw.get("store"),
+                "decision": decision,
             }
         return harness_from(raw.get("harness", raw)), extra
     if store is None:
@@ -103,6 +105,7 @@ def _candidate(args: argparse.Namespace, store: Any) -> tuple[Harness, dict[str,
         "derived_on": derived_on(decision),
         "evaluator_version": (decision.get("evaluator") or {}).get("version"),
         "admitted_decisions_in_store": len(store.decisions({"admitted": True})),
+        "decision": decision,
     }
 
 
@@ -137,12 +140,15 @@ def cmd_run(args: argparse.Namespace) -> int:
         source = Store(uri, args.store_db)
     base = seed_harness()
     cand, cand_extra = _candidate(args, source)
+    sampling = sampling_for(args.temperature, args.seed, cand_extra.pop("decision", None))
     splits = [s for s in args.splits.split(",") if s]
     cases = [c for s in splits for c in by_split(s)]
     info = endpoint_info(args.base_url, _key())
     _log(f"{args.model}: base {base.version}, cand {cand.version}, {len(cases)} cases, splits {splits}")
     started = now_iso()
-    with default_client(args.base_url, _key(), args.model) as client:
+    with default_client(
+        args.base_url, _key(), args.model, temperature=sampling["temperature"], seed=sampling["seed"]
+    ) as client:
         model: Any = SingleCallModel(client) if args.single_tool_call else client
         base_reports, cand_reports = run_transfer(
             base,
@@ -165,6 +171,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "case_counts": {s: sum(1 for c in cases if c.split == s) for s in splits},
         "repeats": args.repeats,
         "workers": args.workers,
+        "sampling": sampling,
         "started_at": started,
         "finished_at": now_iso(),
         "commit": _commit(),
@@ -222,6 +229,8 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--candidate-file")
     rn.add_argument("--splits", default="heldout,audit")
     rn.add_argument("--repeats", type=int, default=2)
+    rn.add_argument("--temperature", type=float, help="default: the derivation run's, else 0")
+    rn.add_argument("--seed", type=int, help="default: the derivation run's, else none")
     rn.add_argument("--workers", type=int, default=8)
     rn.add_argument("--store-db", default=os.environ.get("RATCHET_DB", "ratchet"))
     rn.add_argument("--trace-db", default="ratchet_heldout", help="evaluator-only database; empty to skip")

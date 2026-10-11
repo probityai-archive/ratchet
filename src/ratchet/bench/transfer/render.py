@@ -19,6 +19,13 @@ def margin_met(summary: dict[str, Any]) -> tuple[bool, int, int]:
     return gain >= need, gain, need
 
 
+def _sampling(s: dict[str, Any] | None) -> str:
+    if not s:
+        return "sampling: server defaults from the checkpoint's generation config (no temperature sent)"
+    seed = "no seed" if s["seed"] is None else f"seed {s['seed']} ({s['seed_source']})"
+    return f"sampling: temperature {s['temperature']} ({s['temperature_source']}), {seed}"
+
+
 def _passes(xs: Sequence[int], n: int) -> str:
     return ", ".join(f"{x}/{n}" for x in xs)
 
@@ -32,8 +39,7 @@ def _model_section(res: dict[str, Any], digest: str, title: str | None = None) -
     out = [
         f"## {title or meta['model']}",
         "",
-        f"- Served: {served}; vLLM `{ep.get('server_version')}`; sampling: server defaults from the "
-        "checkpoint's generation config (the client sends no temperature).",
+        f"- Served: {served}; vLLM `{ep.get('server_version')}`; {_sampling(meta.get('sampling'))}.",
         f"- Window: {meta['started_at']} to {meta['finished_at']} (UTC); {meta['repeats']} fresh repeats; "
         f"{meta['workers']} concurrent runs; result file sha256 `{digest}`.",
         f"- Single tool call per turn: {'yes' if meta.get('single_tool_call') else 'no'} "
