@@ -340,7 +340,8 @@ def test_decide_rehashes_the_embedded_runtime(tmp_path: Path) -> None:
         ("def check(call, view, history):\n    return getattr(call, 'name')\n", True),
         ("def check(call, view, history):\n    try:\n        1/0\n    except Exception as e:\n"
          "        return str(e.__traceback__.tb_frame)\n", True),
-        ("def check(call, view, history):\n    return 'history'\n", True),
+        ("def check(call, view, history):\n    return 'history' if call.name == 'eval' else None\n", False),
+        ("def check(call, view, history):\n    return '{0.gi_frame}'.format(call)\n", True),
         ("def check(call, view, history):\n    return None\ncheck = print\n", True),
         ("def check(call, view, history):\n    def check(): pass\n    return None\n", True),
         ("def check(call, view, *rest):\n    return None\n", True),

@@ -212,6 +212,12 @@ INTROSPECTION = frozenset(
 )  # fmt: skip
 
 
+# Attribute names that lead from an object to a frame, a code object or a function's namespace.
+FRAME_WORDS = tuple(
+    sorted(w for w in INTROSPECTION if w.startswith(("f_", "tb_", "gi_", "cr_", "ag_", "_", "__")))
+)
+
+
 def _check_def(tree: ast.Module) -> ast.FunctionDef | None:
     """The module's one plain `def check(call, view, history)`, or None when it has no such single def."""
     defs = [
@@ -233,8 +239,8 @@ def _could_reach(node: ast.AST, hidden: str, check: ast.FunctionDef) -> bool:
         return rebinds or node.id == hidden or node.id in INTROSPECTION
     if isinstance(node, ast.Attribute):
         return node.attr in INTROSPECTION
-    if isinstance(node, ast.Constant):
-        return node.value == hidden or node.value in INTROSPECTION
+    if isinstance(node, ast.Constant):  # a format field such as "{0.gi_frame}" reads an attribute by name
+        return isinstance(node.value, str) and any(word in node.value for word in FRAME_WORDS)
     if isinstance(node, ast.Import | ast.ImportFrom):
         modules = [node.module or ""] if isinstance(node, ast.ImportFrom) else [a.name for a in node.names]
         named = [m.split(".")[0] for m in modules] + [a.name for a in node.names]
@@ -246,9 +252,9 @@ def _could_reach(node: ast.AST, hidden: str, check: ast.FunctionDef) -> bool:
 
 def reads_history(source: str) -> bool:
     """False only when the guard provably never sees its history: the module defines `check` once, at top
-    level, undecorated, with exactly three plain parameters; the third is never named anywhere, not even as
-    a string; `check` is never rebound; and nothing names a way into frames or code objects. Anything else
-    counts as reading."""
+    level, undecorated, with exactly three plain parameters; the third is never named anywhere; `check` is
+    never rebound; and nothing names a way into frames or code objects, not even inside a string. Anything
+    else counts as reading."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
