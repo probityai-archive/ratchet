@@ -53,3 +53,15 @@ def test_summary_and_grouping() -> None:
     assert grouped == {"a": [True, False], "b": [True]}
     s = summary(grouped, [1, 2])
     assert s == {"tasks": 2, "trials_per_task": 1, "runs": 3, "successes": 2, "pass^1": 0.75}
+
+
+def test_heldout_subset_is_seeded_and_bounded() -> None:
+    a = split_cases(115, 500, seed=3, n_train=5, n_heldout=10)
+    held = [c.index for c in a if c.split == "heldout"]
+    assert len(held) == 10 and held == sorted(held) and len(set(held)) == 10
+    assert a == split_cases(115, 500, seed=3, n_train=5, n_heldout=10)
+    assert sum(c.split == "heldout" for c in default_cases(n_train=5, n_heldout=7)) == 7
+    with pytest.raises(ValueError):
+        split_cases(115, 500, n_heldout=0)
+    with pytest.raises(ValueError):
+        default_cases("airline", n_heldout=5)
