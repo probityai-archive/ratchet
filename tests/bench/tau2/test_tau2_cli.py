@@ -349,3 +349,21 @@ def test_a_run_over_several_endpoints_records_each_and_finishes(
     users.clear()
     _run(tmp_path / "own", "--base-url", "http://a/v1,http://b/v1", "--user-base-url", "http://u/v1")
     assert len(users) == 4 and all(u.llm_args == {} for u in users)
+
+
+def test_a_stopped_run_shows_its_reason_until_it_is_resumed(scripted: SayDone, tmp_path: Path) -> None:
+    root = _run(tmp_path)
+    rows = read_jsonl(root / "runs.jsonl")
+    (root / "runs.jsonl").write_text(json.dumps(rows[0]) + "\n", encoding="utf-8")
+    page = render_report(tmp_path)
+    assert "Incomplete: 1 of 4 conversations recorded; no stop reason" in page
+    assert "| 1 / 4 | incomplete, no reason recorded |" in page
+    assert cli.main(["--out", str(tmp_path), "stop", str(root), "--reason", "endpoint cancelled"]) == 0
+    page = render_report(tmp_path)
+    assert "Stopped after 1 of 4 conversations: endpoint cancelled" in page and "| stopped |" in page
+    _run(tmp_path, "--resume")
+    config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+    assert "stopped" not in config and config["stops"][0]["reason"] == "endpoint cancelled"
+    page = render_report(tmp_path)
+    assert "Stopped once after 1 conversations and resumed: endpoint cancelled" in page
+    assert "| 4 / 4 | complete |" in page

@@ -4,6 +4,8 @@ fetch-data  fetch the task data of the pinned tau2-bench commit into the cache (
 run         run one harness over every base task of a domain (or named tasks) at N trials; each finished
             conversation is written at once, in tau2-bench's directory format and as a Ratchet trace
 finalize    rebuild a run's `results.json` from its simulation files (after an interrupted run)
+stop        record why an unfinished run stopped, so its page says so; a later --resume moves the reason
+            to the run's stop history
 summary     counts and pass^k for every run under `--out`, with denominators
 report      write the summary as a Markdown results page (numbers generated, never typed)
 package     build a leaderboard submission (custom type) from finished runs: `submission.json` and one
@@ -328,6 +330,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not (root / "config.json").exists():
         (root / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
         (root / "harness.json").write_text(json.dumps(asdict(harness), indent=2), encoding="utf-8")
+    else:
+        resume_stopped(root)
     configure_user_endpoint(user_url.split(",")[0].strip(), api_key)
     set_judge(judge)
     tconfig = run_config(
@@ -381,6 +385,29 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     finalize(root, info, [t for t in load_tasks(args.domain) if str(t.id) in set(config["task_ids"])])
     print(json.dumps(summarize_run(root), indent=2), flush=True)
+    return 0
+
+
+def resume_stopped(root: Path) -> None:
+    """A resumed run is no longer stopped: its recorded stop moves to the run's stop history."""
+    path = root / "config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    if "stopped" in config:
+        config["stops"] = [*config.get("stops", []), config.pop("stopped")]
+        path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def cmd_stop(args: argparse.Namespace) -> int:
+    """Record why an unfinished run stopped (the reason is printed on the results page)."""
+    root = Path(args.run)
+    path = root / "config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config["stopped"] = {
+        "reason": args.reason,
+        "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "units_recorded": len(read_jsonl(root / "runs.jsonl")),
+    }
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     return 0
 
 
@@ -578,6 +605,10 @@ def parser() -> argparse.ArgumentParser:
     up.add_argument("run")
     up.add_argument("--trace-db", default="ratchet_heldout")
     up.set_defaults(func=cmd_upload)
+    st = sub.add_parser("stop")
+    st.add_argument("run")
+    st.add_argument("--reason", required=True)
+    st.set_defaults(func=cmd_stop)
     fz = sub.add_parser("finalize")
     fz.add_argument("run")
     fz.set_defaults(func=cmd_finalize)

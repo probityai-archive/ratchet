@@ -52,6 +52,19 @@ def run_section(root: Path) -> list[str]:
         f"model endpoint after {config['infra_retries']} retries {s['lost_to_endpoint']}.",
         f"- Successes: {s['successes']} of {s['units_recorded']} recorded conversations.",
     ]
+    if s["units_recorded"] < s["units_planned"]:
+        stop = config.get("stopped")
+        lines.append(
+            f"- Stopped after {stop['units_recorded']} of {s['units_planned']} conversations: "
+            f"{stop['reason']}"
+            if stop
+            else f"- Incomplete: {s['units_recorded']} of {s['units_planned']} conversations recorded; "
+            "no stop reason is recorded for this run."
+        )
+    for past in config.get("stops", []):
+        lines.append(
+            f"- Stopped once after {past['units_recorded']} conversations and resumed: {past['reason']}"
+        )
     tau2 = s.get("tau2")
     if tau2:
         ks = " | ".join(f"pass^{k} {_pct(v)}" for k, v in sorted(tau2["pass_hat_k"].items()))
@@ -78,7 +91,10 @@ def run_section(root: Path) -> list[str]:
 def render_report(out: Path) -> str:
     runs = _all_runs(out)
     lines = [
-        "# tau2-bench results",
+        "# tau2-bench: Ratchet results",
+        "",
+        "tau2-bench airline, retail and telecom run through Ratchet's worker loop: pass^k per run, with "
+        "every planned, recorded and lost conversation counted and every stopped run listed with its reason.",
         "",
         f"Generated {time.strftime('%Y-%m-%d %H:%M %Z')} by `python -m ratchet.bench.tau2 report` from "
         "the run records under the run directory; every number below is computed from those records.",
@@ -97,9 +113,36 @@ def render_report(out: Path) -> str:
         "## Runs",
         "",
     ]
+    lines += [*summary_table(runs), ""]
     for r in runs:
         lines += run_section(r)
     return "\n".join(lines)
+
+
+def summary_table(runs: list[Path]) -> list[str]:
+    """One row per run: status, denominators and pass^k with lost units counted as failures."""
+    ks = max(int(json.loads((r / "config.json").read_text(encoding="utf-8"))["trials"]) for r in runs)
+    head = " | ".join(f"pass^{k}" for k in range(1, ks + 1))
+    lines = [
+        f"| domain | run | agent / user model | tasks x trials | recorded / planned | status | {head} |",
+        "|---|---|---|---|---|---|" + "---|" * ks,
+    ]
+    for r in runs:
+        s = summarize_run(r)
+        config = json.loads((r / "config.json").read_text(encoding="utf-8"))
+        strict = s.get("pass_hat_k_lost_as_fail") or {}
+        status = (
+            "complete"
+            if strict
+            else ("stopped" if config.get("stopped") else "incomplete, no reason recorded")
+        )
+        cells = " | ".join(_pct(strict.get(k)) if k in strict else "" for k in range(1, ks + 1))
+        lines.append(
+            f"| {s['domain']} | `{r.name}` | `{s['agent_model']}` / `{s['user_model']}` | "
+            f"{s['tasks']} x {s['trials']} | {s['units_recorded']} / {s['units_planned']} | {status} | "
+            f"{cells} |"
+        )
+    return lines
 
 
 def cmd_report(args: argparse.Namespace) -> int:
