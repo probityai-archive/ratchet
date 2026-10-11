@@ -144,6 +144,9 @@ def test_overview_names_the_newest_version_and_its_latest_heldout_run() -> None:
     assert "`v1` (e9)" in row
     results["versions"] = ["v0"]
     assert "none promoted | | | |" in overview_row(results)
+    results["status"] = "stopped: a long reason"
+    assert "| stopped, 1 gen |" in overview_row(results)
+    results["status"] = "in progress"
     results["metrics"] = []
     assert overview_row(results).startswith("| slack | `m` | in progress, 1 gen | | | | none promoted")
     assert document([], "pre").startswith("# AgentDojo results\n\npre\n")

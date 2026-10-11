@@ -145,7 +145,7 @@ def overview_row(results: dict[str, Any]) -> str:
     gens = len(results.get("generations", []))
     label = f"`{last_version}` ({latest['eval_id']})" if latest else "none promoted"
     return (
-        f"| {p['suite']} | `{p['model']}` | {results.get('status', '')}, {gens} gen "
+        f"| {p['suite']} | `{p['model']}` | {str(results.get('status', '')).split(':')[0]}, {gens} gen "
         + _heldout_cells(base)
         + f"| {label} "
         + _heldout_cells(latest)
