@@ -3,6 +3,7 @@
 trial    run one harness once over a split of one domain; each trace is written the moment its run ends
 evolve   run `ratchet.improve.loop.evolve` from the domain's seed harness over the train / held-out split
 summary  pass^1 .. pass^k per domain, harness and split, from every recorded run (trials and evolve runs)
+report   the same as a Markdown page with every evaluation and admission decision
 
 Every run lands under `--out` (default `private/bench/tau`, never committed):
   runs/<domain>/<harness>/<split>-trial-<n>/   config.json, harnesses.jsonl, traces.jsonl, evals.jsonl
@@ -25,7 +26,7 @@ from typing import Any
 
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ModelClient, ModelConfig
-from ratchet.bench.tau.metrics import by_task, summary
+from ratchet.bench.tau.report import collect, render, summarize
 from ratchet.bench.tau.runner import TauRunner, configure_user_endpoint, seed_harness, tau_bench_commit
 from ratchet.bench.tau.store import JsonlStore
 from ratchet.bench.tau.tasks import DEFAULT_SEED, DOMAINS, Domain, TauCase, default_cases, split_record
@@ -100,7 +101,7 @@ def _endpoint(args: argparse.Namespace) -> tuple[str, str]:
 
 
 def _all_cases(args: argparse.Namespace) -> list[TauCase]:
-    return default_cases(args.domain, seed=args.seed, n_train=args.n_train)
+    return default_cases(args.domain, seed=args.seed, n_train=args.n_train, n_heldout=args.n_heldout)
 
 
 def _config(args: argparse.Namespace, cases: list[TauCase], **extra: Any) -> dict[str, Any]:
@@ -237,38 +238,17 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     return 0
 
 
-def collect(root: Path) -> list[dict[str, Any]]:
-    """Every recorded evaluation report: trial reports and every evaluation an evolve run persisted."""
-    rows: list[dict[str, Any]] = []
-    for path in sorted(root.rglob("evals.jsonl")):
-        domain = _domain_of(path, root)
-        for rec in JsonlStore(path.parent).read("evals"):
-            rep = rec["report"]
-            if rep.get("type") == "eval" and "results" in rep:
-                rows.append({**rep, "domain": domain, "source": str(path.parent.relative_to(root))})
-    return rows
-
-
-def _domain_of(path: Path, root: Path) -> str:
-    parts = path.relative_to(root).parts
-    return next((p for p in parts if p in DOMAINS), "unknown")
-
-
-def summarize(rows: list[dict[str, Any]], max_k: int) -> list[dict[str, Any]]:
-    table: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-    for rep in rows:
-        for r in rep["results"]:
-            table.setdefault((rep["domain"], rep["harness_version"], r["split"]), []).append(r)
-    out = []
-    for (domain, version, split), results in sorted(table.items()):
-        s = summary(by_task(results), range(1, max_k + 1))
-        s["errors"] = sum(1 for r in results if r.get("error"))
-        out.append({"domain": domain, "harness": version, "split": split, **s})
-    return out
-
-
 def cmd_summary(args: argparse.Namespace) -> int:
     print(json.dumps(summarize(collect(Path(args.out)), args.max_k), indent=2))
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    text = render(Path(args.out), args.domain)
+    if args.write:
+        Path(args.write).write_text(text, encoding="utf-8")
+    else:
+        print(text, end="")
     return 0
 
 
@@ -281,6 +261,7 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--workers", type=int, default=8)
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p.add_argument("--n-train", type=int, default=None)
+    p.add_argument("--n-heldout", type=int, default=None)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -306,6 +287,10 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("summary")
     s.add_argument("--max-k", type=int, default=4)
     s.set_defaults(func=cmd_summary)
+    r = sub.add_parser("report")
+    r.add_argument("--domain", choices=list(DOMAINS), default="retail")
+    r.add_argument("--write", default="")
+    r.set_defaults(func=cmd_report)
     return p
 
 
