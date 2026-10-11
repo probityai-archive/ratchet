@@ -30,10 +30,12 @@ ran. Nothing was re-run or selected afterwards.
 
 **Agent models.** `gpt-5.6-luna` is the assigned agent model. Its baseline targeted ASR measured 0/32
 (banking), 0/20 (slack), 0/40 (travel) and 0/140 (workspace) on held-out attacked episodes, which leaves
-no security headroom to measure, so every suite was also run with `gpt-oss-120b-medium`, whose baseline
-ASR on an 8-episode banking probe was 3/8. (`gemini-3.1-flash-lite`, 4/8 on the same probe, was run first;
-its provider quota ran out mid-run with HTTP 429 RESOURCE_EXHAUSTED, so those runs were stopped and are
-not reported.) The improver is `gpt-5.6-terra` in every run.
+no security headroom to measure, so every suite was also run with open-weight `gpt-oss-120b`: first
+through the shared subscription endpoint (`gpt-oss-120b-medium`), then, when workstation load moved the
+runs to a build box, on a dedicated vLLM server (`gpt-oss-120b`, served with its own default sampling).
+The improver is `gpt-5.6-terra` in the luna and endpoint runs and `gpt-oss-120b` in the dedicated-server
+runs. A first `gemini-3.1-flash-lite` attempt was stopped when its provider quota ran out (HTTP 429
+RESOURCE_EXHAUSTED) and is not reported.
 
 **Differences from AgentDojo's reference pipeline**, each recorded so the numbers are not read as a
 leaderboard entry:
