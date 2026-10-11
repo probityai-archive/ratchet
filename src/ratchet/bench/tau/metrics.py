@@ -1,7 +1,7 @@
 """tau-bench's reliability metric, pass^k, over repeated trials of the same tasks.
 
 For a task run n times with c successes, the chance that k runs drawn without replacement all succeed is
-C(c, k) / C(n, k); pass^k is its mean over tasks (tau-bench, Yao et al. 2024, section 5). pass^1 is the mean
+C(c, k) / C(n, k); pass^k is its mean over tasks, as tau-bench reports it. pass^1 is the mean
 success rate. A trial that crashed counts as a failure, never as a missing run.
 """
 
