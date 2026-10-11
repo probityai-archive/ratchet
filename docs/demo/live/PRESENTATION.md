@@ -14,7 +14,7 @@ on screen before describing it. Never read the panels or IDs aloud; point at the
 2. Make the terminal font large: the panels are about 80 columns wide.
 3. Start `docs/demo/live/run_demo.sh`. It shows a title and waits. Each Enter clears the screen and runs the
    next step under a one-line header.
-4. Keep [the backup clip](../out/20261011T232221Z/ratchet-169.mp4) open in a paused player behind the terminal.
+4. Keep the backup clip (`docs/demo/out/20261011T232221Z/ratchet-169.mp4`, local file) open in a paused player behind the terminal.
 
 ### Measured step times
 
@@ -150,7 +150,7 @@ Spoken words: 370, about 140 a minute, with the command waits (about 18 s in tot
 
 | Fact | Source |
 | --- | --- |
-| Walkthrough ids and counts | [ids.env](../ids.env) |
+| Walkthrough ids and counts | `docs/demo/ids.env` |
 | 3,800 runs, 33.4% to 42.1%, 21 to 8, 32 to 23 | [v3-live.md](../../results/v3-live.md), decision `b972467a3b9a` in `ratchet_v3_full` |
 | 629,192 actions, 13,712 sessions, 7 fires, 0 errors | [hooks-replay.md](../../results/hooks-replay.md) |
 | tau-bench retail | [tau-retail.md](../../results/tau-retail.md) |

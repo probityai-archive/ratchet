@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -134,15 +135,27 @@ def links_of(path: Path) -> list[str]:
     return out
 
 
+def tracked_paths() -> set[Path]:
+    """Every file git tracks, plus each directory that holds one: what a reader of the repository can open."""
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout.split("\0")
+    files = {(ROOT / name).resolve() for name in listed if name}
+    return files | {parent for f in files for parent in f.parents}
+
+
 def check_links() -> list[str]:
+    """A relative link must reach a tracked file: an ignored local file is absent on GitHub and in CI."""
     failures: list[str] = []
-    for path in [ROOT / "README.md", *sorted((ROOT / "docs").rglob("*.md"))]:
+    tracked = tracked_paths()
+    pages = [ROOT / "README.md", *sorted((ROOT / "docs").rglob("*.md"))]
+    for path in (p for p in pages if p.resolve() in tracked):
         for target in links_of(path):
             if re.match(r"^(?:[a-z][a-z0-9+.-]*:|#|//)", target, re.IGNORECASE):
                 continue
             file = (path.parent / target.split("#")[0]).resolve()
-            if not file.exists():
-                failures.append(f"{path.relative_to(ROOT)}: link {target!r} resolves to no file")
+            if file not in tracked:
+                failures.append(f"{path.relative_to(ROOT)}: link {target!r} resolves to no tracked file")
     return failures
 
 

@@ -7,9 +7,9 @@ afternoon", and continue.
 
 ## The recording
 
-[`docs/demo/out/20261011T232221Z/ratchet-169.mp4`](../out/20261011T232221Z/ratchet-169.mp4): 35.6 seconds,
+`docs/demo/out/20261011T232221Z/ratchet-169.mp4`: 35.6 seconds,
 1920x1080, no audio, captions burned in, banner "RECORDED RUN 2026-10-11 16:23 PT | real commands, unedited".
-Every command exited 0 ([manifest](../out/20261011T232221Z/manifest-169.json)). Play it muted, pause on each
+Every command exited 0 (manifest (`docs/demo/out/20261011T232221Z/manifest-169.json`, local file)). Play it muted, pause on each
 scene, and speak over it.
 
 | Script section | Clip time | Scene (the same command as the live step) |
@@ -21,7 +21,7 @@ scene, and speak over it.
 | New tool refused (step 5) | 0:29-0:35 | `ratchet show decision` - authority FAIL |
 
 If the video player fails too, the same take plays in the terminal: `asciinema play
-docs/demo/out/20261011T232221Z/run-169.cast`. The [contact sheet](../out/20261011T232221Z/contact-169.png) shows
+docs/demo/out/20261011T232221Z/run-169.cast`. The contact sheet (`docs/demo/out/20261011T232221Z/contact-169.png`, local file) shows
 all five scenes on one image as a last resort.
 
 ## Steps 6 and 7 without the network
