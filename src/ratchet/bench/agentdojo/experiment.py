@@ -23,12 +23,13 @@ from ratchet.agent.model import ChatModel, ModelClient, ModelConfig
 from ratchet.bench.agentdojo.cases import DEFAULT_ATTACK, DEFAULT_VERSION, DojoSuite
 from ratchet.bench.agentdojo.metrics import DojoMetrics, metrics_from_rows
 from ratchet.bench.agentdojo.run import DOJO_LIMITS, DojoRunner, DojoSimulator, JsonStore, seed_harness
+from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.evaluate import EvalReport, evaluate_many
 from ratchet.improve.loop import EvolveResult, Lab, evolve
 from ratchet.improve.propose import Instructions
 from ratchet.improve.receipt import SIGNING_KEY_ENV, Signer, public_key_bytes
 from ratchet.improve.sandbox import SandboxRunner
-from ratchet.types import Harness, Split, canonical_json, sha256_hex
+from ratchet.types import Guard, Harness, Procedure, Split, canonical_json, sha256_hex
 
 DOJO_INSTRUCTIONS = Instructions.build("""\
 You improve the harness of an AI assistant that acts for one user through tools on that user's own systems
@@ -51,6 +52,12 @@ Give several distinct candidates: at least two guards when the failure is checka
 the property checked), and at least one procedure.""")
 
 
+# The shared endpoint answers HTTP 429 "model_cooldown" under load: with the client's default budget (five
+# attempts, sixty seconds of backoff) 38 of 50 episodes of one evaluation ended in a model error. A cooldown
+# is the endpoint's state, not the agent's, so the client waits it out within a fifteen-minute budget.
+ENDPOINT_PATIENCE: dict[str, Any] = {"max_attempts": 16, "max_backoff_total_s": 900.0, "backoff_cap_s": 120.0}
+
+
 @dataclass
 class Settings:
     suite: str
@@ -69,7 +76,17 @@ class Settings:
     def client(self, model: str) -> ModelClient:
         if model.startswith("claude"):
             raise ValueError("Claude models are not served by this endpoint")
-        return ModelClient(ModelConfig(base_url=self.base_url.rstrip("/"), model=model, api_key=self.api_key))
+        return ModelClient(
+            ModelConfig(
+                base_url=self.base_url.rstrip("/"),
+                model=model,
+                api_key=self.api_key,
+                **ENDPOINT_PATIENCE,
+            )
+        )
+
+
+REPO = Path(__file__).resolve().parents[4]
 
 
 def _git_head(path: Path) -> str | None:
@@ -80,6 +97,23 @@ def _git_head(path: Path) -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return out.stdout.strip() or None if out.returncode == 0 else None
+
+
+def _uncommitted(repo: Path) -> list[str] | None:
+    """Source files under `src/` that differ from the recorded commit: the code a run used but no commit
+    holds. None when git is unavailable."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain", "--", "src"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return sorted(line[3:] for line in out.stdout.splitlines() if line.strip())
 
 
 def suite_digest(dojo: DojoSuite) -> str:
@@ -93,7 +127,8 @@ def provenance(s: Settings, dojo: DojoSuite, reference_clone: Path | None) -> di
         "benchmark": "AgentDojo",
         "agentdojo_package_version": importlib.metadata.version("agentdojo"),
         "agentdojo_reference_clone_commit": _git_head(reference_clone) if reference_clone else None,
-        "ratchet_commit": _git_head(Path(__file__).resolve().parents[4]),
+        "ratchet_commit": _git_head(REPO),
+        "ratchet_uncommitted_source": _uncommitted(REPO),
         "model": s.model,
         "improver_model": s.improver_model,
         "endpoint": s.base_url,
@@ -146,6 +181,7 @@ def evolve_from(
             simulator=DojoSimulator(runner),
             runner=SandboxRunner(runtime),
             signer=_signer(),
+            activator=MemoryActivator(store.decision),
             improver=improver,
             workers=s.workers,
             suite_digest=suite_digest(dojo),
@@ -211,6 +247,34 @@ def admitted_changes(out: Path, versions: list[str]) -> dict[str, dict[str, Any]
         for v in versions
         if v in by_version
     }
+
+
+def harness_from(record: dict[str, Any]) -> Harness:
+    """A stored harness record back as a `Harness`; refuses one whose digest does not match its content."""
+    h = Harness(
+        version=record["version"],
+        parent=record["parent"],
+        system_prompt=record["system_prompt"],
+        procedures=[Procedure(**p) for p in record["procedures"]],
+        guards=[Guard(**g) for g in record["guards"]],
+        tool_allowlist=list(record["tool_allowlist"]),
+        created_by=record["created_by"],
+        digest=record["digest"],
+    )
+    if not h.verify_digest():
+        raise ValueError(f"harness {h.version} does not match its digest")
+    return h
+
+
+def recorded_lineage(out: Path) -> list[str]:
+    """v0 and every version the loop promoted, in order, read from a run's files."""
+    harnesses = read_jsonl(out / "harnesses.jsonl")
+    versions = [str(harnesses[0]["version"])] if harnesses else []
+    for rec in read_jsonl(out / "evals.jsonl"):
+        promoted = (rec.get("level1") or {}).get("promoted") if rec.get("type") == "generation" else None
+        if promoted and promoted not in versions:
+            versions.append(str(promoted))
+    return versions
 
 
 def lineage(v0: Harness, result: EvolveResult | None) -> list[str]:

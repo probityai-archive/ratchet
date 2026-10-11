@@ -112,6 +112,7 @@ class JsonStore:
         self._evals = 0
         self._harnesses: set[str] = set()
         self._traces: set[str] = set()
+        self._decisions: dict[str, dict[str, Any]] = {}
 
     def _append(self, name: str, record: Mapping[str, Any]) -> None:
         line = json.dumps(record, sort_keys=True, default=str)
@@ -141,8 +142,14 @@ class JsonStore:
 
     def put_decision(self, decision: Any, *, decision_id: str | None = None) -> str:
         did = decision_id or f"decision-{self._evals:04d}"
-        self._append("decisions.jsonl", {"decision_id": did, **_payload(decision)})
+        record = {"decision_id": did, **_payload(decision)}
+        self._append("decisions.jsonl", record)
+        self._decisions[did] = record
         return did
+
+    def decision(self, decision_id: str) -> dict[str, Any] | None:
+        """A decision stored by this run, for the activator's binding check."""
+        return self._decisions.get(decision_id)
 
 
 def _payload(obj: Any) -> dict[str, Any]:
