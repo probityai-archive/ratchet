@@ -159,9 +159,20 @@ def _merge(shards: list[Run]) -> Run:
     )
 
 
+def _identity(run: Run) -> tuple[Any, ...]:
+    """What makes two recorded evaluations the same record: the harness and every run id it produced."""
+    ids = sorted(str(r.get("run_id") or r["case_id"]) for r in run.report["results"])
+    return (run.report.get("harness_version"), tuple(ids))
+
+
 def collect(root: Path) -> list[Run]:
-    """Every recorded run under `root`, in path order, with the shards of a trial merged."""
+    """Every recorded run under `root`, in path order, with the shards of a trial merged.
+
+    The same evaluation can sit under two directories (a box's output directory copied back by two jobs that
+    shared it); it is counted once, from the first path.
+    """
     runs: list[Run] = []
+    seen: set[tuple[Any, ...]] = set()
     for evals in sorted(root.rglob("evals.jsonl")):
         folder = evals.parent
         if not (folder / "cases.json").exists():
@@ -175,9 +186,13 @@ def collect(root: Path) -> list[Run]:
         for rec in store.read("evals"):
             rep = rec["report"]
             if rep.get("type") == "eval" and "results" in rep:
-                runs.append(
-                    Run(str(folder.relative_to(root)), config, rep, rows_for(store, rep), store.read_cases())
+                run = Run(
+                    str(folder.relative_to(root)), config, rep, rows_for(store, rep), store.read_cases()
                 )
+                if _identity(run) in seen:
+                    continue
+                seen.add(_identity(run))
+                runs.append(run)
     return merge_shards(runs)
 
 

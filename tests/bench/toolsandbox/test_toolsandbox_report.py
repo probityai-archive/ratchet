@@ -141,3 +141,36 @@ def test_the_csv_lists_every_scenario_of_every_run(tmp_path: Path) -> None:
     assert ran["categories"] == "STATE_DEPENDENCY THREE_DISTRACTION_TOOLS"
     blocked = next(r for r in rows if r["scenario"] == "blocked")
     assert blocked["similarity"] == "" and blocked["detail"].startswith("NOT RUN")
+
+
+def test_the_same_evaluation_under_two_directories_is_counted_once(tmp_path: Path) -> None:
+    import shutil
+
+    _write_run(tmp_path / "a")
+    shutil.copytree(tmp_path / "a", tmp_path / "b")
+    runs = collect(tmp_path)
+    assert len(runs) == 1 and runs[0].path.startswith("a/")
+
+
+def test_the_same_shards_under_two_directories_merge_once(tmp_path: Path) -> None:
+    import shutil
+
+    for index in (0, 1):
+        folder = tmp_path / "a" / "runs" / "h" / f"all-trial-1-shard-{index}-of-2"
+        store = RunStore(folder)
+        case = _case(f"c{index}", ("CANONICALIZATION",))
+        store.write_cases([case])
+        graded = Graded(1.0, 1.0, 0.0, 3, (), ())
+        trace = Trace(f"run-c{index}", case.id, "h", "m", [], Outcome(True, [], "", Cost()))
+        store.put_graded(case, trace, graded)
+        store.put_eval(
+            {"type": "eval", "harness_version": "h", "results": [_result(case, run_id=f"run-c{index}")]}
+        )
+        (folder / "config.json").write_text(
+            json.dumps({"split": "all", "trial": 1, "shard": {"index": index, "count": 2}}), encoding="utf-8"
+        )
+    shutil.copytree(tmp_path / "a", tmp_path / "b")
+    runs = collect(tmp_path)
+    assert len(runs) == 1
+    assert runs[0].path.endswith("(shards 0,1 of 2)")
+    assert len(runs[0].rows) == 2 and all(r.status == RAN for r in runs[0].rows)
