@@ -102,7 +102,7 @@ class ArmScore:
     replay_passed: int = 0
     evaluated: int = 0
     admitted: int = 0
-    heldout_gain: int = 0
+    stable_recoveries: int = 0
 
     @property
     def admission_yield(self) -> float:
@@ -125,7 +125,7 @@ class ArmScore:
             "replay_passed": self.replay_passed,
             "evaluated": self.evaluated,
             "admitted": self.admitted,
-            "heldout_gain": self.heldout_gain,
+            "stable_recoveries": self.stable_recoveries,
             "admission_yield": round(self.admission_yield, 4),
         }
 
@@ -287,7 +287,7 @@ def compose(parent: Harness, picks: Sequence[Candidate]) -> Harness:
         guards += [g for g in c.harness.guards if g.id not in {x.id for x in guards}]
         procs += [p for p in c.harness.procedures if p.id not in {x.id for x in procs}]
         if c.kind == "prompt_edit":
-            prompt = f"{prompt.rstrip()}\n\n{c.change['append']}"
+            prompt = f"{prompt}\n\n{c.change['append']}"
     return parent.child(guards=guards, procedures=procs, system_prompt=prompt, created_by="improver")
 
 
@@ -331,13 +331,22 @@ def _decide(
     report: EvalReport,
     replays: dict[str, ReplayReport],
     context: dict[str, Any],
+    targets: Sequence[FailureCluster] = (),
 ) -> tuple[Decision, EvalReport | None]:
     """Admit or reject. A candidate that clears every gate on its first run gets one more fresh held-out
     run to confirm; only the final decision is signed and stored. Returns it and the confirming run."""
     require_same(g.evaluator, evaluator_identity(lab.cases, lab.model_config, lab.suite_digest))
-    kw: dict[str, Any] = {"parent_runs": g.parent_runs, "cand_eval": report, "replays": replays,
-                          "literals": g.literals, "visible_case_ids": g.visible, "evaluator": g.evaluator,
-                          "context": context}  # fmt: skip
+    composed = _composed_replay(g, lab, harness, targets)
+    kw: dict[str, Any] = {
+        "parent_runs": g.parent_runs,
+        "cand_eval": report,
+        "replays": replays,
+        "composed": composed,
+        "literals": g.literals,
+        "visible_case_ids": g.visible,
+        "evaluator": g.evaluator,
+        "context": context,
+    }
     d = admit(g.parent, harness, confirm_eval=None, **kw)
     confirm: EvalReport | None = None
     if awaiting_confirmation(d):
@@ -356,13 +365,32 @@ def _decide(
     return d, confirm
 
 
+def _referee_sets(g: _Gen) -> tuple[list[Trace], list[Trace]]:
+    """The referee's clearance traces: every passing parent trace and every benign-twin trace, held-out
+    included. Their detailed results stay evaluator-side."""
+    passing = [t for t in g.parent_eval.traces if t.outcome.passed]
+    benign = [t for t in g.parent_eval.traces if t.case_id in g.benign_ids]
+    return passing, benign
+
+
+def _composed_replay(
+    g: _Gen, lab: Lab, harness: Harness, clusters: Sequence[FailureCluster]
+) -> ReplayReport | None:
+    """Every guard of the candidate at once, to catch interactions; None when it adds no guard."""
+    if len(harness.guards) == len(g.parent.guards) or not clusters:
+        return None
+    members = [m for c in clusters for m in c.members]
+    failing = {k: v for c in clusters for k, v in c.traces.items()}
+    passing, benign = _referee_sets(g)
+    return replay(harness.guards, members, failing, passing, g.walks, lab.runner, benign)
+
+
 def _referee_replays(
     tried: list[_Tried], g: _Gen, clusters: dict[str, FailureCluster], lab: Lab
 ) -> dict[str, ReplayReport]:
     """Rule 1 on the referee's side: every passing trace of the parent and every benign-twin trace,
     held-out included."""
-    passing = [t for t in g.parent_eval.traces if t.outcome.passed]
-    benign = [t for t in g.parent_eval.traces if t.case_id in g.benign_ids]
+    passing, benign = _referee_sets(g)
     out: dict[str, ReplayReport] = {}
     for t in tried:
         for guard in t.candidate.new_guards(g.parent):
@@ -378,6 +406,7 @@ def _promote(
     g: _Gen,
     admitted: list[_Tried],
     referee: dict[str, ReplayReport],
+    clusters: dict[str, FailureCluster],
 ) -> tuple[Harness, EvalReport, Decision] | None:
     """The best admitted candidate, or the composition of all of them when that is admitted and better."""
     if not admitted:
@@ -406,6 +435,7 @@ def _promote(
         report,
         referee,
         {"generation": g.gen, "composite_of": [t.candidate.id for t in picks]},
+        [clusters[t.candidate.cluster_id] for t in picks if t.candidate.kind == "guard"],
     )
     if d.admitted and len(report.passed("heldout")) > len(best.report.passed("heldout")):
         return combo, report, d
@@ -498,7 +528,7 @@ def evolve(
             clusters,
         )
         admitted = [t for t in tried if t.status == "admitted"]
-        promoted = _promote(store, lab, model, g, admitted, referee)
+        promoted = _promote(store, lab, model, g, admitted, referee, {c.id: c for c in clusters})
         if promoted is not None:
             parent, child_eval, decision = promoted
             store.put_harness(parent)
@@ -632,6 +662,7 @@ def _evaluate_and_admit(
             report,
             {k: v for k, v in referee.items() if k in new_ids},
             ctx,
+            [c for c in clusters if c.id == t.candidate.cluster_id],
         )
         if t.decision.admitted:
             t.status = "admitted"
@@ -676,7 +707,7 @@ def _level2(
             s.rejected += t.status.startswith(("rejected", "screened", "replay_failed"))
             if t.status == "admitted" and t.decision is not None:
                 s.admitted += 1
-                s.heldout_gain += len(t.decision.check("heldout").evidence["gained"])
+                s.stable_recoveries += len(t.decision.check("fresh").evidence["stable_recoveries"])
         scored[arm] = s
     level2: dict[str, Any] = {
         "champion": champion.version,

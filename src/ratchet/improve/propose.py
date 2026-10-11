@@ -243,9 +243,7 @@ def make_candidate(
         if not text:
             return "prompt_edit rejected: empty text"
         eid = f"e-{cluster.id}-{_short(text)}"
-        child = parent.child(
-            system_prompt=f"{parent.system_prompt.rstrip()}\n\n{text}", created_by="improver"
-        )
+        child = parent.child(system_prompt=f"{parent.system_prompt}\n\n{text}", created_by="improver")
         return Candidate(f"c-{eid}", "prompt_edit", cluster.id, instructions.version, child, {"append": text},
                          rationale, list(cluster.members))  # fmt: skip
     return f"unknown kind {kind!r}"
