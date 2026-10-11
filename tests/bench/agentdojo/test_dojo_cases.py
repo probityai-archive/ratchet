@@ -69,4 +69,4 @@ def test_other_registered_attacks_load(banking: DojoSuite) -> None:
 
 def test_attack_target_is_an_empty_named_pipeline() -> None:
     target = attack_target()
-    assert target.name == "ratchet-harness" and list(target.elements) == []
+    assert target.name == "probity-ratchet" and list(target.elements) == []

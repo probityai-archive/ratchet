@@ -338,7 +338,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         _log(f"stored {sink.written} traces in {args.trace_db}.tau2_traces")
         sink.close()
     info = tau2_info(
-        tconfig, agent_implementation=f"ratchet-harness:{harness.version}", commit=installed_commit()
+        tconfig, agent_implementation=f"probity-ratchet:{harness.version}", commit=installed_commit()
     )
     finalize(root, info, [t for t in load_tasks(args.domain) if str(t.id) in set(config["task_ids"])])
     print(json.dumps(summarize_run(root), indent=2), flush=True)
@@ -358,7 +358,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     )
     info = tau2_info(
         tconfig,
-        agent_implementation=f"ratchet-harness:{config['harness']['version']}",
+        agent_implementation=f"probity-ratchet:{config['harness']['version']}",
         commit=config["tau2_commit_installed"],
     )
     ids = set(config["task_ids"])

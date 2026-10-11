@@ -100,7 +100,7 @@ def test_run_writes_tau2_bench_results_and_ratchet_records(
     assert "k" not in json.dumps(config).replace('"', " ").split()  # the key is never recorded
     results = load_results(root)
     assert len(results.simulations) == 4 and {s.trial for s in results.simulations} == {0, 1}
-    assert results.info.agent_info.implementation == f"ratchet-harness:{config['harness']['version']}"
+    assert results.info.agent_info.implementation == f"probity-ratchet:{config['harness']['version']}"
     rows = read_jsonl(root / "runs.jsonl")
     assert len(rows) == 4 and len(read_jsonl(root / "traces.jsonl")) == 4
     summary = summarize_run(root)

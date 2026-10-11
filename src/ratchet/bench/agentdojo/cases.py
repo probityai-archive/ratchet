@@ -38,7 +38,7 @@ def attack_target() -> AgentPipeline:
     """The attacks take a pipeline only to read its name; Ratchet's worker loop is the real target, so this
     pipeline has no elements and is never queried."""
     target = AgentPipeline([])
-    target.name = "ratchet-harness"
+    target.name = "probity-ratchet"
     return target
 
 

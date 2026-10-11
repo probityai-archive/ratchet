@@ -3998,6 +3998,72 @@ wheels = [
 ]
 
 [[package]]
+name = "probity-ratchet"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "agent-evidence-vectors" },
+    { name = "cryptography" },
+    { name = "httpx" },
+    { name = "probity-verify" },
+    { name = "pymongo" },
+    { name = "raindrop-ai" },
+    { name = "rich" },
+]
+
+[package.optional-dependencies]
+bench = [
+    { name = "agentdojo" },
+    { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
+    { name = "litellm" },
+    { name = "tau-bench" },
+    { name = "tau2" },
+    { name = "terminal-bench" },
+    { name = "tool-sandbox" },
+]
+gepa = [
+    { name = "gepa" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+    { name = "securesystemslib", extra = ["crypto"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agent-evidence-vectors", specifier = "==0.17.7" },
+    { name = "agentdojo", marker = "extra == 'bench'", specifier = "==0.1.35" },
+    { name = "audioop-lts", marker = "python_full_version >= '3.13' and extra == 'bench'", specifier = "==0.2.2" },
+    { name = "cryptography", specifier = ">=44" },
+    { name = "gepa", marker = "extra == 'gepa'", specifier = "==0.1.4" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "litellm", marker = "extra == 'bench'", specifier = "==1.102.1" },
+    { name = "probity-verify", git = "https://github.com/probityai/probity-verify?rev=b920366397cb131232163706864a70723b867367" },
+    { name = "pymongo", specifier = ">=4.10" },
+    { name = "raindrop-ai", specifier = "==0.0.75" },
+    { name = "rich", specifier = ">=15.0.0" },
+    { name = "tau-bench", marker = "extra == 'bench'", git = "https://github.com/sierra-research/tau-bench?rev=59a200c6d575d595120f1cb70fea53cef0632f6b" },
+    { name = "tau2", marker = "extra == 'bench'", git = "https://github.com/sierra-research/tau2-bench?rev=4ce7c0397c1eb65c9bbe59aeacfe1ca44a1cd699" },
+    { name = "terminal-bench", marker = "extra == 'bench'", specifier = "==0.2.18" },
+    { name = "tool-sandbox", marker = "extra == 'bench'", git = "https://github.com/apple/ToolSandbox?rev=c8571d7854316d2e1c5f288e59fe1e34e53f6dd1" },
+]
+provides-extras = ["bench", "gepa"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-cov", specifier = ">=5" },
+    { name = "ruff", specifier = ">=0.6" },
+    { name = "securesystemslib", extras = ["crypto"], specifier = ">=1.0" },
+]
+
+[[package]]
 name = "probity-verify"
 version = "0.1.0"
 source = { git = "https://github.com/probityai/probity-verify?rev=b920366397cb131232163706864a70723b867367#b920366397cb131232163706864a70723b867367" }
@@ -4764,72 +4830,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/92/7d/943a04a134a5d333c00d3a77169226defef5e081be9219a765afc176dda0/rapidfuzz-3.14.6-cp315-cp315t-win32.whl", hash = "sha256:15da2b258908eb38853c1a6a58a1d09d9aad9c721e03a68c8ba691cd31dff739", size = 1974478, upload-time = "2026-08-30T21:45:25.475Z" },
     { url = "https://files.pythonhosted.org/packages/21/0e/8356ca3e190e2bcced9b80e374d95b0925c4716b51e65720a55399983f41/rapidfuzz-3.14.6-cp315-cp315t-win_amd64.whl", hash = "sha256:3d502769263318690d4f6638b08483979d1b88cdc7c6f087482eea935fde4031", size = 1823286, upload-time = "2026-08-30T21:45:28.368Z" },
     { url = "https://files.pythonhosted.org/packages/fb/04/a0b0e6324b6384d1ab40feb4d16400af3b3101d38cbd15957edd9d17cbe0/rapidfuzz-3.14.6-cp315-cp315t-win_arm64.whl", hash = "sha256:07c7aa0b1e4b9999a54f9e73317d6743ff85442c8ef7b7fbbe6b190fd37d9e75", size = 1243815, upload-time = "2026-08-30T21:45:31.187Z" },
-]
-
-[[package]]
-name = "ratchet-harness"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "agent-evidence-vectors" },
-    { name = "cryptography" },
-    { name = "httpx" },
-    { name = "probity-verify" },
-    { name = "pymongo" },
-    { name = "raindrop-ai" },
-    { name = "rich" },
-]
-
-[package.optional-dependencies]
-bench = [
-    { name = "agentdojo" },
-    { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
-    { name = "litellm" },
-    { name = "tau-bench" },
-    { name = "tau2" },
-    { name = "terminal-bench" },
-    { name = "tool-sandbox" },
-]
-gepa = [
-    { name = "gepa" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-    { name = "securesystemslib", extra = ["crypto"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "agent-evidence-vectors", specifier = "==0.17.7" },
-    { name = "agentdojo", marker = "extra == 'bench'", specifier = "==0.1.35" },
-    { name = "audioop-lts", marker = "python_full_version >= '3.13' and extra == 'bench'", specifier = "==0.2.2" },
-    { name = "cryptography", specifier = ">=44" },
-    { name = "gepa", marker = "extra == 'gepa'", specifier = "==0.1.4" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "litellm", marker = "extra == 'bench'", specifier = "==1.102.1" },
-    { name = "probity-verify", git = "https://github.com/probityai/probity-verify?rev=b920366397cb131232163706864a70723b867367" },
-    { name = "pymongo", specifier = ">=4.10" },
-    { name = "raindrop-ai", specifier = "==0.0.75" },
-    { name = "rich", specifier = ">=15.0.0" },
-    { name = "tau-bench", marker = "extra == 'bench'", git = "https://github.com/sierra-research/tau-bench?rev=59a200c6d575d595120f1cb70fea53cef0632f6b" },
-    { name = "tau2", marker = "extra == 'bench'", git = "https://github.com/sierra-research/tau2-bench?rev=4ce7c0397c1eb65c9bbe59aeacfe1ca44a1cd699" },
-    { name = "terminal-bench", marker = "extra == 'bench'", specifier = "==0.2.18" },
-    { name = "tool-sandbox", marker = "extra == 'bench'", git = "https://github.com/apple/ToolSandbox?rev=c8571d7854316d2e1c5f288e59fe1e34e53f6dd1" },
-]
-provides-extras = ["bench", "gepa"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.11" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-cov", specifier = ">=5" },
-    { name = "ruff", specifier = ">=0.6" },
-    { name = "securesystemslib", extras = ["crypto"], specifier = ">=1.0" },
 ]
 
 [[package]]
