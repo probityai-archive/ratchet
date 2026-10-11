@@ -72,11 +72,11 @@ probity-verify = { git = "https://github.com/probityai/probity-verify", rev = "b
 tool-sandbox = { git = "https://github.com/apple/ToolSandbox", rev = "c8571d7854316d2e1c5f288e59fe1e34e53f6dd1" }
 
 [[tool.uv.dependency-metadata]]
-# apple/ToolSandbox pins every dependency exactly (pydantic 2.7.4 conflicts with raindrop-ai, which needs
+# The tool-sandbox package pins every dependency exactly (pydantic 2.7.4 conflicts with raindrop-ai, which needs
 # pydantic>=2.9; numpy 1.26.4 and openai 1.17.0 conflict with the versions already locked) and declares
 # clients for model providers the adapter never imports. This is the metadata for the modules that
 # `ratchet.bench.toolsandbox` loads: the conflicting pins are relaxed, and polars stays at 0.20.31 because
-# ToolSandbox imports `polars.type_aliases`, which later polars releases removed.
+# tool-sandbox imports `polars.type_aliases`, which later polars releases removed.
 name = "tool-sandbox"
 version = "0.0.1"
 requires-dist = [
