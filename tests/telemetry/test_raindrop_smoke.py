@@ -4,7 +4,7 @@ import importlib
 import json
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -82,7 +82,7 @@ def test_delivery_recorder_notes_raindrop_posts_only(monkeypatch: pytest.MonkeyP
             return self.body
 
     class Session:
-        calls: list[str] = []
+        calls: ClassVar[list[str]] = []
 
         def request(self, method: str, url: str, **kwargs: Any) -> Resp:
             Session.calls.append(url)
