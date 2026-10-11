@@ -59,6 +59,9 @@ class GuardLimits:
     # Layers that must take effect or the child is refused. Network isolation is required by the
     # contract; netns and seccomp each provide it, and both are required by default on Linux.
     require: tuple[str, ...] = ("rlimits", "netns", "seccomp", "landlock")
+    # Use at most this Landlock ABI, to run the sandbox as it runs on an older kernel. None uses the
+    # kernel's own ABI. Isolation never depends on it: seccomp alone refuses signals and sockets.
+    landlock_max_abi: int | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +137,7 @@ class GuardProcess:
             "memory_mb": self.limits.memory_mb,
             "timeout_s": self.limits.call_timeout_s,
             "require": list(self.limits.require),
+            "landlock_max_abi": self.limits.landlock_max_abi,
         }
         deadline = time.monotonic() + self.limits.startup_timeout_s + self.limits.call_timeout_s
         try:

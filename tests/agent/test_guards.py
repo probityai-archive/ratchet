@@ -139,7 +139,6 @@ ESCAPES = {
     "write_file": "open('/tmp/ratchet-guard-escape', 'w').write('x')",
     "fork": "import os\nos.fork()",
     "exec": "import os\nos.execv('/bin/true', ['true'])",
-    "kill_parent": "import os, signal\nos.kill(os.getppid(), signal.SIGTERM)",
     "import_new_module": "import sqlite3",
     "memory": "x = bytearray(2 * 1024 * 1024 * 1024)",
     "env": "import os\nassert not os.environ, dict(os.environ)\nraise RuntimeError('env empty')",
@@ -250,3 +249,49 @@ def test_child_exit_mid_call_fails_closed() -> None:
     assert decision.blocked and "exited with status 3" in (decision.error or "")
     assert not proc.alive
     proc.close()
+
+
+# Signals that are harmless if a regression lets them through, so the probe can never kill the test runner.
+SIGNAL_PROBE = guard(
+    """
+    import os, signal
+
+    def check(call, view, history):
+        target = call.args["pid"]
+        out = []
+        for name, attempt in (
+            ("kill0", lambda: os.kill(target, 0)),
+            ("sigcont", lambda: os.kill(target, signal.SIGCONT)),
+            ("pidfd", lambda: signal.pidfd_send_signal(os.pidfd_open(target), 0)),
+            ("group", lambda: os.killpg(os.getpgid(target), 0)),
+        ):
+            try:
+                attempt()
+            except PermissionError:
+                out.append(name + "=EPERM")
+            except OSError as exc:
+                out.append(name + "=" + type(exc).__name__)
+            else:
+                out.append(name + "=SENT")
+        return " ".join(out)
+    """,
+    "signal-probe",
+)
+
+
+@pytest.mark.parametrize("max_abi", [None, 5, 1], ids=["kernel-abi", "abi5-no-signal-scope", "abi1"])
+def test_guard_cannot_signal_its_parent_on_any_landlock_abi(max_abi: int | None) -> None:
+    """Landlock scopes signals only from ABI 6 (Linux 6.12); the seccomp filter must refuse them anyway."""
+    with GuardRuntime(GuardLimits(landlock_max_abi=max_abi)) as rt:
+        isolation = rt.validate(SIGNAL_PROBE)
+        if max_abi is not None:
+            assert (
+                isolation["landlock"].startswith(f"abi {max_abi},") and "signal" not in isolation["landlock"]
+            )
+        denied = set(isolation["seccomp"].removeprefix("denied: ").split(","))
+        assert {"kill", "tkill", "tgkill", "pidfd_open", "pidfd_send_signal"} <= denied, denied
+        for target in (os.getpid(), os.getppid(), 1):
+            decision = rt.check(SIGNAL_PROBE, ToolCall("x", {"pid": target}, "c"), {}, [])
+            assert decision.blocked and decision.error is None, decision
+            assert decision.reason is not None and "SENT" not in decision.reason, (target, decision.reason)
+            assert decision.reason.count("=EPERM") >= 3, (target, decision.reason)

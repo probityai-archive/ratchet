@@ -46,7 +46,7 @@ def test_freeze_is_deep_and_read_only() -> None:
 
 def test_seccomp_program_shapes() -> None:
     prog, names = child.seccomp_program("x86_64")
-    assert "socket" in names and "io_uring_setup" in names
+    assert {"socket", "io_uring_setup", "kill", "tgkill", "tkill", "pidfd_send_signal"} <= set(names)
     deny_at = len(prog) - 1
     assert prog[-1] == (0x06, 0, 0, 0x00050001) and prog[-2] == (0x06, 0, 0, 0x7FFF0000)
     for index, (code, jt, _, _) in enumerate(prog[4:-2], start=4):

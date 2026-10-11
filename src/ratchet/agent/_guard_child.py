@@ -11,7 +11,10 @@ silently):
             so no TCP/UDP route exists, loopback included.
   seccomp   socket, socketpair, ptrace, process_vm_readv/writev and io_uring are refused with EPERM, which
             also closes filesystem unix sockets (the docker and session-bus sockets) that a network
-            namespace does not cover.
+            namespace does not cover. Every signal-sending call (kill, tkill, tgkill, rt_sigqueueinfo,
+            rt_tgsigqueueinfo, pidfd_open, pidfd_send_signal) is refused too, so the guard cannot signal
+            its parent on any kernel; Landlock's signal scoping needs ABI 6 (Linux 6.12) and is only a
+            second layer where the kernel has it.
   landlock  every filesystem access right, TCP bind/connect, abstract unix sockets and signals to
             processes outside the sandbox are handled with no rule granting any of them back.
 
@@ -119,6 +122,13 @@ _SYSCALLS = {
             "io_uring_setup": 425,
             "io_uring_enter": 426,
             "io_uring_register": 427,
+            "kill": 62,
+            "tkill": 200,
+            "tgkill": 234,
+            "rt_sigqueueinfo": 129,
+            "rt_tgsigqueueinfo": 297,
+            "pidfd_open": 434,
+            "pidfd_send_signal": 424,
         },
     ),
     "aarch64": (
@@ -133,6 +143,13 @@ _SYSCALLS = {
             "io_uring_setup": 425,
             "io_uring_enter": 426,
             "io_uring_register": 427,
+            "kill": 129,
+            "tkill": 130,
+            "tgkill": 131,
+            "rt_sigqueueinfo": 138,
+            "rt_tgsigqueueinfo": 240,
+            "pidfd_open": 434,
+            "pidfd_send_signal": 424,
         },
     ),
 }
@@ -220,10 +237,12 @@ def landlock_ruleset(abi: int) -> tuple[_RulesetAttr, int, str]:
     return _RulesetAttr(fs, net, scoped), size, f"abi {abi}, denied " + ",".join(parts)
 
 
-def apply_landlock() -> str:  # pragma: no cover - runs only inside the sandbox; see module docstring
+def apply_landlock(max_abi: int | None) -> str:  # pragma: no cover - runs only inside the sandbox
     libc = _libc()
     libc.syscall.restype = ctypes.c_long
     abi = libc.syscall(ctypes.c_long(444), None, ctypes.c_size_t(0), ctypes.c_uint32(1))
+    if max_abi is not None:
+        abi = min(abi, max_abi)  # emulate an older kernel; the rules of a lower ABI are a subset
     if abi < 1:
         raise OSError(ctypes.get_errno(), "landlock is not available")
     attr, size, description = landlock_ruleset(abi)
@@ -286,7 +305,7 @@ def lockdown(
             ("rlimits", lambda: apply_rlimits(int(setup["cpu_s"]), int(setup["memory_mb"]))),
             ("netns", apply_netns),
             ("seccomp", apply_seccomp),
-            ("landlock", apply_landlock),
+            ("landlock", lambda: apply_landlock(setup.get("landlock_max_abi"))),
         )
     )
 
