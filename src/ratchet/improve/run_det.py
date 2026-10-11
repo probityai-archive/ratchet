@@ -1,7 +1,10 @@
-"""Ruling-2 admission of one stored candidate on deterministic endpoints (batch size one, no prefix cache,
-temperature 0, fixed seed), with gpt-oss-120b as the worker.
+"""Ruling-2 admission of one stored candidate on deterministic endpoints (temperature 0, fixed seed), with
+gpt-oss-120b as the worker. The endpoint is either batch size one with no prefix cache, or vLLM's
+batch-invariant mode (`--serve-config` records how it was served, and that record is part of the endpoint
+configuration digest every receipt names).
 
-1. Repeatability: three held-out cases run twice each; every pair must produce the same normalized trace.
+1. Repeatability: held-out cases (three by default, `--repeat-heldout 0` for all) run twice each; every pair
+   must produce the same normalized trace.
 2. P1 (every decision case), P2 (held-out), C1 (every decision case), C2 (held-out, only when C1 clears).
    If P1 and P2 disagree on any held-out case, the endpoint is not repeatable and the track stops.
 3. Replay of the candidate's guard over this cohort's recorded traces, then `admit()` and a signed receipt
@@ -62,6 +65,14 @@ def normalized(trace: Trace) -> str:
     return sha256_hex(canonical_json([rows, trace.outcome.passed, trace.outcome.reasons]))
 
 
+def _stop(store: Store, out: dict[str, Any], path: Path) -> int:
+    """Record that the endpoint is not repeatable, in the database and the output file, and stop the track."""
+    store.put_eval({"type": "endpoint_verdict", "policy": RULING_2, **out})
+    path.write_text(json.dumps(out, indent=2, default=str))
+    print("RESULT", out["result"], flush=True)
+    return 0
+
+
 def _args(argv: Sequence[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="ratchet-improve-run-det")
     p.add_argument("--endpoints", required=True, help="comma-separated deterministic endpoints")
@@ -70,6 +81,13 @@ def _args(argv: Sequence[str] | None) -> argparse.Namespace:
     p.add_argument("--candidate", required=True, help="db:candidate_version of a stored decision")
     p.add_argument("--db", default="ratchet_det")
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument(
+        "--serve-config",
+        type=Path,
+        help="JSON record of how the endpoint was served; replaces the batch-size-one fields",
+    )
+    p.add_argument("--repeat-heldout", type=int, default=3, help="held-out cases to repeat; 0 = all")
+    p.add_argument("--workers", type=int, help="concurrent cases (default: one per endpoint)")
     return p.parse_args(argv)
 
 
@@ -83,14 +101,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     decision_cases = [c for c in every if c.split in ("train", "heldout")]
     heldout = [c for c in every if c.split == "heldout"]
     endpoints = [e.strip() for e in a.endpoints.split(",") if e.strip()]
-    endpoint_config = {
+    endpoint_config: dict[str, Any] = {
         "endpoints": endpoints,
         "model": a.model,
         "temperature": 0.0,
         "seed": a.seed,
-        "batch_size": 1,
-        "prefix_cache": False,
     }
+    if a.serve_config:
+        endpoint_config["serving"] = json.loads(a.serve_config.read_text(encoding="utf-8"))
+    else:
+        endpoint_config |= {"batch_size": 1, "prefix_cache": False}
     config_digest = sha256_hex(canonical_json(endpoint_config))
     out: dict[str, Any] = {"endpoint_config": endpoint_config, "endpoint_config_digest": config_digest}
     db, version = a.candidate.split(":")
@@ -119,10 +139,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for e in endpoints
     ]
-    workers = len(clients)
+    workers = a.workers or len(clients)
 
     class Spread:
-        """Round-robin over the deterministic endpoints; each serves one request at a time."""
+        """Round-robin over the deterministic endpoints."""
 
         def __init__(self) -> None:
             self.i = 0
@@ -139,25 +159,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         for t in rep.traces:
             store.put_trace(t)
         store.put_eval({**rep.to_payload(), "role": role, "endpoint_config_digest": config_digest})
+        n = len(rep.results)
+        out.setdefault("throughput", {})[role] = {
+            "runs": n,
+            "wall_s": round(rep.wall_s, 1),
+            "runs_per_min": round(60 * n / rep.wall_s, 2) if rep.wall_s else None,
+            "workers": workers,
+        }
         print(
             f"{role}: heldout {len(rep.passed('heldout'))}/{rep.count('heldout')} train "
-            f"{len(rep.passed('train'))}/{rep.count('train')}",
+            f"{len(rep.passed('train'))}/{rep.count('train')} wall {rep.wall_s:.0f}s",
             flush=True,
         )
         return rep
 
-    # 1. Repeatability on three held-out cases.
-    probe = heldout[:3]
+    # 1. Repeatability on held-out cases.
+    probe = heldout[: a.repeat_heldout] if a.repeat_heldout > 0 else heldout
     first, second = ev(parent, probe, "repeat_a"), ev(parent, probe, "repeat_b")
     digests = {t.case_id: normalized(t) for t in first.traces}
     again = {t.case_id: normalized(t) for t in second.traces}
     repeat = {c.id: digests.get(c.id) == again.get(c.id) for c in probe}
-    out["repeatability"] = {"cases": repeat, "repeatable": all(repeat.values())}
+    out["repeatability"] = {
+        "cases": repeat,
+        "repeatable": all(repeat.values()),
+        "digests_a": digests,
+        "digests_b": again,
+    }
     print("REPEATABILITY", json.dumps(out["repeatability"]), flush=True)
     if not all(repeat.values()):
         out["result"] = "NOT REPEATABLE: two identical runs produced different traces; track stopped"
-        a.out.write_text(json.dumps(out, indent=2, default=str))
-        return 0
+        return _stop(store, out, a.out)
 
     # 2. The parent twice; stop when the held-out outcomes disagree.
     p1 = ev(parent, decision_cases, "parent_run_1")
@@ -167,9 +198,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     out["parent_discordance"] = differ
     if differ:
         out["result"] = f"NOT REPEATABLE: P1 and P2 differ on {len(differ)} held-out case(s); track stopped"
-        a.out.write_text(json.dumps(out, indent=2, default=str))
-        print("RESULT", out["result"], flush=True)
-        return 0
+        return _stop(store, out, a.out)
     c1 = ev(candidate, decision_cases, "candidate_run")
 
     # 3. Replay over this cohort's records, then the decision.
