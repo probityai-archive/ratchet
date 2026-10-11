@@ -1,8 +1,10 @@
 # Ratchet: build contract
 
-Ratchet is an agent harness that turns each failure into an executable guard or procedure, proves the change
-against the recorded history before it adopts it, and keeps every version, trace and proof in MongoDB Atlas.
-A ratchet moves one way: a change is admitted only when it fixes failures and breaks nothing that worked.
+Ratchet turns observed agent failures into executable harness changes. Before it adopts a change, it checks the
+proposed guard against recorded actions, runs fresh evaluations, prevents any growth of authority, and publishes a
+signed, independently checkable admission record. Every version, trace, evaluation and decision lives in MongoDB
+Atlas. Admitted changes satisfy the recorded-history and evaluation gates; every decision states exactly what
+evidence was checked, and every rejection stays in the record.
 
 This file is the interface every lane builds against. Change it only through the integrator (main session).
 
@@ -55,15 +57,40 @@ tests/        one test module per source module, plus tests/integration/
   passing trace); `evaluate(candidate, cases) -> EvalReport`; `admit(parent, candidate, reports) -> Decision`;
   `receipt(decision) -> bytes` (signed DSSE envelope over the canonical JSON of the decision and its evidence).
 
-## Admission rule (the ratchet)
+## Admission rule (the ratchet), adjudicated 2026-10-11
 
-A candidate harness is admitted only when all hold, and the decision records each check:
-1. Replay: every new guard fires on its target failures and on zero previously passing traces.
-2. Held-out: pass count on held-out cases strictly rises, measured on cases the improver never saw.
-3. No regression: no `must_succeed` case that passed before fails now (refusing everything cannot win).
-4. Authority does not grow: `tool_allowlist` is a subset of the parent's, and no guard is removed, unless a
-   human-signed change says so. The improver can never grant itself access.
-5. Cost is recorded and reported. It is not a gate.
+Freeze before proposing: cases, graders, fault schedules, model configuration, evaluator version (digests recorded).
+Changing any of them after held-out outcomes were seen starts a new evaluator version.
+
+A candidate is admitted only when ALL hold, and the decision records each check with counts and ids:
+1. Replay (guards only): over the declared, digest-frozen trace snapshot, using each call's recorded PRE-CALL
+   view, the guard fires on every target failure at or before the causing step, and on zero passing traces and
+   zero benign-twin traces. Replay may run similarity-ordered and stop at the first counterexample (REJECTED,
+   with "k/N traces checked"); clearance requires an exhaustive pass ("N/N checked"). Replay proves the
+   predicate's behaviour on recorded inputs only, not that the counterfactual continuation succeeds.
+2. Fresh held-out evaluation: run the parent twice fresh; D = cases whose outcome differs between the two runs.
+   The candidate's held-out pass count must exceed the better parent count by at least max(2, D+1). Then one
+   more fresh candidate run must confirm it. Procedures and prompt edits are judged by this gate only.
+3. No regression: zero failures on must_succeed cases that passed in either parent run; zero unwarranted
+   interventions on benign twins.
+4. Overfitting screen: no literal case, customer, charge or order ids, names or amounts from training traces.
+5. Authority does not grow: tool_allowlist is a subset of the parent's and no guard is removed, unless a
+   human-signed change says so. This is an enforced policy, not a safety proof.
+6. Cost is recorded and reported. It is not a gate.
+
+Evaluation modes are distinct and labelled everywhere: FRESH (counts for admission), RECORDED (a stored fresh
+result shown again, with its timestamp), CACHED (byte-identical request replay; debugging only, never admission).
+
+Held-out secrecy: held-out cases and their traces live in collections the improver's database identity cannot
+read; the improver process never inherits evaluator or admin credentials. A final audit cohort is never used for
+any decision until the harness is frozen.
+
+Level 2 (the improver's own harness): versions i0 and i1 are frozen, get the same training-visible failure
+material, and are scored on separately held-out proposal tasks with fixed slots and budget, counting invalid,
+duplicate, rejected and empty proposals. The claim is exactly what that comparison shows.
+
+The receipt (DSSE) names: corpus snapshot digest, parent, candidate, evaluator version, every report digest,
+exceptions. It is verified by the pinned public verifier (`probity-verify`) and an independently pinned key.
 
 ## Safety
 
