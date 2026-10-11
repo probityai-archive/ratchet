@@ -14,7 +14,7 @@ cmd = "ratchet show trace {{BAD_TRACE}}"
 hold = 3.5
 captions = [
   { at = 0.0, text = "Ratchet turns an AI agent's mistakes into tested, signed safety rules. Demo scenario, scripted agent." },
-  { at = 3.0, text = "A refund commits, then times out. The agent retries. The ledger shows two refunds." },
+  { at = 3.0, text = "Demo: a refund goes through, the reply is lost, the agent tries again, and the customer is refunded twice." },
 ]
 
 [[step]]
@@ -34,8 +34,8 @@ cmd = "ratchet replay {{REJECTED_CAND}} {{CLEARED_CAND}}"
 cmd_45 = "ratchet replay {{REJECTED_CAND}} {{CLEARED_CAND}} --max-columns 2"
 hold = 7.0
 captions = [
-  { at = 0.0, text = "Ratchet replays each proposed guard over {{REPLAY_TRACES}} recorded traces, with no model call." },
-  { at = 6.0, text = "One guard stops the bad retry but also blocks a legitimate refund: rejected." },
+  { at = 0.0, text = "Ratchet writes candidate safety rules and reruns all {{REPLAY_TRACES}} past conversations through them, with no AI calls." },
+  { at = 6.0, text = "One rule stops the double refund but also blocks a refund that should go through. Rejected." },
 ]
 
 [[step]]
@@ -45,7 +45,7 @@ cmd = "ratchet replay {{REJECTED_CAND}} {{REFUSED_CAND}}"
 cmd_45 = "ratchet replay {{REJECTED_CAND}} {{REFUSED_CAND}} --max-columns 2"
 hold = 6.0
 captions = [
-  { at = 0.0, text = "Ratchet replays each proposed guard over {{REPLAY_TRACES}} recorded traces, with no model call." },
+  { at = 0.0, text = "Ratchet writes candidate safety rules and reruns all {{REPLAY_TRACES}} past conversations through them, with no AI calls." },
   { at = 4.0, text = "It shows what each guard would block. A guard that blocks a legitimate run is rejected." },
 ]
 
@@ -55,7 +55,7 @@ outcome = "admitted"
 cmd = "ratchet show decision {{ADMITTED_CAND}}"
 hold = 6.0
 captions = [
-  { at = 0.0, text = "Demo scenario, scripted agent. The other clears replay, then fresh held-out runs: {{STABLE_RECOVERIES}} stable recoveries (needs {{STABLE_NEEDED}}), {{PROTECTED_N}} protected cases kept." },
+  { at = 0.0, text = "The other rule is then tested on cases the AI improver never saw: it fixes {{STABLE_RECOVERIES}} failing cases (needs {{STABLE_NEEDED}}) and keeps all {{PROTECTED_N}} must-pass cases passing. Admitted." },
 ]
 
 [[step]]
@@ -64,7 +64,7 @@ outcome = "admitted"
 cmd = "ratchet verify {{ADMITTED_CAND}}"
 hold = 2.5
 captions = [
-  { at = 0.0, text = "The admission carries a signed receipt, checked against a pinned public key." },
+  { at = 0.0, text = "Every decision is signed. Anyone can check the signature against our published key." },
 ]
 
 [[step]]
@@ -86,9 +86,9 @@ cmd = "ratchet show decision b972467a3b9a"
 db = "ratchet_v3_full"
 hold = 9.0
 captions = [
-  { at = 0.0, text = "Live gpt-oss-120b, 3,800 fresh runs: a change lifts the pass rate from 33.4% to 42.1%." },
-  { at = 3.0, text = "It also drops one policy case from 21 to 8 of 40. Ratchet refuses it and signs the refusal." },
-  { at = 6.0, text = "An unchanged control moved a case from 32 to 23 of 40. Without this gate, noise looks like progress." },
+  { at = 0.0, text = "Now a real AI model, 3,800 test runs: an AI-written change lifts the success rate from 33.4% to 42.1%." },
+  { at = 3.0, text = "But one customer case falls from 21 to 8 passes out of 40. Ratchet refuses the change and signs the refusal." },
+  { at = 6.0, text = "The same agent with no change at all swung from 32 to 23 out of 40. Without a strict gate, luck looks like progress." },
 ]
 
 [[step]]
@@ -97,7 +97,7 @@ cmd = "ratchet show decision {{AUTHORITY_DECISION}}"
 db = "{{AUTHORITY_DB}}"
 hold = 4.0
 captions = [
-  { at = 0.0, text = "Demo scenario: a change that grants the agent a tool its parent lacks fails the authority gate." },
+  { at = 0.0, text = "Demo: a change that tries to give the agent a new tool or permission is refused automatically." },
 ]
 
 [[step]]
@@ -105,7 +105,7 @@ id = "lineage"
 cmd = "ratchet show lineage"
 hold = 5.0
 captions = [
-  { at = 0.0, text = "Everything lives in MongoDB Atlas: $graphLookup builds this lineage, Vector Search finds past failures, a database role hides held-out cases from the improver." },
+  { at = 0.0, text = "Everything lives in MongoDB Atlas: every version and decision, a search over past failures, and test cases the improver is not allowed to read." },
 ]
 
 [[step]]
@@ -113,8 +113,8 @@ id = "hooks"
 cmd = "cat docs/results/hooks-replay.md"
 hold = 5.5
 captions = [
-  { at = 0.0, text = "Real data: one guard replayed over 629,192 tool calls from 13,712 real coding-agent sessions." },
-  { at = 2.5, text = "7 fires, each a force push to main it would have denied. 0 errors. About 1,600 checks per second." },
+  { at = 0.0, text = "Real data: one safety rule rerun over 629,192 actions from 13,712 real AI coding-agent sessions." },
+  { at = 2.5, text = "It fired 7 times, each a forced overwrite of the main code branch it would have stopped. 0 errors." },
 ]
 
 [[step]]
@@ -122,5 +122,5 @@ id = "benchmarks"
 cmd = "cat {{RESULTS_FILE}}"
 hold = 3.5
 captions = [
-  { at = 0.0, text = "Also run on AgentDojo ({{AGENTDOJO_CASES}} held-out cases) and tau-bench retail ({{TAU_CASES}} held-out tasks)." },
+  { at = 0.0, text = "Also run on public agent tests: tau-bench (simulated customer service, {{TAU_CASES}} tasks) and AgentDojo (hidden prompt attacks, {{AGENTDOJO_CASES}} cases)." },
 ]
