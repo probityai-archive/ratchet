@@ -544,6 +544,15 @@ def _raindrop_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--experiment", help="label that keeps one comparison apart in Raindrop")
 
 
+def cmd_demo(args: argparse.Namespace, backend: Backend, console: Console) -> int:
+    from ratchet.demo.scenario import main as demo_main
+
+    uri = os.environ.get(URI_ENV, "")
+    if not uri:
+        raise CliError(f"set {URI_ENV} to point at the store")
+    return demo_main(args.db, uri, reset=args.reset)
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ratchet",
@@ -612,6 +621,12 @@ def _parser() -> argparse.ArgumentParser:
     lv.add_argument("--timeout", type=float, default=None, help="stop after this many seconds")
     lv.add_argument("--max-events", type=int, default=None, help="stop after this many lines")
     lv.set_defaults(func=cmd_live)
+
+    dm = sub.add_parser("demo", help="labelled demo scenarios (scripted agent, real pipeline)")
+    dm.add_argument("scenario", choices=["admit"], help="admit: one admission end to end, scripted agent")
+    dm.add_argument("--db", default="ratchet_demo", help="database to write (must start with ratchet_demo)")
+    dm.add_argument("--reset", action="store_true", help="drop the demo database first")
+    dm.set_defaults(func=cmd_demo)
 
     rt = sub.add_parser("report", help="write one static HTML page: lineage, replay matrix, results")
     rt.add_argument("candidate", nargs="*")
