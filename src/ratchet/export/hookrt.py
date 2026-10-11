@@ -216,6 +216,19 @@ INTROSPECTION = frozenset(
 FRAME_WORDS = tuple(
     sorted(w for w in INTROSPECTION if w.startswith(("f_", "tb_", "gi_", "cr_", "ag_", "_", "__")))
 )
+# Attributes that are a way in wherever they appear (`re.compile` is harmless; a bare `compile` is not).
+ATTRIBUTE_WORDS = frozenset(
+    {
+        *FRAME_WORDS,
+        "attrgetter",
+        "methodcaller",
+        "currentframe",
+        "__subclasses__",
+        "__mro__",
+        "__bases__",
+        "__base__",
+    }
+)
 
 
 def _check_def(tree: ast.Module) -> ast.FunctionDef | None:
@@ -238,7 +251,7 @@ def _could_reach(node: ast.AST, hidden: str, check: ast.FunctionDef) -> bool:
         rebinds = node.id == "check" and not isinstance(node.ctx, ast.Load)
         return rebinds or node.id == hidden or node.id in INTROSPECTION
     if isinstance(node, ast.Attribute):
-        return node.attr in INTROSPECTION
+        return node.attr in ATTRIBUTE_WORDS
     if isinstance(node, ast.Constant):  # a format field such as "{0.gi_frame}" reads an attribute by name
         return isinstance(node.value, str) and any(word in node.value for word in FRAME_WORDS)
     if isinstance(node, ast.Import | ast.ImportFrom):
