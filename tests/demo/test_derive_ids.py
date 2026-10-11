@@ -365,13 +365,14 @@ def fresh_doc(
     )
 
 
-def test_the_closest_refusal_ranks_recoveries_then_kept_protection_then_fewest_regressions() -> None:
+def test_the_closest_refusal_ranks_kept_protection_then_recoveries_then_fewest_regressions() -> None:
     keeps = {"a": "pass", "b": "pass", "p1": "pass", "p2": "pass"}
     best = fresh_doc("best", ["a", "b"], keeps, ["x"], "invalid")
     breaks = fresh_doc("breaks", ["a", "b"], {**keeps, "p2": "fail"}, [], "invalid")
     worse = fresh_doc("worse", ["a", "b"], keeps, ["x", "y"], "invalid")
-    fewer = fresh_doc("fewer", ["a"], keeps, [], "invalid")
-    db, picked = derive.pick_closest({"live1": [breaks, worse], "live2": [best, fewer]}) or ("", None)
+    fewer = fresh_doc("fewer", ["a"], keeps, [], "invalid")  # below the minimum of two recoveries
+    more = fresh_doc("more", ["a", "b", "p1"], {**keeps, "p1": "fail"}, [], "invalid")  # breaks p1
+    db, picked = derive.pick_closest({"live1": [breaks, worse, more], "live2": [best, fewer]}) or ("", None)
     assert (db, picked.doc["candidate"] if picked else None) == ("live2", "best")
     out = derive.Derived()
     derive.derive_refusal(out, (db, picked))  # type: ignore[arg-type]

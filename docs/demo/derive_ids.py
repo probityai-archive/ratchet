@@ -65,6 +65,7 @@ ADMITTED_ONLY = (
     "HELDOUT_N",
 )
 DEMO_DB_PREFIX = "ratchet_demo"
+MIN_RECOVERIES = 2  # docs/CONTRACT.md: at least two stable recoveries
 LEVEL2_DB = "ratchet_l2"
 LEVEL2_ID = re.compile(r"^(level2-[^:]+):([^:]+):")
 
@@ -278,11 +279,14 @@ class Closeness:
     heldout_n: int
     confirm_invalid: bool
 
-    def rank(self) -> tuple[int, bool, int, int]:
+    def rank(self) -> tuple[bool, bool, int, int, int]:
+        """Every protected case kept first, then the gate's minimum of recoveries, then fewest regressed
+        must-succeed cases, then most recoveries, then fewest failed gates."""
         return (
-            len(self.recoveries),
             self.kept == self.protected,
+            len(self.recoveries) >= MIN_RECOVERIES,
             -len(self.regressed),
+            len(self.recoveries),
             -len(_failed(self.doc)),
         )
 
@@ -388,7 +392,7 @@ def derive_level2_from_store(
             )
         return
     run = max(full, key=lambda r: newest[r])
-    head = f"{'arm':<12}{'proposed':>10}{'replay_cleared':>16}{'admitted':>10}{'yield':>8}"
+    head = f"{'arm':<18}{'proposed':>10}{'replay_cleared':>16}{'admitted':>10}{'yield':>8}"
     lines = [f"Level 2: improver instructions, same gate (Atlas {db}, run {run}, live models)", head]
     yields: dict[str, str] = {}
     for name in sorted(runs[run]):
@@ -396,7 +400,7 @@ def derive_level2_from_store(
         cleared = sum(1 for d in arm_docs if (_check(d, GATE_REPLAY) or {}).get("passed"))
         admitted = sum(1 for d in arm_docs if d.get("admitted"))
         yields[name] = f"{admitted}/{len(arm_docs)}"
-        lines.append(f"{name:<12}{len(arm_docs):>10}{cleared:>16}{admitted:>10}{yields[name]:>8}")
+        lines.append(f"{name:<18}{len(arm_docs):>10}{cleared:>16}{admitted:>10}{yields[name]:>8}")
     out_dir.mkdir(exist_ok=True)
     summary = out_dir / "level2-summary.txt"
     summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -739,6 +743,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     all_docs = {n: stored_decisions(client, n) for n in ratchet_databases(client)}
     live = {n: d for n, d in all_docs.items() if not n.startswith(DEMO_DB_PREFIX)}
     out = Derived()
+    live_docs = [d for docs in live.values() for d in docs]
+    out.set("N_LIVE_DECISIONS", len(live_docs), "decisions in every live-model database")
+    out.set("N_LIVE_REJECTED", sum(1 for d in live_docs if not d.get("admitted")), "of those, admitted=false")
     refusal = pick_closest(live)
     derive_refusal(out, refusal)
 
