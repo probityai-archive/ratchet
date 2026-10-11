@@ -86,13 +86,19 @@ def _candidate(args: argparse.Namespace, store: Any) -> tuple[Harness, dict[str,
     harness = store.get_harness(decision["candidate"])
     if harness is None:
         raise SystemExit(f"admitted version {decision['candidate']} is not in harness_versions")
-    ctx = decision.get("context") or {}
     return harness, {
         "decision_id": str(decision.get("_id")),
         "decided_at": decision.get("decided_at"),
-        "derived_on": ctx.get("model"),
+        "derived_on": derived_on(decision),
+        "evaluator_version": (decision.get("evaluator") or {}).get("version"),
         "admitted_decisions_in_store": len(store.decisions({"admitted": True})),
     }
+
+
+def derived_on(decision: dict[str, Any]) -> Any:
+    """The model the admission evidence was produced with: the frozen evaluator's model configuration."""
+    cfg = (decision.get("evaluator") or {}).get("model_config") or {}
+    return cfg.get("model") or (decision.get("context") or {}).get("model")
 
 
 def _harness_meta(h: Harness, extra: dict[str, Any] | None = None) -> dict[str, Any]:

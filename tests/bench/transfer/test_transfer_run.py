@@ -178,3 +178,122 @@ def test_persist_writes_every_trace_and_one_eval() -> None:
     assert all(d["eval_id"] == out["eval_id"] for d in db["transfer_traces"].docs.values())
     empty = persist(db, payload, [])
     assert empty["traces"] == 0
+
+
+def test_derived_on_prefers_the_frozen_evaluator() -> None:
+    assert cli.derived_on({"evaluator": {"model_config": {"model": "a"}}, "context": {"model": "b"}}) == "a"
+    assert cli.derived_on({"context": {"model": "b"}}) == "b"
+    assert cli.derived_on({}) is None
+
+
+class FakeStore:
+    def __init__(self, decisions: list[dict[str, Any]], harness: Harness | None) -> None:
+        self._d = decisions
+        self._h = harness
+
+    def decisions(self, flt: dict[str, Any]) -> list[dict[str, Any]]:
+        return [d for d in self._d if d.get("admitted") == flt.get("admitted")]
+
+    def get_harness(self, version: str) -> Harness | None:
+        return self._h
+
+
+def test_candidate_from_store_takes_latest_admitted(tmp_path: Path) -> None:
+    import argparse
+
+    h = candidate()
+    decisions = [
+        {"_id": "d1", "candidate": "old", "admitted": True},
+        {"_id": "d2", "candidate": h.version, "admitted": True, "evaluator": {"version": "e1",
+         "model_config": {"model": "gpt-5"}}},
+        {"_id": "d3", "candidate": "rej", "admitted": False},
+    ]  # fmt: skip
+    args = argparse.Namespace(candidate_file=None, candidate="latest")
+    got, extra = cli._candidate(args, FakeStore(decisions, h))
+    assert got == h and extra["decision_id"] == "d2" and extra["derived_on"] == "gpt-5"
+    assert extra["admitted_decisions_in_store"] == 2 and extra["evaluator_version"] == "e1"
+    args.candidate = "missing"
+    with pytest.raises(SystemExit):
+        cli._candidate(args, FakeStore(decisions, h))
+    args.candidate = h.version
+    with pytest.raises(SystemExit):
+        cli._candidate(args, FakeStore(decisions, None))
+    with pytest.raises(SystemExit):
+        cli._candidate(args, None)
+
+
+class _Ctx:
+    def __init__(self, model: ScriptedModel) -> None:
+        self.model = model
+
+    def __enter__(self) -> ScriptedModel:
+        return self.model
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+def test_cli_probe_writes_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    turns = [scripted_turn(tool_calls=[("get_weather", {"city": "x"})])]
+    monkeypatch.setattr(cli, "endpoint_info", lambda *_a, **_k: {"served": [], "server_version": "v"})
+    monkeypatch.setattr(cli, "default_client", lambda *_a: _Ctx(ScriptedModel(turns)))
+    monkeypatch.setattr(
+        "ratchet.agent.worker.run_case",
+        lambda h, case, model: fake_run_case(h, case, model, None, run_id="p"),
+    )
+    out = tmp_path / "probe.json"
+    assert (
+        cli.main(["probe", "--base-url", "u", "--model", "m", "--case", "ordinary.v1", "--out", str(out)])
+        == 0
+    )
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["tool_call"]["tool_call_ok"] and data["run_case"]["case_id"] == "ordinary.v1"
+    monkeypatch.setattr(cli, "default_client", lambda *_a: _Ctx(ScriptedModel([scripted_turn("no")])))
+    assert cli.main(["probe", "--base-url", "u", "--model", "m", "--case", "ordinary.v1"]) == 1
+
+
+def test_cli_run_persists_when_a_store_uri_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import pymongo
+
+    import ratchet.store
+
+    written: dict[str, Any] = {}
+
+    class FakeClient:
+        def __init__(self, uri: str, **_kw: Any) -> None:
+            written["uri"] = uri
+
+        def __getitem__(self, name: str) -> dict[str, FakeCollection]:
+            written["db"] = name
+            written["colls"] = {"transfer_traces": FakeCollection(), "transfer_evals": FakeCollection()}
+            return written["colls"]  # type: ignore[no-any-return]
+
+        def close(self) -> None:
+            written["closed"] = True
+
+    h = candidate()
+    monkeypatch.setenv("RATCHET_MONGODB_URI", "mongodb://fake")
+    monkeypatch.setattr(pymongo, "MongoClient", FakeClient)
+    monkeypatch.setattr(ratchet.store, "Store", lambda *_a: FakeStore([{"_id": "d", "candidate": h.version,
+                                                                         "admitted": True}], h))  # fmt: skip
+    monkeypatch.setattr(cli, "endpoint_info", lambda *_a, **_k: {"served": [], "server_version": None})
+    monkeypatch.setattr("ratchet.agent.worker.run_case", fake_run_case)
+    out = tmp_path / "r.json"
+    args = [
+        "run",
+        "--base-url",
+        "u",
+        "--model",
+        "m",
+        "--splits",
+        "audit",
+        "--repeats",
+        "1",
+        "--out",
+        str(out),
+    ]
+    assert cli.main(args) == 0
+    n = len(by_split("audit"))
+    assert written["db"] == "ratchet_heldout" and written["closed"]
+    assert len(written["colls"]["transfer_traces"].docs) == 2 * n
+    assert json.loads(out.read_text(encoding="utf-8"))["meta"]["trace_db"] == "ratchet_heldout"
