@@ -32,7 +32,7 @@ def test_precise_guard_passes_replay() -> None:
     targets, failing, passing = _setup()
     sim, runner = FakeSimulator(), LocalRunner()
     rep = replay(Guard("g", "no dup", NO_DUP_GUARD), targets, failing, passing, WalkCache(sim), runner)  # type: ignore[arg-type]
-    assert rep.passed and runner.batches == 1
+    assert rep.passed and runner.batches == 2 and rep.coverage == "6/6 traces checked"
     assert all(t["hit"] and t["first_block_seq"] == 5 for t in rep.targets)
     assert rep.traces == 6 and rep.checks > 0 and rep.checks_per_s > 0
     assert rep.to_payload()["targets_hit"] == 3
@@ -110,3 +110,20 @@ def test_runtime_returning_wrong_count_is_an_error() -> None:
     targets, failing, passing = _setup()
     with pytest.raises(RuntimeError, match="verdicts"):
         replay(Guard("g", "", NO_DUP_GUARD), targets, failing, passing, WalkCache(FakeSimulator()), Short())  # type: ignore[arg-type]
+
+
+def test_overbroad_guard_is_rejected_early_and_clearance_needs_every_trace() -> None:
+    targets, failing, passing = _setup()
+    g = Guard("g", "", BLOCK_ALL_REFUNDS)
+    early = replay(g, targets, failing, passing, WalkCache(FakeSimulator()), LocalRunner(), chunk=1)  # type: ignore[arg-type]
+    assert early.verdict == "REJECTED" and early.coverage == "4/6 traces checked"
+    full = replay(g, targets, failing, passing, WalkCache(FakeSimulator()), LocalRunner(), early_stop=False)  # type: ignore[arg-type]
+    assert full.coverage == "6/6 traces checked" and len(full.false_positives) == 3
+    assert full.to_payload()["exhaustive"] and full.snapshot == early.snapshot
+
+
+def test_similarity_order_puts_target_like_traces_first() -> None:
+    from ratchet.improve.replay import similarity_order
+
+    order = similarity_order([good_plain(1), good_timeout(2)], [bad_timeout(3)], "refund")
+    assert [t.run_id for t in order] == ["plain-1", "good-2"]

@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 from ratchet.improve.diagnose import FailurePoint
-from ratchet.improve.sim import Simulator, Walk
-from ratchet.types import Event, Guard, ToolCall, Trace
+from ratchet.improve.sim import Simulator, Walk, call_of
+from ratchet.types import Event, Guard, ToolCall, Trace, canonical_json, sha256_hex
 
 
 @dataclass(frozen=True)
@@ -74,6 +74,16 @@ class ReplayReport:
     check_s: float
     walk_s: float
     notes: list[str] = field(default_factory=list)
+    traces_checked: int = 0
+    snapshot: str = ""
+
+    @property
+    def verdict(self) -> str:
+        return "CLEARED" if self.passed else "REJECTED"
+
+    @property
+    def coverage(self) -> str:
+        return f"{self.traces_checked}/{self.traces} traces checked"
 
     @property
     def benign_fires(self) -> int:
@@ -87,6 +97,10 @@ class ReplayReport:
         return {
             "guard_id": self.guard_id,
             "passed": self.passed,
+            "verdict": self.verdict,
+            "coverage": self.coverage,
+            "exhaustive": self.traces_checked == self.traces,
+            "snapshot_digest": self.snapshot,
             "targets_hit": sum(1 for t in self.targets if t["hit"]),
             "targets_total": len(self.targets),
             "targets": self.targets,
@@ -103,6 +117,32 @@ class ReplayReport:
         }
 
 
+def trace_digest(trace: Trace) -> str:
+    return sha256_hex(canonical_json(asdict(trace)))
+
+
+def snapshot_digest(traces: Iterable[Trace]) -> str:
+    """The digest of a declared trace snapshot: every (run id, trace digest) pair, sorted."""
+    return sha256_hex(canonical_json(sorted([t.run_id, trace_digest(t)] for t in traces)))
+
+
+def _tools(trace: Trace) -> set[str]:
+    return {call_of(e)["name"] for e in trace.events if e.kind == "tool_call"}
+
+
+def similarity_order(traces: Sequence[Trace], targets: Sequence[Trace], tool: str | None) -> list[Trace]:
+    """Most target-like first (tool-set overlap, then use of the failing tool), so a guard that is too
+    broad meets its counterexample early."""
+    ref = set().union(*(_tools(t) for t in targets)) if targets else set()
+
+    def score(t: Trace) -> tuple[float, int, str]:
+        mine = _tools(t)
+        jac = len(mine & ref) / len(mine | ref) if mine | ref else 0.0
+        return (-jac, -(tool in mine), t.run_id)
+
+    return sorted(traces, key=score)
+
+
 def replay(
     guard: Guard,
     targets: Sequence[FailurePoint],
@@ -111,83 +151,93 @@ def replay(
     walks: WalkCache,
     runner: GuardRunner,
     benign: Iterable[Trace] = (),
+    *,
+    early_stop: bool = True,
+    chunk: int = 32,
 ) -> ReplayReport:
-    """Replay `guard` over the target failures (by run id in `failing`), every passing trace, and every
-    benign-twin trace whatever its outcome: a guard must fire on none of the last two."""
+    """Replay `guard` over the target failures, every passing trace and every benign-twin trace, using each
+    call's recorded pre-call view.
+
+    Targets are checked first; then the clearance traces in similarity order, `chunk` traces per sandbox
+    batch. With `early_stop` the first counterexample ends the replay: REJECTED with "k/N traces checked".
+    CLEARED requires an exhaustive pass, "N/N traces checked".
+    """
     walk_before = walks.walk_s
-    inputs: list[GuardInput] = []
-    # (role, run_id, case_id, seq) for each input, in order.
-    where: list[tuple[str, str, str, int]] = []
     unfaithful: list[str] = []
     notes: list[str] = []
-
-    target_runs = sorted({t.run_id for t in targets})
-    for run_id in target_runs:
-        trace = failing.get(run_id)
-        if trace is None:
-            notes.append(f"target trace {run_id} not supplied")
-            continue
-        horizon = max(t.seq for t in targets if t.run_id == run_id)
-        w = walks.walk(trace)
-        if not w.faithful:
-            unfaithful.append(run_id)
-        for s in w.steps:
-            if s.seq <= horizon:
-                inputs.append(GuardInput(s.call, s.view, s.history))
-                where.append(("target", run_id, trace.case_id, s.seq))
-
-    n_passing = 0
-    seen: set[str] = set()
-    for role, traces in (("benign", benign), ("passing", passing)):
-        for trace in traces:
-            if trace.run_id in seen:
-                continue
-            seen.add(trace.run_id)
-            n_passing += 1
-            w = walks.walk(trace)
-            if not w.faithful:
-                unfaithful.append(trace.run_id)
-            for s in w.steps:
-                if s.executed:  # a call an existing guard already blocked cannot be a new false positive
-                    inputs.append(GuardInput(s.call, s.view, s.history))
-                    where.append((role, trace.run_id, trace.case_id, s.seq))
-
-    started = time.perf_counter()
-    verdicts = runner.check_batch(guard, inputs) if inputs else []
-    check_s = time.perf_counter() - started
-    if len(verdicts) != len(inputs):
-        raise RuntimeError(f"guard runtime returned {len(verdicts)} verdicts for {len(inputs)} inputs")
-
+    check_s = 0.0
+    checks = 0
     first_block: dict[str, int] = {}
     false_positives: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
-    for (role, run_id, case_id, seq), v in zip(where, verdicts, strict=True):
-        if v.error is not None:
-            errors.append({"run_id": run_id, "seq": seq, "error": v.error[:300]})
-            continue
-        if v.block is None:
-            continue
-        if role == "target":
-            first_block[run_id] = min(seq, first_block.get(run_id, seq))
-        else:
-            false_positives.append(
-                {
-                    "run_id": run_id,
-                    "case_id": case_id,
-                    "seq": seq,
-                    "reason": v.block[:300],
-                    "benign_twin": role == "benign",
-                }
-            )
 
+    def run(batch: list[tuple[str, Trace]]) -> None:
+        nonlocal check_s, checks
+        inputs: list[GuardInput] = []
+        where: list[tuple[str, str, str, int]] = []
+        for role, trace in batch:
+            w = walks.walk(trace)
+            if not w.faithful:
+                unfaithful.append(trace.run_id)
+            horizon = max((t.seq for t in targets if t.run_id == trace.run_id), default=0)
+            for st in w.steps:
+                if role == "target" and st.seq > horizon:
+                    continue
+                if role != "target" and not st.executed:
+                    continue  # a call an existing guard already blocked cannot be a new false positive
+                inputs.append(GuardInput(st.call, st.view, st.history))
+                where.append((role, trace.run_id, trace.case_id, st.seq))
+        started = time.perf_counter()
+        verdicts = runner.check_batch(guard, inputs) if inputs else []
+        check_s += time.perf_counter() - started
+        checks += len(inputs)
+        if len(verdicts) != len(inputs):
+            raise RuntimeError(f"guard runtime returned {len(verdicts)} verdicts for {len(inputs)} inputs")
+        for (role, run_id, case_id, seq), v in zip(where, verdicts, strict=True):
+            if v.error is not None:
+                errors.append({"run_id": run_id, "seq": seq, "error": v.error[:300]})
+            elif v.block is not None and role == "target":
+                first_block[run_id] = min(seq, first_block.get(run_id, seq))
+            elif v.block is not None:
+                fp = {"run_id": run_id, "case_id": case_id, "seq": seq, "reason": v.block[:300]}
+                false_positives.append({**fp, "benign_twin": role == "benign"})
+
+    target_traces: list[Trace] = []
+    for run_id in sorted({t.run_id for t in targets}):
+        trace = failing.get(run_id)
+        if trace is None:
+            notes.append(f"target trace {run_id} not supplied")
+        else:
+            target_traces.append(trace)
+    clear: list[tuple[str, Trace]] = []
+    seen = {t.run_id for t in target_traces}
+    for role, traces in (("benign", benign), ("passing", passing)):
+        for trace in traces:
+            if trace.run_id not in seen:
+                seen.add(trace.run_id)
+                clear.append((role, trace))
+    roles = {t.run_id: r for r, t in clear}
+    tool = targets[0].tool if targets else None
+    ordered = [(roles[t.run_id], t) for t in similarity_order([t for _, t in clear], target_traces, tool)]
+    total = len(target_traces) + len(ordered)
+
+    run([("target", t) for t in target_traces])
+    checked = len(target_traces)
     target_rows = []
     for t in targets:
         fb = first_block.get(t.run_id)
-        target_rows.append(
-            {"failure_id": t.id, "case_id": t.case_id, "failing_seq": t.seq, "first_block_seq": fb,
-             "hit": fb is not None and fb <= t.seq}
-        )  # fmt: skip
-    passed = bool(target_rows) and all(r["hit"] for r in target_rows) and not false_positives and not errors
+        target_rows.append({"failure_id": t.id, "case_id": t.case_id, "failing_seq": t.seq,
+                            "first_block_seq": fb, "hit": fb is not None and fb <= t.seq})  # fmt: skip
+    targets_ok = bool(target_rows) and all(r["hit"] for r in target_rows) and not errors
+    if targets_ok or not early_stop:
+        for i in range(0, len(ordered), max(1, chunk)):
+            if early_stop and (false_positives or errors):
+                break
+            batch = ordered[i : i + max(1, chunk)]
+            run(batch)
+            checked += len(batch)
+    exhaustive = checked == total
+    passed = exhaustive and targets_ok and not false_positives and not errors
     return ReplayReport(
         guard_id=guard.id,
         passed=passed,
@@ -195,9 +245,11 @@ def replay(
         false_positives=false_positives,
         errors=errors,
         unfaithful=sorted(set(unfaithful)),
-        traces=len(target_runs) + n_passing,
-        checks=len(inputs),
+        traces=total,
+        checks=checks,
         check_s=check_s,
         walk_s=walks.walk_s - walk_before,
         notes=notes,
+        traces_checked=checked,
+        snapshot=snapshot_digest([*target_traces, *(t for _, t in ordered)]),
     )
