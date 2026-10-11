@@ -1,0 +1,100 @@
+1. IDENTITY-CONTROL SPREAD (three runs of the same harness, 40 executions each)
+case                      P  I1  I2   pooled   P-I1 P-I2 I1-I2
+approval_revoked.v3       1   3   2   0.050    -2   -1   +1
+approval_revoked.v4      30  26  29   0.708    +4   +1   -3
+concurrent_worker.v3      7   7   4   0.150    +0   +3   +3
+concurrent_worker.v4      1   2   3   0.050    -1   -2   -1
+injection.v3              4   5   9   0.150    -1   -5   -4
+injection.v4             22  19  24   0.542    +3   -2   -5
+injection.v6             32  23  30   0.708    +9   +2   -7
+order_modification.v3     0   0   0   0.000    +0   +0   +0
+order_modification.v4    21  23  26   0.583    -2   -5   -3
+order_modification.v5    30  30  28   0.733    +0   +2   +2
+ordinary.v3              19  14  14   0.392    +5   +5   +0
+ordinary.v4               6   4   5   0.125    +2   +1   -1
+policy_changed.v3         0   0   0   0.000    +0   +0   +0
+policy_changed.v4         0   0   0   0.000    +0   +0   +0
+policy_changed.v6        21  30  20   0.592    -9   +1  +10
+reconciliation.v3         0   0   0   0.000    +0   +0   +0
+reconciliation.v4        40  40  40   1.000    +0   +0   +0
+refund_lost_reply.v3      1   1   2   0.033    +0   -1   -1
+refund_lost_reply.v4     19  18  21   0.483    +1   -2   -3
+standardized null differences: n=42, variance 0.888
+  (1.0 means binomial spread; the identity runs are neither over- nor under-dispersed)
+same-seed correlation between identical arms: mean -0.021, n=42
+
+fixed limit 8: P(an unchanged identity arm declines > 8 on some case)
+  one control 0.180; either of two controls 0.327
+
+calibrated limit: least L with P(decline > L | unchanged) <= 0.05/19
+  (Jeffreys-smoothed pooled rate (k + 0.5) / 121, so 0/120 and 120/120 still get a spread)
+  approval_revoked.v3      rate 0.054  limit  6  largest identity decline -1
+  approval_revoked.v4      rate 0.707  limit 11  largest identity decline +4
+  concurrent_worker.v3     rate 0.153  limit  9  largest identity decline +3
+  concurrent_worker.v4     rate 0.054  limit  6  largest identity decline -1
+  injection.v3             rate 0.153  limit  9  largest identity decline -1
+  injection.v4             rate 0.541  limit 12  largest identity decline +3
+  injection.v6             rate 0.707  limit 11  largest identity decline +9
+  order_modification.v3    rate 0.004  limit  2  largest identity decline +0
+  order_modification.v4    rate 0.583  limit 12  largest identity decline -2
+  order_modification.v5    rate 0.731  limit 11  largest identity decline +2
+  ordinary.v3              rate 0.393  limit 12  largest identity decline +5
+  ordinary.v4              rate 0.128  limit  8  largest identity decline +2
+  policy_changed.v3        rate 0.004  limit  2  largest identity decline +0
+  policy_changed.v4        rate 0.004  limit  2  largest identity decline +0
+  policy_changed.v6        rate 0.591  limit 12  largest identity decline +1
+  reconciliation.v3        rate 0.004  limit  2  largest identity decline +0
+  reconciliation.v4        rate 0.996  limit  2  largest identity decline +0
+  refund_lost_reply.v3     rate 0.037  limit  5  largest identity decline +0
+  refund_lost_reply.v4     rate 0.483  limit 12  largest identity decline +1
+  one control 0.028; either of two controls 0.055
+  identity_1               over 8: ['injection.v6']   over calibrated: -
+  identity_2               over 8: -   over calibrated: -
+  candidate:ad50dac8194c   over 8: -   over calibrated: -
+  candidate:b972467a3b9a   over 8: ['policy_changed.v6']   over calibrated: ['policy_changed.v6']
+
+2. SEQUENTIAL DECLINE TEST, looks after 10/20/30/40 executions per arm, spending (n/40)^2
+  limit  2: pass boundaries [-8, -6, -3, 1]; max excess P(pass) over fixed, bad region +7.6e-15; worst stop-time bias -1.51 pp
+            expected executions per arm when the arms are equal, by pass rate: {0.0: 40.0, 0.05: 39.3, 0.3: 37.3, 0.5: 37.0, 0.7: 37.3, 1.0: 40.0}
+  limit  5: pass boundaries [-7, -4, -1, 4]; max excess P(pass) over fixed, bad region +7.8e-14; worst stop-time bias -2.47 pp
+            expected executions per arm when the arms are equal, by pass rate: {0.0: 40.0, 0.05: 36.2, 0.3: 34.4, 0.5: 34.1, 0.7: 34.4, 1.0: 40.0}
+  limit  6: pass boundaries [-7, -4, 0, 5]; max excess P(pass) over fixed, bad region +1.3e-15; worst stop-time bias -2.47 pp
+            expected executions per arm when the arms are equal, by pass rate: {0.0: 30.0, 0.05: 33.7, 0.3: 33.3, 0.5: 33.1, 0.7: 33.3, 1.0: 30.0}
+  limit  8: pass boundaries [-6, -3, 2, 7]; max excess P(pass) over fixed, bad region +2.7e-14; worst stop-time bias -2.78 pp
+            expected executions per arm when the arms are equal, by pass rate: {0.0: 30.0, 0.05: 30.3, 0.3: 30.4, 0.5: 30.4, 0.7: 30.4, 1.0: 30.0}
+  limit  9: pass boundaries [-6, -2, 3, 8]; max excess P(pass) over fixed, bad region +3.1e-14; worst stop-time bias -2.93 pp
+            expected executions per arm when the arms are equal, by pass rate: {0.0: 30.0, 0.05: 28.9, 0.3: 28.6, 0.5: 28.6, 0.7: 28.6, 1.0: 30.0}
+  limit 11: pass boundaries [-5, -1, 4, 10]; max excess P(pass) over fixed, bad region +3.9e-14; worst stop-time bias -3.30 pp
+            expected executions per arm when the arms are equal, by pass rate: {0.0: 30.0, 0.05: 26.6, 0.3: 26.6, 0.5: 26.6, 0.7: 26.6, 1.0: 30.0}
+  limit 12: pass boundaries [-5, 0, 5, 11]; max excess P(pass) over fixed, bad region +7.5e-14; worst stop-time bias -3.18 pp
+            expected executions per arm when the arms are equal, by pass rate: {0.0: 20.0, 0.05: 23.5, 0.3: 24.8, 0.5: 24.9, 0.7: 24.8, 1.0: 20.0}
+
+3. REPLAY OF ratchet_v3_full, fixed limit 8 (the adopted v3 tolerances)
+  executions: parent 650/760, identity_1 580/760, identity_2 570/760, candidate:ad50dac8194c 620/760, candidate:b972467a3b9a 540/760
+  total 2960 of 3800 (77.9%), saving 840 (22.1%)
+  identity_1               settled at looks {20: 1, 30: 16, 40: 2}  failing: ['injection.v6']
+  identity_2               settled at looks {20: 1, 30: 17, 40: 1}  failing: -
+  candidate:ad50dac8194c   settled at looks {20: 1, 30: 12, 40: 6}  failing: -
+  candidate:b972467a3b9a   settled at looks {20: 5, 30: 12, 40: 2}  failing: ['policy_changed.v6']
+  per-case verdicts that differ from the fixed rule with the same limits: none
+  look at which each arm first has a certain case failure: {'identity_1': 40, 'identity_2': None, 'candidate:ad50dac8194c': None, 'candidate:b972467a3b9a': 40}
+  aggregate, stop-time rates, limit 5.00 - 2.78 = 2.22 pp:
+    identity_1               pooled -0.04 (fixed +1.18)  panel 0 -1.40 (fixed -0.26)  panel 1 +1.32 (fixed +2.63)  pass: sequential True, fixed True
+    identity_2               pooled -1.36 (fixed -0.39)  panel 0 -4.12 (fixed -2.11)  panel 1 +1.40 (fixed +1.32)  pass: sequential True, fixed True
+    candidate:ad50dac8194c   pooled +0.70 (fixed +0.66)  panel 0 -1.67 (fixed -1.05)  panel 1 +3.07 (fixed +2.37)  pass: sequential False, fixed True
+    candidate:b972467a3b9a   pooled -9.08 (fixed -8.68)  panel 0 -11.67 (fixed -11.05)  panel 1 -6.49 (fixed -6.32)  pass: sequential True, fixed True
+
+4. REPLAY OF ratchet_v3_full, calibrated per-case limits
+  executions: parent 690/760, identity_1 610/760, identity_2 610/760, candidate:ad50dac8194c 640/760, candidate:b972467a3b9a 590/760
+  total 3140 of 3800 (82.6%), saving 660 (17.4%)
+  identity_1               settled at looks {20: 4, 30: 7, 40: 8}  failing: -
+  identity_2               settled at looks {20: 2, 30: 11, 40: 6}  failing: -
+  candidate:ad50dac8194c   settled at looks {20: 1, 30: 10, 40: 8}  failing: -
+  candidate:b972467a3b9a   settled at looks {20: 6, 30: 5, 40: 8}  failing: ['policy_changed.v6']
+  per-case verdicts that differ from the fixed rule with the same limits: none
+  look at which each arm first has a certain case failure: {'identity_1': None, 'identity_2': None, 'candidate:ad50dac8194c': None, 'candidate:b972467a3b9a': 40}
+  aggregate, stop-time rates, limit 5.00 - 3.30 = 1.70 pp:
+    identity_1               pooled -1.32 (fixed +1.18)  panel 0 -0.79 (fixed -0.26)  panel 1 -1.84 (fixed +2.63)  pass: sequential True, fixed True
+    identity_2               pooled -1.01 (fixed -0.39)  panel 0 -3.95 (fixed -2.11)  panel 1 +1.93 (fixed +1.32)  pass: sequential False, fixed True
+    candidate:ad50dac8194c   pooled +1.67 (fixed +0.66)  panel 0 -1.14 (fixed -1.05)  panel 1 +4.47 (fixed +2.37)  pass: sequential False, fixed True
+    candidate:b972467a3b9a   pooled -9.21 (fixed -8.68)  panel 0 -11.67 (fixed -11.05)  panel 1 -6.75 (fixed -6.32)  pass: sequential True, fixed True
