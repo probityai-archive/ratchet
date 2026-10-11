@@ -82,6 +82,7 @@ captions = [
 
 [[step]]
 id = "refusal_v3"
+outcome = "terminal-only"
 cmd = "ratchet show decision b972467a3b9a"
 db = "ratchet_v3_full"
 hold = 9.0
@@ -102,6 +103,7 @@ captions = [
 
 [[step]]
 id = "lineage"
+outcome = "terminal-only"
 cmd = "ratchet show lineage"
 hold = 5.0
 captions = [
@@ -110,6 +112,7 @@ captions = [
 
 [[step]]
 id = "hooks"
+outcome = "terminal-only"
 cmd = "cat docs/results/hooks-replay.md"
 hold = 5.5
 captions = [
@@ -119,6 +122,7 @@ captions = [
 
 [[step]]
 id = "benchmarks"
+outcome = "terminal-only"
 cmd = "cat {{RESULTS_FILE}}"
 hold = 3.5
 captions = [

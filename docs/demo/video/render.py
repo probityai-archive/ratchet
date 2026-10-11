@@ -22,6 +22,7 @@ import subprocess
 import sys
 import textwrap
 from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -70,6 +71,36 @@ def sentinel_time(events: list[tuple[float, str, str]]) -> float:
         if code == "o" and SENTINEL_TITLE in data:
             return t
     raise SystemExit("the cast has no start marker: it was not recorded through drive.py")
+
+
+def compress_waits(
+    events: list[tuple[float, str, str]], steps: list[dict[str, Any]], cap: float
+) -> dict[float, float]:
+    """Map cast time to video time, cutting each gap inside a command's run (t_run to t_done) to `cap`.
+
+    Typing and the hold after each command keep their real length, so captions get their reading time;
+    only the wait for Atlas and the model store is shortened. The banner states the run was recorded.
+    """
+    waits = [(st["t_run"], st["t_done"]) for st in steps]
+    keys = ("t_start", "t_run", "t_done", "t_end")
+    points = sorted({0.0} | {t for t, _, _ in events} | {st[k] for st in steps for k in keys})
+    mapped = {points[0]: points[0]}
+    clock = points[0]
+    for a, b in pairwise(points):
+        inside = any(r <= a and b <= d for r, d in waits)
+        clock += min(b - a, cap) if inside else b - a
+        mapped[b] = clock
+    return mapped
+
+
+def write_cast(path: Path, header_src: Path, events: list[tuple[float, str, str]]) -> None:
+    """Write events as an asciicast v2 file (absolute times) with the source terminal size."""
+    head = json.loads(header_src.read_text(encoding="utf-8").splitlines()[0])
+    term = head.get("term") or {}
+    width, height = term.get("cols", head.get("width")), term.get("rows", head.get("height"))
+    lines = [json.dumps({"version": 2, "width": width, "height": height})]
+    lines += [json.dumps([round(t, 6), code, data]) for t, code, data in events]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def ass_time(seconds: float) -> str:
@@ -174,6 +205,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--label", help="replaces the banner; use for pipeline tests")
     ap.add_argument("--max-seconds", type=float, default=60.0)
+    ap.add_argument("--max-wait", type=float, default=0.4, help="longest pause kept while a command runs")
     args = ap.parse_args()
 
     fmt = FORMATS[args.format]
@@ -189,6 +221,12 @@ def main() -> int:
     for step in timeline["steps"]:
         for key in ("t_start", "t_run", "t_done", "t_end"):
             step[key] += shift
+    mapped = compress_waits(events, timeline["steps"], args.max_wait)
+    for step in timeline["steps"]:
+        for key in ("t_start", "t_run", "t_done", "t_end"):
+            step[key] = mapped[step[key]]
+    cast = args.out / f"compressed-{args.format}.cast"
+    write_cast(cast, args.cast, [(mapped[t], code, data) for t, code, data in events])
     total = max(s["t_end"] for s in timeline["steps"]) + 0.5
 
     gif = args.out / f"terminal-{args.format}.gif"
@@ -214,7 +252,7 @@ def main() -> int:
             "--last-frame-duration",
             "1",
             "--no-loop",
-            str(args.cast),
+            str(cast),
             str(gif),
         ]
     )
