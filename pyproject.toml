@@ -25,6 +25,8 @@ bench = [
     "terminal-bench==0.2.18",
     "tau-bench",
     "tool-sandbox",
+    "tau2",
+    "audioop-lts==0.2.2 ; python_full_version >= '3.13'",
 ]
 gepa = [
     "gepa==0.1.4",
@@ -69,7 +71,13 @@ addopts = "-W error"
 [tool.uv.sources]
 tau-bench = { git = "https://github.com/sierra-research/tau-bench", rev = "59a200c6d575d595120f1cb70fea53cef0632f6b" }
 probity-verify = { git = "https://github.com/probityai/probity-verify", rev = "b920366397cb131232163706864a70723b867367" }
+tau2 = { git = "https://github.com/sierra-research/tau2-bench", rev = "4ce7c0397c1eb65c9bbe59aeacfe1ca44a1cd699" }
 tool-sandbox = { git = "https://github.com/apple/ToolSandbox", rev = "c8571d7854316d2e1c5f288e59fe1e34e53f6dd1" }
+
+[tool.uv]
+# tau2-bench caps litellm below 1.82.7 only to keep out the two compromised PyPI releases (1.82.7, 1.82.8;
+# tau2-bench commit e40aba6). The bench extra already pins litellm 1.102.1, a later clean release.
+override-dependencies = ["litellm==1.102.1"]
 
 [[tool.uv.dependency-metadata]]
 # The tool-sandbox package pins every dependency exactly (pydantic 2.7.4 conflicts with raindrop-ai, which needs
