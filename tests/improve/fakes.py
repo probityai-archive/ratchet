@@ -232,6 +232,11 @@ class FakeRunCase:
             raise RuntimeError("model endpoint down")
         if case.id.startswith("timeout"):
             t = good_timeout(n, run) if harness.guards else bad_timeout(n, run)
+        elif case.id.startswith("omit"):
+            calls: list[tuple[str, dict[str, Any]]] = [("get_charge", {"charge_id": f"ch_{n}"})]
+            if harness.procedures:
+                calls.append(("refund", {"charge_id": f"ch_{n}"}))
+            t = make_trace(case.id, calls, run)
         else:
             t = lazy(n, run) if self.block_plain and harness.guards else good_plain(n, run)
         return Trace(t.run_id, t.case_id, harness.version, t.model, t.events, t.outcome)
