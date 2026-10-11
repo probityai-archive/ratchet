@@ -121,12 +121,13 @@ class FakeBackend:
         )
         store.put_harness(child)
         store.put_eval(
-            {"type": "generation", "generation": 1, "parent": sid, "promoted": cid}, eval_id="gen-1"
+            {"type": "generation", "generation": 1, "parent": sid, "level1": {"promoted": cid}},
+            eval_id="gen-1",
         )
         won = {"heldout_passed": 1, "heldout_total": 1}
-        gen = SimpleNamespace(generation=1, parent=sid, promoted=cid, parent_score={"heldout_passed": 0},
-                              child_score=won, note="")  # fmt: skip
-        idle = SimpleNamespace(generation=2, parent=cid, promoted=None, parent_score={}, child_score={},
+        gen = SimpleNamespace(generation=1, parent=sid, promoted=cid, note="",
+                              level1={"parent_score": {"heldout_passed": 0}, "child_score": won})  # fmt: skip
+        idle = SimpleNamespace(generation=2, parent=cid, promoted=None, level1={},
                                note="no training failures left")  # fmt: skip
         return SimpleNamespace(harness=child, generations=[gen, idle])
 

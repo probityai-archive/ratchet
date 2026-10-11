@@ -100,6 +100,7 @@ class LiveBackend:
 
     def __init__(self, env: dict[str, str] | None = None) -> None:
         self.env = dict(os.environ) if env is None else env
+        self._store: Any = None
 
     def open_store(self) -> AbstractContextManager[WriteStore]:
         from ratchet.store import Store
@@ -109,7 +110,9 @@ class LiveBackend:
             raise CliError(
                 f"{URI_ENV} is not set (local Atlas: docker compose -f docker/compose.yaml up -d --wait)"
             )
-        return Store(uri, self.env.get(DB_ENV, "ratchet"))
+        store = Store(uri, self.env.get(DB_ENV, "ratchet"))
+        self._store = store
+        return store
 
     def model(self) -> Any:
         from ratchet.agent.model import ModelClient
@@ -169,11 +172,15 @@ class LiveBackend:
         from ratchet.agent.guards import GuardRuntime
         from ratchet.agent.worker import run_case
         from ratchet.cases import all_cases
+        from ratchet.improve.activate import MongoActivator
         from ratchet.improve.loop import Lab, evolve
         from ratchet.improve.receipt import Signer
         from ratchet.improve.sandbox import SandboxRunner
         from ratchet.improve.worldsim import WorldSimulator
 
+        if self._store is None:
+            raise CliError("evolve needs the store open first (open_store)")
+        activator = MongoActivator(self._store.db.client, self._store.db.name)
         with GuardRuntime() as runtime:
             lab = Lab(
                 cases=cases,
@@ -181,6 +188,7 @@ class LiveBackend:
                 simulator=WorldSimulator(all_cases()),
                 runner=SandboxRunner(runtime),
                 signer=Signer.from_env(),
+                activator=activator,
                 workers=workers,
                 repeats=repeats,
                 log=log,
@@ -308,7 +316,8 @@ def cmd_evolve(args: argparse.Namespace, backend: Backend, console: Console) -> 
 
 
 def _generation_line(g: Any) -> Text:
-    before, after = g.parent_score or {}, g.child_score or {}
+    level1 = getattr(g, "level1", None) or {}
+    before, after = level1.get("parent_score") or {}, level1.get("child_score") or {}
     t = Text.assemble((f"generation {g.generation}", "bold"), f"  parent {g.parent}")
     if g.promoted:
         t.append(f"  promoted {g.promoted}", style="bold green")
