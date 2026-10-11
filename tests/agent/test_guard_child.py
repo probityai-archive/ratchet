@@ -98,7 +98,8 @@ def test_serve_refuses_when_a_required_layer_is_missing() -> None:
 )
 def test_serve_reports_load_failures(source: str, error: str) -> None:
     sent = _serve(_setup(source, timeout_s=0.2), [])
-    assert len(sent) == 1 and sent[0]["ready"] is False and error in sent[0]["error"]
+    assert sent[0] == {"loading": True}
+    assert len(sent) == 2 and sent[1]["ready"] is False and error in sent[1]["error"]
 
 
 def test_serve_answers_requests_and_tracks_history() -> None:
@@ -117,9 +118,12 @@ def test_serve_answers_requests_and_tracks_history() -> None:
         _request(3, 0, [], amount=1),
     ]
     sent = _serve(_setup(source), lines)
-    assert sent[0]["ready"] is True
-    assert [r["block"] for r in sent[1:]] == ["over:1", "over:1,2", "over:1", None]
-    assert [r["i"] for r in sent[1:]] == [0, 1, 2, 3]
+    assert sent[0] == {"loading": True} and sent[1]["ready"] is True
+    markers, replies = sent[2::2], sent[3::2]
+    assert markers == [{"s": 0}, {"s": 1}, {"s": 2}, {"s": 3}]
+    assert [r["block"] for r in replies] == ["over:1", "over:1,2", "over:1", None]
+    assert [r["i"] for r in replies] == [0, 1, 2, 3]
+    assert all(r["guard_s"] >= 0.0 for r in replies)
 
 
 @pytest.mark.parametrize(
@@ -133,12 +137,12 @@ def test_serve_answers_requests_and_tracks_history() -> None:
 def test_evaluate_failures(body: str, error: str) -> None:
     code = child._load("def check(call, view, history):\n" + body)
     call = child.ToolCall(name="x", args={}, call_id="c")
-    signal_was = signal.getsignal(signal.SIGALRM)
-    signal.signal(signal.SIGALRM, child._on_alarm)
+    signal_was = signal.getsignal(signal.SIGPROF)
+    signal.signal(signal.SIGPROF, child._on_alarm)
     try:
         reply = child._evaluate(code, call, {}, [], 0.2)
     finally:
-        signal.signal(signal.SIGALRM, signal_was)
+        signal.signal(signal.SIGPROF, signal_was)
     assert reply["block"] is None and error in reply["error"]
 
 

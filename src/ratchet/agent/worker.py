@@ -5,7 +5,9 @@ Order of checks for every tool call the model makes:
   2. the tool must be on the harness allowlist,
   3. every guard runs in the sandbox (fail closed) on the call, the state view and the history so far.
 Any failure returns an error to the model as the tool's result and records a `guard_block` event; the world
-is not touched. Otherwise the world executes the call and a `tool_result` event records the result.
+is not touched. A sandbox failure that is not the guard's (`GuardInfrastructureError`) is never turned into
+a block: it stops the run loudly, and with a store the run resumes from its last checkpoint.
+Otherwise the world executes the call and a `tool_result` event records the result.
 
 Events and what they carry (the improver and the store read these keys):
   model        model, content, tool_calls, finish_reason, usage{input_tokens, output_tokens}, latency_s

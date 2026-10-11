@@ -23,9 +23,13 @@ cannot write its data. They are exercised end to end by tests/agent/test_guards.
 children, asserts every layer reports active, and asserts each escape attempt (network, unix sockets, file
 reads and writes, fork, exec, signals, memory) is refused.
 
+Startup : setup line in; {"loading": true} once locked down (untrusted code runs from here), then
+          {"ready": bool, "isolation": {...}, "error"?: str}.
 Request : {"i": n, "call": {...}, "view": {...}, "h_keep": k, "h_add": [event, ...]}
           The child keeps its last history; it keeps the first k events and appends `h_add`.
-Reply   : {"i": n, "block": str | null, "error": str | null}
+Replies : {"s": n} when the request is decoded and the guard starts, then
+          {"i": n, "block": str | null, "error": str | null, "guard_s": float}.
+          The guard's time limit is CPU time (ITIMER_PROF) measured from the start marker only.
 """
 
 import builtins
@@ -36,6 +40,7 @@ import platform
 import resource
 import signal
 import sys
+import time
 import types
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -270,22 +275,29 @@ def _on_alarm(signum: int, frame: Any) -> None:
 
 
 def _evaluate(code: Any, call: ToolCall, view: Any, history: list[Event], timeout_s: float) -> dict[str, Any]:
-    signal.setitimer(signal.ITIMER_REAL, timeout_s)
+    """Run the guard under a CPU-time alarm. Only the guard's own work counts against `timeout_s`: the
+    request was decoded before the alarm starts, and CPU time does not advance while the machine's load
+    keeps this process waiting. A guard that blocks without using CPU is stopped by the parent instead."""
+    started = time.perf_counter()
+    signal.setitimer(signal.ITIMER_PROF, timeout_s)
     try:
         namespace: dict[str, Any] = {"__name__": "guard", "__builtins__": builtins}
         exec(code, namespace)
         result = namespace["check"](call, view, history)
     except GuardTimeout:
-        return {"block": None, "error": "timeout"}
+        return {"block": None, "error": "timeout", "guard_s": time.perf_counter() - started}
     except BaseException as exc:
-        return {"block": None, "error": f"{type(exc).__name__}: {exc}"[:500]}
+        error = f"{type(exc).__name__}: {exc}"[:500]
+        return {"block": None, "error": error, "guard_s": time.perf_counter() - started}
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.setitimer(signal.ITIMER_PROF, 0)
+    elapsed = time.perf_counter() - started
     if result is None:
-        return {"block": None, "error": None}
+        return {"block": None, "error": None, "guard_s": elapsed}
     if isinstance(result, str):
-        return {"block": result[:1000], "error": None}
-    return {"block": None, "error": f"check returned {type(result).__name__}, expected str or None"}
+        return {"block": result[:1000], "error": None, "guard_s": elapsed}
+    error = f"check returned {type(result).__name__}, expected str or None"
+    return {"block": None, "error": error, "guard_s": elapsed}
 
 
 def _load(source: str) -> Any:
@@ -332,8 +344,10 @@ def serve(
         send({"ready": False, "isolation": isolation, "error": f"isolation unavailable: {missing}"})
         return
     timeout_s = float(setup["timeout_s"])
-    signal.signal(signal.SIGALRM, _on_alarm)
-    signal.setitimer(signal.ITIMER_REAL, timeout_s)
+    signal.signal(signal.SIGPROF, _on_alarm)
+    # Tells the parent that untrusted code starts now: time before this marker is sandbox startup.
+    send({"loading": True})
+    signal.setitimer(signal.ITIMER_PROF, timeout_s)
     try:
         code = _load(setup["source"])
     except GuardTimeout:
@@ -343,7 +357,7 @@ def serve(
         send({"ready": False, "isolation": isolation, "error": f"{type(exc).__name__}: {exc}"[:500]})
         return
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.setitimer(signal.ITIMER_PROF, 0)
     send({"ready": True, "isolation": isolation})
     history: list[Event] = []
     for line in lines:
@@ -355,7 +369,10 @@ def serve(
         )
         raw = request["call"]
         call = ToolCall(name=raw["name"], args=raw["args"], call_id=raw["call_id"])
-        reply = _evaluate(code, call, request["view"], list(history), timeout_s)
+        snapshot = list(history)
+        # Decoding is done; the guard's own time starts here, and the parent times it from this marker.
+        send({"s": request["i"]})
+        reply = _evaluate(code, call, request["view"], snapshot, timeout_s)
         reply["i"] = request["i"]
         send(reply)
 

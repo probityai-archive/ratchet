@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import textwrap
 import time
 from collections.abc import Iterator
@@ -9,6 +11,8 @@ import pytest
 
 from ratchet.agent.guards import (
     GUARD_ERROR_REASON,
+    INFRASTRUCTURE_ERROR_REASON,
+    GuardInfrastructureError,
     GuardItem,
     GuardLimits,
     GuardProcess,
@@ -124,7 +128,7 @@ def test_guard_that_swallows_the_timer_is_killed_by_the_parent() -> None:
                     pass
         """
     )
-    with GuardRuntime(GuardLimits(call_timeout_s=0.3)) as rt:
+    with GuardRuntime(GuardLimits(call_timeout_s=0.3, guard_wall_grace_s=0.3)) as rt:
         started = time.monotonic()
         decision = rt.check(stubborn, CALL, VIEW, [])
         assert decision.blocked and decision.error == "timeout" and time.monotonic() - started < 2.0
@@ -295,3 +299,108 @@ def test_guard_cannot_signal_its_parent_on_any_landlock_abi(max_abi: int | None)
             assert decision.blocked and decision.error is None, decision
             assert decision.reason is not None and "SENT" not in decision.reason, (target, decision.reason)
             assert decision.reason.count("=EPERM") >= 3, (target, decision.reason)
+
+
+# --- guard time versus transport time -----------------------------------------------------------------
+
+
+def _big_history(n: int, tag: int) -> list[Event]:
+    payload = {"call": {"name": "lookup", "args": {"id": "INV-1", "amount": 50}}, "note": "x" * 120}
+    return [Event(seq=i, kind="tool_call", payload={**payload, "tag": tag}, ts=float(i)) for i in range(n)]
+
+
+@pytest.fixture
+def cpu_hog() -> Iterator[int]:
+    """Saturate every CPU this process may run on with busy loops for the duration of the test."""
+    count = len(os.sched_getaffinity(0))
+    hogs = [
+        subprocess.Popen([sys.executable, "-c", "while True: pass"], stdin=subprocess.DEVNULL)
+        for _ in range(count)
+    ]
+    try:
+        yield count
+    finally:
+        for hog in hogs:
+            hog.kill()
+        for hog in hogs:
+            hog.wait()
+
+
+INSTANT = guard(
+    """
+    def check(call, view, history):
+        if call.args.get("loop"):
+            while True:
+                pass
+        return "n=%d" % len(history)
+    """,
+    "instant",
+)
+HISTORY_EVENTS = 15_000
+CALL_LIMIT_S = 0.2
+
+
+def test_decoding_a_large_history_under_load_is_never_a_guard_timeout(cpu_hog: int) -> None:
+    items = [
+        GuardItem(INSTANT, ToolCall("lookup", {}, f"c{k}"), VIEW, _big_history(HISTORY_EVENTS, k))
+        for k in range(3)
+    ]
+    with GuardRuntime(GuardLimits(call_timeout_s=CALL_LIMIT_S), workers=1) as rt:
+        started = time.monotonic()
+        results = rt.batch(items)
+        wall = time.monotonic() - started
+    # The scenario is real: getting each history into the child took longer than a guard may run ...
+    assert wall / len(items) > CALL_LIMIT_S, wall
+    # ... and none of that time was charged to the guard.
+    assert [r.kind for r in results] == ["verdict"] * len(items), results
+    assert [r.reason for r in results] == [f"n={HISTORY_EVENTS}"] * len(items)
+    assert all(r.elapsed_s < CALL_LIMIT_S for r in results), [r.elapsed_s for r in results]
+
+
+def test_a_looping_guard_still_times_out_under_the_same_load(cpu_hog: int) -> None:
+    history = _big_history(HISTORY_EVENTS, 0)
+    items = [
+        GuardItem(INSTANT, ToolCall("lookup", {}, "a"), VIEW, history),
+        GuardItem(INSTANT, ToolCall("lookup", {"loop": True}, "b"), VIEW, history),
+        GuardItem(INSTANT, ToolCall("lookup", {}, "c"), VIEW, history),
+    ]
+    with GuardRuntime(GuardLimits(call_timeout_s=CALL_LIMIT_S), workers=1) as rt:
+        results = rt.batch(items)
+    assert [r.kind for r in results] == ["verdict", "guard_error", "verdict"], results
+    assert results[1].reason == GUARD_ERROR_REASON and results[1].error == "timeout"
+
+
+def test_a_guard_that_blocks_without_cpu_hits_the_wall_backstop() -> None:
+    sleeper = guard("import time\ndef check(call, view, history):\n    time.sleep(30)\n", "sleeper")
+    with GuardRuntime(GuardLimits(call_timeout_s=0.2, guard_wall_grace_s=0.3)) as rt:
+        started = time.monotonic()
+        decision = rt.check(sleeper, CALL, VIEW, [])
+    assert decision.kind == "guard_error" and decision.error == "timeout" and time.monotonic() - started < 3.0
+
+
+def test_transport_failure_is_an_infrastructure_error_not_a_verdict() -> None:
+    limits = GuardLimits(transport_timeout_s=0.01)
+    items = [
+        GuardItem(INSTANT, ToolCall("lookup", {}, f"c{k}"), VIEW, _big_history(HISTORY_EVENTS, k))
+        for k in range(2)
+    ]
+    with GuardRuntime(limits, workers=1) as rt:
+        with pytest.raises(GuardInfrastructureError, match="failed in the sandbox, not in the guard") as info:
+            rt.batch(items)
+        assert {d.kind for d in info.value.decisions} == {"infrastructure_error"}
+        assert {d.reason for d in info.value.decisions} == {INFRASTRUCTURE_ERROR_REASON}
+        with pytest.raises(GuardInfrastructureError, match="transport timeout") as one:
+            rt.check(INSTANT, CALL, VIEW, items[0].history)
+        assert one.value.decisions[0].reason == INFRASTRUCTURE_ERROR_REASON
+
+
+def test_sandbox_startup_failure_is_an_infrastructure_error() -> None:
+    with GuardRuntime(GuardLimits(startup_timeout_s=0.001)) as rt:
+        with pytest.raises(GuardInfrastructureError, match="failed to start"):
+            rt.validate(LIMIT_GUARD)
+        with pytest.raises(GuardInfrastructureError):
+            rt.check(LIMIT_GUARD, CALL, VIEW, [])
+        items = [GuardItem(LIMIT_GUARD, CALL, VIEW, [])]
+        with pytest.raises(GuardInfrastructureError) as info:
+            rt.batch(items)
+        assert info.value.decisions[0].kind == "infrastructure_error"

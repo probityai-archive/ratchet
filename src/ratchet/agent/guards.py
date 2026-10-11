@@ -15,8 +15,20 @@ Landlock ruleset before it reads the guard source (see `_guard_child`), and repo
 effect; the runtime refuses to start a child that lacks a required layer.
 
 Fail closed: a guard that does not compile, does not define `check`, raises, returns a non-string, runs
-past its time limit or kills its process yields a BLOCK decision with reason `GUARD_ERROR_REASON` and the
-underlying error in `GuardDecision.error`. Timed-out or dead children are killed and replaced.
+past its time limit or kills its process yields a BLOCK decision with reason `GUARD_ERROR_REASON`, kind
+`guard_error`, and the underlying error in `GuardDecision.error`. Timed-out or dead children are killed and
+replaced.
+
+Two clocks, so machine load never becomes a guard verdict:
+  guard time      `call_timeout_s` of CPU time, counted inside the child from the moment the request is
+                  decoded and the guard starts (the child sends a start marker), plus a wall-clock backstop
+                  of `call_timeout_s + guard_wall_grace_s` from that marker for a guard that blocks
+                  without using CPU. Exceeding it is the guard's fault: a `guard_error` decision.
+  transport time  `transport_timeout_s` (and `startup_timeout_s` for sandbox startup) for everything
+                  before the marker: encoding, the pipe, decoding a large history, a loaded machine.
+                  Exceeding it is not the guard's fault: the item is retried once on a fresh child, and if
+                  it fails again the runtime raises `GuardInfrastructureError`. It is never reported as
+                  a guard verdict.
 """
 
 from __future__ import annotations
@@ -33,11 +45,13 @@ from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ratchet.types import Event, Guard, ToolCall
 
 GUARD_ERROR_REASON = "guard error"
+INFRASTRUCTURE_ERROR_REASON = "guard infrastructure error"
+DecisionKind = Literal["verdict", "guard_error", "infrastructure_error"]
 CHILD_PATH = Path(__file__).with_name("_guard_child.py")
 ALL_LAYERS = ("rlimits", "netns", "seccomp", "landlock")
 
@@ -50,11 +64,22 @@ class SandboxUnavailableError(RuntimeError):
     """The child could not apply an isolation layer the runtime requires."""
 
 
+class GuardInfrastructureError(RuntimeError):
+    """The sandbox, not the guard, failed: startup or transport ran past its bound, or the child died
+    before the guard started. Carries every decision of the batch so a caller can see what completed."""
+
+    def __init__(self, message: str, decisions: Sequence[GuardDecision] = ()) -> None:
+        super().__init__(message)
+        self.decisions = list(decisions)
+
+
 @dataclass(frozen=True)
 class GuardLimits:
-    call_timeout_s: float = 2.0
-    startup_timeout_s: float = 10.0
-    cpu_s: int = 120
+    call_timeout_s: float = 2.0  # CPU time of one guard evaluation
+    guard_wall_grace_s: float = 5.0  # extra wall time from the start marker before the parent kills
+    transport_timeout_s: float = 60.0  # encode, pipe and decode one request, under any machine load
+    startup_timeout_s: float = 60.0  # interpreter start, preloads and lockdown
+    cpu_s: int = 3600  # whole-process CPU backstop; a child serves one shard of a batch
     memory_mb: int = 512
     # Layers that must take effect or the child is refused. Network isolation is required by the
     # contract; netns and seccomp each provide it, and both are required by default on Linux.
@@ -71,6 +96,7 @@ class GuardDecision:
     reason: str | None
     error: str | None = None
     elapsed_s: float = 0.0
+    kind: DecisionKind = "verdict"
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -88,7 +114,22 @@ class GuardItem:
 
 def _error_decision(guard_id: str, error: str, elapsed: float = 0.0) -> GuardDecision:
     return GuardDecision(
-        guard_id=guard_id, blocked=True, reason=GUARD_ERROR_REASON, error=error, elapsed_s=elapsed
+        guard_id=guard_id,
+        blocked=True,
+        reason=GUARD_ERROR_REASON,
+        error=error,
+        elapsed_s=elapsed,
+        kind="guard_error",
+    )
+
+
+def _infra_decision(guard_id: str, error: str) -> GuardDecision:
+    return GuardDecision(
+        guard_id=guard_id,
+        blocked=True,
+        reason=INFRASTRUCTURE_ERROR_REASON,
+        error=error,
+        kind="infrastructure_error",
     )
 
 
@@ -139,12 +180,18 @@ class GuardProcess:
             "require": list(self.limits.require),
             "landlock_max_abi": self.limits.landlock_max_abi,
         }
-        deadline = time.monotonic() + self.limits.startup_timeout_s + self.limits.call_timeout_s
+        guard_bound = self.limits.call_timeout_s + self.limits.guard_wall_grace_s
         try:
-            self._write(setup, deadline)
-            reply = self._read(deadline)
+            self._write(setup, time.monotonic() + self.limits.transport_timeout_s)
+            marker = self._read(time.monotonic() + self.limits.startup_timeout_s)
         except (TimeoutError, _ChildDiedError) as exc:
-            raise GuardSourceError(f"guard failed to start: {exc}") from exc
+            raise GuardInfrastructureError(f"guard sandbox failed to start: {exc}") from exc
+        reply = marker
+        if marker.get("loading"):
+            try:
+                reply = self._read(time.monotonic() + guard_bound)
+            except (TimeoutError, _ChildDiedError) as exc:
+                raise GuardSourceError(f"guard failed to load: {exc}") from exc
         self.isolation = dict(reply.get("isolation") or {})
         if not reply.get("ready"):
             error = str(reply.get("error"))
@@ -223,8 +270,9 @@ class GuardProcess:
         }
         return (json.dumps(request, separators=(",", ":")) + "\n").encode("utf-8")
 
-    def _decision(self, reply: dict[str, Any], elapsed: float) -> GuardDecision:
+    def _decision(self, reply: dict[str, Any]) -> GuardDecision:
         guard_id = self.guard.id
+        elapsed = float(reply.get("guard_s") or 0.0)
         if reply.get("error"):
             return _error_decision(guard_id, str(reply["error"]), elapsed)
         block = reply.get("block")
@@ -239,21 +287,24 @@ class GuardProcess:
     def evaluate_many(self, items: Sequence[GuardItem], window: int = 64) -> list[GuardDecision]:
         """Pipelined evaluation: up to `window` requests in flight, replies read as they arrive.
 
-        Returns decisions for a prefix of `items`. When the child times out or dies, the item it was
-        working on gets a fail-closed decision, the child is killed, and the shorter list is returned so the
-        caller can continue the rest on a fresh child. Each item's time limit runs from the moment the child
-        could start it (its send time, or the previous reply, whichever is later)."""
+        Returns decisions for a prefix of `items`. When the child fails, the item at the head gets a
+        decision, the child is killed, and the shorter list is returned so the caller can continue the rest
+        on a fresh child. The head item is judged by the clock that applies to it: before its start marker
+        arrives, `transport_timeout_s` from when the child could begin reading it, and an expiry or a death
+        there is an `infrastructure_error`; after the marker, the guard's own bound, and an expiry or a
+        death there is a `guard_error`."""
         if not items:
             return []
         if not self.alive:
-            return [_error_decision(self.guard.id, "guard process is not running")]
+            return [_infra_decision(self.guard.id, "guard process is not running")]
         stdin, stdout = self._proc.stdin, self._proc.stdout
         assert stdin is not None and stdout is not None
         in_fd, out_fd = stdin.fileno(), stdout.fileno()
         os.set_blocking(in_fd, False)
-        limit = self.limits.call_timeout_s + 0.5
+        guard_bound = self.limits.call_timeout_s + self.limits.guard_wall_grace_s
         out: list[GuardDecision] = []
         inflight: deque[tuple[int, float]] = deque()
+        head_started: float | None = None
         pending = b""
         sent = 0
         last_reply = time.monotonic()
@@ -263,11 +314,17 @@ class GuardProcess:
                 inflight.append((self._next, time.monotonic()))
                 self._next += 1
                 sent += 1
-            head_start = max(inflight[0][1], last_reply)
-            remaining = head_start + limit - time.monotonic()
+            if head_started is None:
+                deadline = max(inflight[0][1], last_reply) + self.limits.transport_timeout_s
+            else:
+                deadline = head_started + guard_bound
+            remaining = deadline - time.monotonic()
             if remaining <= 0:
                 self.close()
-                out.append(_error_decision(self.guard.id, "timeout", time.monotonic() - head_start))
+                if head_started is None:
+                    out.append(_infra_decision(self.guard.id, "transport timeout before the guard started"))
+                else:
+                    out.append(_error_decision(self.guard.id, "timeout", time.monotonic() - head_started))
                 return out
             readable, writable, _ = select.select([out_fd], [in_fd] if pending else [], [], remaining)
             if writable:
@@ -282,22 +339,30 @@ class GuardProcess:
                 code = self._proc.wait()
                 self.close()
                 error = f"guard process exited with status {code}"
-                out.append(_error_decision(self.guard.id, error, time.monotonic() - head_start))
+                if head_started is None:
+                    out.append(_infra_decision(self.guard.id, error + " before the guard started"))
+                else:
+                    out.append(_error_decision(self.guard.id, error, time.monotonic() - head_started))
                 return out
             self._buffer += chunk
             now = time.monotonic()
             *lines, self._buffer = self._buffer.split(b"\n")
             for line in lines:
-                index, started = inflight.popleft()
+                index = inflight[0][0]
                 try:
                     reply = json.loads(line)
                 except ValueError:
                     reply = None
-                if not isinstance(reply, dict) or reply.get("i") != index:
+                if isinstance(reply, dict) and head_started is None and reply.get("s") == index:
+                    head_started = now
+                    continue
+                if not isinstance(reply, dict) or head_started is None or reply.get("i") != index:
                     self.close()
                     out.append(_error_decision(self.guard.id, "guard process sent a malformed reply"))
                     return out
-                out.append(self._decision(reply, now - max(started, last_reply)))
+                inflight.popleft()
+                out.append(self._decision(reply))
+                head_started = None
                 last_reply = now
         return out
 
@@ -354,10 +419,16 @@ class GuardRuntime:
     def check(
         self, guard: Guard, call: ToolCall, view: Mapping[str, Any], history: Sequence[Event]
     ) -> GuardDecision:
-        proc = self._process(guard)
-        if isinstance(proc, str):
-            return _error_decision(guard.id, proc)
-        return proc.evaluate(call, view, history)
+        """One guard on one call. A guard's own failure is a fail-closed `guard_error` decision; a sandbox
+        failure is retried once on a fresh child and then raised as `GuardInfrastructureError`."""
+        for _ in range(2):
+            proc = self._process(guard)
+            if isinstance(proc, str):
+                return _error_decision(guard.id, proc)
+            decision = proc.evaluate(call, view, history)
+            if decision.kind != "infrastructure_error":
+                return decision
+        raise GuardInfrastructureError(f"guard {guard.id}: {decision.error}", [decision])
 
     def check_all(
         self, guards: Iterable[Guard], call: ToolCall, view: Mapping[str, Any], history: Sequence[Event]
@@ -367,7 +438,9 @@ class GuardRuntime:
 
     def batch(self, items: Sequence[GuardItem]) -> list[GuardDecision]:
         """Evaluate many items. Items for one guard are split into up to `workers` shards; each shard runs
-        in its own sandboxed child, and shards run concurrently. Results come back in input order."""
+        in its own sandboxed child, and shards run concurrently. Results come back in input order. Raises
+        `GuardInfrastructureError` (with every decision attached) when any item still fails in the sandbox
+        after one retry, so a replay can never read a sandbox failure as a guard verdict."""
         by_guard: dict[str, list[int]] = {}
         for index, item in enumerate(items):
             by_guard.setdefault(_guard_key(item.guard), []).append(index)
@@ -382,6 +455,7 @@ class GuardRuntime:
         def run(shard: list[int]) -> None:
             guard = items[shard[0]].guard
             pending = list(shard)
+            retried: set[int] = set()
             while pending:
                 try:
                     compile_guard(guard.source)
@@ -390,10 +464,17 @@ class GuardRuntime:
                     for index in pending:
                         results[index] = _error_decision(guard.id, str(exc))
                     return
+                except GuardInfrastructureError as exc:
+                    for index in pending:
+                        results[index] = _infra_decision(guard.id, str(exc))
+                    return
                 try:
                     done = proc.evaluate_many([items[i] for i in pending])
                 finally:
                     proc.close()
+                if done and done[-1].kind == "infrastructure_error" and pending[len(done) - 1] not in retried:
+                    retried.add(pending[len(done) - 1])
+                    done = done[:-1]  # one more try on a fresh child before it counts
                 for index, decision in zip(pending, done, strict=False):
                     results[index] = decision
                 pending = pending[len(done) :]
@@ -403,4 +484,11 @@ class GuardRuntime:
                 future.result()
         done = [r for r in results if r is not None]
         assert len(done) == total
+        failed = [d for d in done if d.kind == "infrastructure_error"]
+        if failed:
+            raise GuardInfrastructureError(
+                f"{len(failed)} of {total} guard evaluations failed in the sandbox, not in the guard: "
+                f"{failed[0].error}",
+                done,
+            )
         return done

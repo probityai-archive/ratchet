@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from ratchet.agent.guards import GUARD_ERROR_REASON, GuardRuntime
+from ratchet.agent.guards import GUARD_ERROR_REASON, GuardInfrastructureError, GuardLimits, GuardRuntime
 from ratchet.agent.model import ModelError, ModelTurn, ScriptedModel, scripted_turn
 from ratchet.agent.worker import (
     READ_PROCEDURE,
@@ -220,6 +220,7 @@ def test_guard_blocks_with_reason_and_sees_history_and_view(runtime: GuardRuntim
             "reason": None,
             "error": None,
             "elapsed_s": result.payload["decisions"][0]["elapsed_s"],
+            "kind": "verdict",
         }
     ]
     assert "look up the balance first" in model.requests[1][0][-1]["content"]
@@ -395,3 +396,17 @@ def test_default_run_id_is_stable_and_owns_its_runtime() -> None:
     )
     trace, _ = _run(h, ScriptedModel([scripted_turn("nothing to do")]))
     assert trace.run_id == default_run_id(h, _case(), "scripted") and not trace.outcome.passed
+
+
+def test_sandbox_failure_stops_the_run_instead_of_blocking() -> None:
+    guard = Guard(id="g", description="allow", source="def check(call, view, history):\n    return None\n")
+    model = ScriptedModel([scripted_turn(tool_calls=[("refund", {"amount": 30})]), scripted_turn("done")])
+    store = FakeStore()
+    with (
+        GuardRuntime(GuardLimits(startup_timeout_s=0.001)) as broken,
+        pytest.raises(GuardInfrastructureError),
+    ):
+        _run(_harness([guard]), model, runtime=broken, store=store, run_id="infra")
+    assert store.states == {} or store.states["infra"]["status"] == "running"
+    trace, world = _run(_harness([guard]), ScriptedModel(model._turns), store=store, run_id="infra")
+    assert trace.outcome.passed and world.balance == 70
