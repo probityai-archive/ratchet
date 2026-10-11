@@ -34,3 +34,21 @@ def test_replay_through_the_sandbox_matches_the_local_runner() -> None:
                        SandboxRunner(rt))  # fmt: skip
     assert boxed.passed and local.passed and boxed.targets == local.targets and boxed.checks == local.checks
     assert not crash.passed and crash.errors
+
+
+def test_a_sandbox_failure_makes_replay_incomplete_not_a_fire() -> None:
+    from collections.abc import Sequence
+
+    from ratchet.agent.guards import GuardInfrastructureError, GuardItem
+
+    class Broken(GuardRuntime):
+        def batch(self, items: Sequence[GuardItem]) -> list:  # type: ignore[type-arg]
+            raise GuardInfrastructureError("child died before the guard started")
+
+    failing = [bad_timeout(i) for i in range(2)]
+    cluster = diagnose(failing, FakeSimulator())[0]
+    with Broken(workers=1) as rt:
+        rep = replay(Guard("g", "", NO_DUP_GUARD), cluster.members, cluster.traces, [good_plain(5)],
+                     WalkCache(FakeSimulator()), SandboxRunner(rt))  # fmt: skip
+    assert rep.verdict == "INCOMPLETE" and not rep.false_positives and not any(t["hit"] for t in rep.targets)
+    assert rep.errors[0]["error"].startswith("guard infrastructure error")
