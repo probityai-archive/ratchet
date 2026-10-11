@@ -26,6 +26,7 @@ from ratchet.agent.seed import seed_harness
 from ratchet.agent.worker import run_case
 from ratchet.cases import all_cases
 from ratchet.improve.activate import MongoActivator
+from ratchet.improve.archive import ArchiveSelector
 from ratchet.improve.loop import EvolveResult, Lab, evolve
 from ratchet.improve.receipt import Signer, public_key_bytes
 from ratchet.improve.sandbox import SandboxRunner
@@ -124,7 +125,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             model_config=model_config,
             log=lambda msg: print(msg, flush=True),
         )
-        result = evolve(store, model, a.generations, lab=lab, seed=seed_harness())
+        # Selector scores come from training outcomes only, since the proposer sees what they select.
+        chooser = ArchiveSelector(store, min_descendants=2, seed=a.db, split="train")
+        result = evolve(store, model, a.generations, lab=lab, seed=seed_harness(), select_parent=chooser)
         report = summary(result, signer, time.perf_counter() - started, config)
         report["agent_model_cost"] = model.cost().__dict__
         report["improver_model_cost"] = improver.cost().__dict__

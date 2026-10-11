@@ -45,8 +45,11 @@ def test_main_refuses_without_a_store_or_key(monkeypatch: pytest.MonkeyPatch, tm
 def test_main_wires_the_lanes_and_writes_a_summary(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     seen: dict[str, Any] = {}
 
-    def fake_evolve(store: Any, model: Any, generations: int, *, lab: Any, seed: Harness) -> EvolveResult:
+    def fake_evolve(
+        store: Any, model: Any, generations: int, *, lab: Any, seed: Harness, select_parent: Any
+    ) -> EvolveResult:
         seen.update(generations=generations, cases=len(lab.cases), config=lab.model_config)
+        assert select_parent.split == "train" and select_parent.min_descendants == 2
         return EvolveResult(HARNESS, SEED, [GenerationRecord(1, seed.version, note="n")])
 
     for name in ("Store", "ModelClient", "GuardRuntime", "MongoClient"):

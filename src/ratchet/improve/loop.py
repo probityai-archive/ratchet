@@ -52,8 +52,15 @@ def frozen_suite_digest(path: Path = FROZEN_SUITE_FILE) -> str | None:
     return words[0] if words else None
 
 
+class ParentChooser(Protocol):
+    """The archive's parent selection: where ideas come from. It never changes the comparison parent."""
+
+    def __call__(self, tip: str, generation: int) -> Any: ...
+
+
 class ImproveStore(Protocol):
     def put_harness(self, harness: Harness) -> bool: ...
+    def get_harness(self, version: str) -> Harness | None: ...
     def put_trace(self, trace: Trace) -> bool: ...
     def put_eval(self, report: Any, *, eval_id: str | None = None) -> str: ...
     def put_decision(self, decision: Any, *, decision_id: str | None = None) -> str: ...
@@ -146,6 +153,7 @@ class GenerationRecord:
     agent_cost: dict[str, Any] = field(default_factory=dict)
     wall_s: float = 0.0
     note: str = ""
+    archive: dict[str, Any] = field(default_factory=dict)
 
     @property
     def promoted(self) -> str | None:
@@ -189,6 +197,8 @@ class _Gen:
     benign_ids: set[str]
     rec: GenerationRecord
     meter: Meter
+    inspiration: Harness | None = None
+    archive_context: dict[str, Any] = field(default_factory=dict)
     task_stats: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
     receipts: dict[str, tuple[str, str]] = field(default_factory=dict)  # candidate -> (decision id, digest)
 
@@ -448,7 +458,7 @@ def _promote(
         combo,
         report,
         referee,
-        {"generation": g.gen, "composite_of": [t.candidate.id for t in picks]},
+        {"generation": g.gen, "composite_of": [t.candidate.id for t in picks], **g.archive_context},
         [clusters[t.candidate.cluster_id] for t in picks if t.candidate.kind == "guard"],
     )
     if d.admitted and len(report.passed("heldout")) > len(best.report.passed("heldout")):
@@ -472,8 +482,13 @@ def evolve(
     lab: Lab,
     seed: Harness,
     instructions: Instructions = SEED,
+    select_parent: ParentChooser | None = None,
 ) -> EvolveResult:
-    """Run `generations` rounds of the ratchet from `seed`. Returns the final harness and every record."""
+    """Run `generations` rounds of the ratchet from `seed`. Returns the final harness and every record.
+
+    With `select_parent` (the version archive), each generation may draw ideas from an earlier admitted
+    version: that version is shown to the proposer read-only, every candidate is still a child of the active
+    harness and is compared with it, and the choice is recorded in the generation and in each decision."""
     improver: Chat = lab.improver or model
     lab.improver = improver
     parent, champion = seed, instructions
@@ -514,6 +529,12 @@ def evolve(
         train = parent_eval.train_traces()
         g = _Gen(gen, parent, (parent_eval, parent_rerun), evaluator, WalkCache(lab.simulator),
                  training_literals(train), visible, benign_ids, rec, meter)  # fmt: skip
+        if select_parent is not None:
+            choice = select_parent(parent.version, gen)
+            rec.archive = choice.to_payload()
+            g.archive_context = choice.decision_context()
+            if choice.rebase_required:
+                g.inspiration = store.get_harness(choice.version)
         clusters = diagnose(train, lab.simulator, improver, meter)[: lab.max_clusters]
         rec.clusters = [c.to_payload() for c in clusters]
         if not clusters:
@@ -621,6 +642,7 @@ def _propose_all(
                 walks=g.walks,
                 meter=g.meter,
                 n=lab.candidates_per_cluster,
+                inspiration=g.inspiration,
             )
             score.proposed += len(prop.candidates)
             g.task_stats[(arm, cl.id)] = {
@@ -687,7 +709,7 @@ def _evaluate_and_admit(
         t.report = report
         _persist_eval(store, report, {"generation": g.gen, "role": "candidate", "candidate": t.candidate.id})
         new_ids = {x.id for x in t.candidate.new_guards(g.parent)}
-        ctx = {"generation": g.gen, "arm": t.arm, **t.candidate.to_payload()}
+        ctx = {"generation": g.gen, "arm": t.arm, **t.candidate.to_payload(), **g.archive_context}
         t.decision, t.confirm = _decide(
             store,
             lab,

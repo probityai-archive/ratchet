@@ -182,6 +182,7 @@ def build_prompt(
     passing: Sequence[Trace],
     walks: WalkCache | None,
     n: int,
+    inspiration: Harness | None = None,
 ) -> str:
     shown = cluster.members[:3]
     failing = "\n\n".join(
@@ -196,6 +197,14 @@ def build_prompt(
             instructions.text,
             GUARD_API,
             f"Current harness:\n{_harness_text(harness)}",
+            *(
+                [
+                    "An earlier admitted harness, for ideas only (read-only: every change you propose "
+                    f"applies to the current harness above):\n{_harness_text(inspiration)}"
+                ]
+                if inspiration is not None and inspiration.version != harness.version
+                else []
+            ),
             f"Failure cluster {cluster.id} ({len(cluster.members)} failures): {cluster.summary}\n"
             f"Mechanism key: {json.dumps(cluster.key)}",
             failing,
@@ -259,10 +268,11 @@ def propose(
     walks: WalkCache | None = None,
     meter: Meter | None = None,
     n: int = 4,
+    inspiration: Harness | None = None,
 ) -> Proposal:
     """Several candidates for one cluster. Unusable items are kept in `rejected` with the reason."""
     out = Proposal()
-    prompt = build_prompt(cluster, harness, instructions, passing, walks, n)
+    prompt = build_prompt(cluster, harness, instructions, passing, walks, n, inspiration)
     try:
         reply = ask_json(model, _SYSTEM, prompt, meter or Meter())
     except Exception as exc:
