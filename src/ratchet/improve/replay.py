@@ -79,7 +79,24 @@ class ReplayReport:
 
     @property
     def verdict(self) -> str:
+        """CLEARED, REJECTED (a miss or a false fire on complete evidence) or INCOMPLETE (a runtime error, a
+        timeout, a missing target trace or partial coverage: such evidence can never clear a guard)."""
+        if self.errors or self.traces_checked < self.traces or self.notes:
+            return "INCOMPLETE"
         return "CLEARED" if self.passed else "REJECTED"
+
+    def sanitized(self) -> dict[str, Any]:
+        """The only form of a protected (evaluator-side) replay the proposer may see: counts, no case ids,
+        run ids, inputs or guard-returned strings."""
+        return {
+            "verdict": self.verdict,
+            "targets_hit": sum(1 for t in self.targets if t["hit"]),
+            "targets_total": len(self.targets),
+            "false_fires": len(self.false_positives),
+            "benign_twin_fires": self.benign_fires,
+            "errors": len(self.errors),
+            "coverage": self.coverage,
+        }
 
     @property
     def coverage(self) -> str:
@@ -144,7 +161,7 @@ def similarity_order(traces: Sequence[Trace], targets: Sequence[Trace], tool: st
 
 
 def replay(
-    guard: Guard,
+    guards: Guard | Sequence[Guard],
     targets: Sequence[FailurePoint],
     failing: Mapping[str, Trace],
     passing: Iterable[Trace],
@@ -152,16 +169,15 @@ def replay(
     runner: GuardRunner,
     benign: Iterable[Trace] = (),
     *,
-    early_stop: bool = True,
     chunk: int = 32,
 ) -> ReplayReport:
-    """Replay `guard` over the target failures, every passing trace and every benign-twin trace, using each
-    call's recorded pre-call view.
-
-    Targets are checked first; then the clearance traces in similarity order, `chunk` traces per sandbox
-    batch. With `early_stop` the first counterexample ends the replay: REJECTED with "k/N traces checked".
-    CLEARED requires an exhaustive pass, "N/N traces checked".
+    """Replay one guard, or a composed set of guards (a call is blocked when any of them blocks), over the
+    target failures, every passing trace and every benign-twin trace, using each call's recorded pre-call
+    view. The replay always completes: every false fire is recorded, and CLEARED needs "N/N traces checked"
+    with no runtime error. Clearance traces run in similarity order, `chunk` traces per sandbox batch.
     """
+    group = [guards] if isinstance(guards, Guard) else list(guards)
+    gid = group[0].id if len(group) == 1 else "composed:" + "+".join(g.id for g in group)
     walk_before = walks.walk_s
     unfaithful: list[str] = []
     notes: list[str] = []
@@ -170,6 +186,19 @@ def replay(
     first_block: dict[str, int] = {}
     false_positives: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+
+    def combined(inputs: list[GuardInput]) -> list[Verdict]:
+        per_guard = [runner.check_batch(g, inputs) if inputs else [] for g in group]
+        for vs in per_guard:
+            if len(vs) != len(inputs):
+                raise RuntimeError(f"guard runtime returned {len(vs)} verdicts for {len(inputs)} inputs")
+        out = []
+        for i in range(len(inputs)):
+            vs = [pg[i] for pg in per_guard]
+            err = next((v.error for v in vs if v.error is not None), None)
+            block = next((v.block for v in vs if v.block is not None), None)
+            out.append(Verdict(None, err) if err is not None else Verdict(block))
+        return out
 
     def run(batch: list[tuple[str, Trace]]) -> None:
         nonlocal check_s, checks
@@ -188,11 +217,9 @@ def replay(
                 inputs.append(GuardInput(st.call, st.view, st.history))
                 where.append((role, trace.run_id, trace.case_id, st.seq))
         started = time.perf_counter()
-        verdicts = runner.check_batch(guard, inputs) if inputs else []
+        verdicts = combined(inputs)
         check_s += time.perf_counter() - started
-        checks += len(inputs)
-        if len(verdicts) != len(inputs):
-            raise RuntimeError(f"guard runtime returned {len(verdicts)} verdicts for {len(inputs)} inputs")
+        checks += len(inputs) * len(group)
         for (role, run_id, case_id, seq), v in zip(where, verdicts, strict=True):
             if v.error is not None:
                 errors.append({"run_id": run_id, "seq": seq, "error": v.error[:300]})
@@ -228,18 +255,15 @@ def replay(
         fb = first_block.get(t.run_id)
         target_rows.append({"failure_id": t.id, "case_id": t.case_id, "failing_seq": t.seq,
                             "first_block_seq": fb, "hit": fb is not None and fb <= t.seq})  # fmt: skip
-    targets_ok = bool(target_rows) and all(r["hit"] for r in target_rows) and not errors
-    if targets_ok or not early_stop:
-        for i in range(0, len(ordered), max(1, chunk)):
-            if early_stop and (false_positives or errors):
-                break
-            batch = ordered[i : i + max(1, chunk)]
-            run(batch)
-            checked += len(batch)
+    for i in range(0, len(ordered), max(1, chunk)):
+        batch = ordered[i : i + max(1, chunk)]
+        run(batch)
+        checked += len(batch)
+    targets_ok = bool(target_rows) and all(r["hit"] for r in target_rows)
     exhaustive = checked == total
-    passed = exhaustive and targets_ok and not false_positives and not errors
+    passed = exhaustive and targets_ok and not false_positives and not errors and not notes
     return ReplayReport(
-        guard_id=guard.id,
+        guard_id=gid,
         passed=passed,
         targets=target_rows,
         false_positives=false_positives,

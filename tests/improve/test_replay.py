@@ -112,14 +112,37 @@ def test_runtime_returning_wrong_count_is_an_error() -> None:
         replay(Guard("g", "", NO_DUP_GUARD), targets, failing, passing, WalkCache(FakeSimulator()), Short())  # type: ignore[arg-type]
 
 
-def test_overbroad_guard_is_rejected_early_and_clearance_needs_every_trace() -> None:
+def test_replay_always_completes_and_records_every_false_fire() -> None:
     targets, failing, passing = _setup()
     g = Guard("g", "", BLOCK_ALL_REFUNDS)
-    early = replay(g, targets, failing, passing, WalkCache(FakeSimulator()), LocalRunner(), chunk=1)  # type: ignore[arg-type]
-    assert early.verdict == "REJECTED" and early.coverage == "4/6 traces checked"
-    full = replay(g, targets, failing, passing, WalkCache(FakeSimulator()), LocalRunner(), early_stop=False)  # type: ignore[arg-type]
-    assert full.coverage == "6/6 traces checked" and len(full.false_positives) == 3
-    assert full.to_payload()["exhaustive"] and full.snapshot == early.snapshot
+    rep = replay(g, targets, failing, passing, WalkCache(FakeSimulator()), LocalRunner(), chunk=1)  # type: ignore[arg-type]
+    assert (
+        rep.verdict == "REJECTED" and rep.coverage == "6/6 traces checked" and len(rep.false_positives) == 3
+    )
+    assert rep.to_payload()["exhaustive"]
+
+
+def test_runtime_errors_make_replay_incomplete_and_summaries_carry_no_ids() -> None:
+    targets, failing, passing = _setup()
+    rep = replay(
+        Guard("c", "", CRASHING_GUARD), targets, failing, passing, WalkCache(FakeSimulator()), LocalRunner()
+    )  # type: ignore[arg-type]
+    assert rep.verdict == "INCOMPLETE" and not rep.passed
+    summary = rep.sanitized()
+    assert summary["verdict"] == "INCOMPLETE" and summary["errors"] > 0
+    assert "bad-" not in str(summary) and "KeyError" not in str(summary)
+
+
+def test_composed_guards_fire_when_any_member_fires() -> None:
+    targets, failing, passing = _setup()
+    quiet = Guard("q", "", "def check(call, view, history):\n    return None\n")
+    walks = WalkCache(FakeSimulator())
+    together = replay([quiet, Guard("n", "", NO_DUP_GUARD)], targets, failing, passing, walks, LocalRunner())  # type: ignore[arg-type]
+    assert together.passed and together.guard_id == "composed:q+n"
+    broad = replay(
+        [quiet, Guard("b", "", BLOCK_ALL_REFUNDS)], targets, failing, passing, walks, LocalRunner()
+    )  # type: ignore[arg-type]
+    assert broad.verdict == "REJECTED" and len(broad.false_positives) == 3
 
 
 def test_similarity_order_puts_target_like_traces_first() -> None:
