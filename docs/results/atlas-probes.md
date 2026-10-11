@@ -15,8 +15,8 @@ documentation pages and their `SHA256SUMS` are in `research/_raw/atlas-probes/` 
 | 1 | `$scoreFusion` | code 40324, stage unknown | works | ship on 9.0 |
 | 2 | `autoEmbed` vector index (Atlas-run Voyage embeddings) | works | works | ship |
 | 3 | Database trigger writing sanitized failure memory | works | works | ship |
-| 4 | Agent Engine Policy Engine | NOT RUN | NOT RUN | needs an operator-issued credential |
-| 4 | Agent Engine standalone memory | NOT RUN | NOT RUN | same blocker |
+| 4 | Agent Engine Policy Engine (integration demonstration) | not tested | works | widening refused by the platform; revision monotonicity not enforced |
+| 4 | Agent Engine standalone memory | not tested | NOT RUN | needs operator approval of three secrets and network access |
 | 5 | MongoDB MCP server, restricted identity, one training read | works | works | ship |
 
 Recommendation for retrieval (item 1, numbers below): use vector search alone, with server-side `autoEmbed`,
@@ -134,60 +134,75 @@ and nothing else, so free-text names would pass through.
 
 Reproduce: `uv run python -m ratchet.atlas_features.triggers` (idempotent; reuses the app).
 
-## 4. Atlas Agent Engine (public preview): NOT RUN
+## 4. Atlas Agent Engine Policy Engine (live) and memory service
 
-Documentation captured with `curl` on 2026-10-11 and used for this section: the Policy Engine page, the memory
-page, the API-keys page, the install page, the limitations page and the gateway's OpenAPI document
-(`agentengine-openapi.json`, 133 paths, security scheme `BearerAuth`), listed in `SHA256SUMS`.
+Label: this is a **policy integration demonstration, not runtime enforcement of Ratchet's own worker**. The
+platform enforces `AUTHORIZED_TOOLS` on executions that run on its Orchestration Engine; Ratchet's worker runs
+outside it. What the run proves is that MongoDB's own control plane refuses a project policy that widens an
+organization policy, so a harness `tool_allowlist` mirrored there cannot be widened past the organization.
 
-What the documentation states (the design this probe implements):
+Access, as done on 2026-10-11: the CLI (`agentengine` 0.1.119) was signed in as the project owner. The
+organization is `SFTW: Harness Engineering & Model Wrangling Hackathon` (`6aa1ed66371c6468b4a49ac1`); its one
+project is the Atlas sandbox project (`6acbd00b1b25c55279b6511b`, the Agent Engine project id equals the Atlas
+project id). `agentengine service-account create ratchet-probe --role PROJECT_OWNER` made the probe's identity;
+its client id and secret are in the keyring. The organization policy needs an organization administrator, which
+a service account cannot hold (its attempt: `403 {"success":false,"error":"Insufficient permissions","code":"FORBIDDEN"}`),
+so the organization policy was written with the signed-in CLI user's session token; the project policies were
+written by the service account. Routes used (gateway OpenAPI document, captured):
+`POST|PUT /api/v1/organizations/{id}/policies`, `POST|PUT /api/v1/projects/{id}/policies`,
+`GET /api/v1/projects/{id}/policies/effective`.
 
-- `AUTHORIZED_TOOLS` is an allowlist policy. An organization policy applies to every project; a project policy
-  "must be at least as restrictive" as the organization's of the same kind, the effective value is the
-  intersection, and a project policy that is less restrictive is rejected on save. A tool outside the effective
-  list halts the execution with `error_code: policy_denied`, message `Policy denied: <reason>`.
-- Routes: `POST /api/v1/projects/{id}/policies` (body `{type, string_list, enabled}`), `PUT .../{policy_id}`,
-  `GET .../policies/effective`, and the same under `/api/v1/organizations/{id}/policies` plus `.../preview`.
-- Enforcement applies to executions on the platform's Orchestration Engine. Ratchet's worker runs outside it, so
-  this is a policy integration demonstration: it shows the platform refusing a widening and mirrors an admitted
-  allowlist; it does not enforce Ratchet's own worker.
+Organization `AUTHORIZED_TOOLS` (set by the session): `billing_get_invoice, mail_send, orders_cancel,
+orders_get, tickets_add_note, tickets_get`. Project policy mirrored from a harness allowlist (written by the
+service account, 201): `billing_get_invoice, orders_cancel, orders_get, tickets_add_note, tickets_get`.
+`GET .../policies/effective` then reported `source: "both"` and the effective list equal to the project list
+(the intersection), with both sides shown.
 
-Blocker, from commands that ran. The gateway answers `GET /health` with `200 {"status":"healthy"}`; every API
-route answers without credentials with `401 {"success":false,"error":"Missing Authorization header","code":"MISSING_AUTH_HEADER"}`;
-`POST /api/v1/oauth/token` without client credentials answers `401 {"error":"invalid_client","error_description":"client credentials required"}`;
-the Atlas Admin API key sent with digest auth gets the same `MISSING_AUTH_HEADER`, and with HTTP Basic auth
-`{"code":"INVALID_AUTH_FORMAT"}`. The gateway accepts only a bearer token: a service-account access token
-(`ae_sa_id_...` / `ae_sa_sk_...`, created by a signed-in user with `PROJECT_OWNER`) or a user session from the
-browser login (`agentengine auth login`, an OIDC flow). The keyring holds no `agentengine` entry and the CLI
-binary is downloaded from the signed-in UI. Operator action, one time: sign in at
-https://agentengine.mongodb.com with the Atlas account that owns this project, create a project service account
-with role `PROJECT_OWNER`, and store its id and secret in the keyring as `service=agentengine
-account=sa-client-id` and `account=sa-client-secret`. Setting the organization policy additionally needs an
-`ORG_OWNER` session (a service account holds only `ORG_GROUP_CREATOR` or `ORG_READ_ONLY` at organization scope).
+**The widening refusal, verbatim.** A `PUT` of the project policy with the six organization tools plus
+`tool_not_in_org_policy` returned HTTP 400:
 
-Shipped and tested against a stand-in gateway that implements the documented merge rule
-(`src/ratchet/atlas_features/agent_engine.py`): the allowlist-to-policy mapping, the create-or-update install,
-the widening attempt with the server's refusal captured verbatim, a revision test (whether a project revision
-that is wider than its predecessor but still inside the organization list is accepted, which separates
-"stricter than the organization" from "stricter than the previous revision"), and a procedural-memory
-write-then-search round trip through the project's memory tool server. With a credential,
-`uv run python -m ratchet.atlas_features.agent_engine` with `AGENTENGINE_PROJECT_ID` and
-`AGENTENGINE_ORG_TOOLS` set runs it live. Until it does, the revision rule is untested and Ratchet's own
-parent-to-candidate subset check is the only temporal guard.
+```
+{"success":false,"error":"Project policy value cannot be less restrictive than the existing org-level policy (org policy AUTHORIZED_TOOLS: billing_get_invoice, mail_send, orders_cancel, orders_get, tickets_add_note, tickets_get)","code":"INVALID_POLICY_VALUE"}
+```
+
+The effective list was unchanged afterwards.
+
+**Revision monotonicity: the platform does not enforce it.** Revising the project policy from five tools to all
+six organization tools (wider than its predecessor, still inside the organization list) was accepted (HTTP
+200). The platform checks a project policy against the organization policy only, not against the project's
+previous revision. Ratchet's own parent-to-candidate subset check in the admission rule is therefore the only
+guard on temporal growth; the mirror can show the platform refusing a widening past the organization, not past
+the previous version.
+
+**Memory service: not run, blocked on a decision, not an error.** State observed: `GET .../memory/runtime` returns
+`{"state":"not_provisioned", ... "memory-server:v0.11.8"}`, `GET .../memory/config` returns `404
+MEMORY_CONFIG_NOT_FOUND`, and the project memory tool route returns `400 {"error":"This agent has not been
+deployed yet","code":"AGENT_NOT_DEPLOYED"}`. Provisioning the hosted memory server requires uploading three
+project secrets to the platform (the cluster connection string, the embeddings key and a language-model key
+for extraction), storing a memory configuration, and allowing the platform's data-plane addresses on the
+cluster's access list. Those hand credentials and network access to a third-party service, so they need the
+operator's explicit approval; the procedural write-then-read round trip is built
+(`procedural_roundtrip`) and runs as part of the same command once the runtime is provisioned.
+
+Side effects left in place, all inside the sandbox organization: one organization-level `AUTHORIZED_TOOLS`
+policy (it restricts every agent in the organization to the six tools above), one project policy, one service
+account. Remove with the policy `DELETE` routes and `agentengine service-account delete`.
+
+Reproduce: with `AGENTENGINE_PROJECT_ID`, `AGENTENGINE_ORG_ID` and `AGENTENGINE_ORG_TOOLS` set,
+`uv run python -m ratchet.atlas_features.agent_engine`.
 
 Supply-chain check for the memory SDK (nothing was installed or imported). The documentation tells users to
-install the memory SDK from a MongoDB-hosted package index with an extra index URL; that route needs the
-credential above. Public PyPI also serves `agent-engine-sdk-memory` 0.11.8. It was downloaded with
-`pip download --no-deps --require-hashes` from the default index only, against the wheel hash
+install the memory SDK from the platform's own package index with an extra index URL and an access token.
+Public PyPI also serves `agent-engine-sdk-memory` 0.11.8. It was downloaded with `pip download --no-deps
+--require-hashes` from the default index only, against the wheel hash
 `aad5d2d288486f7dd53b7f5348a618c1e96b88083ea049156c04282f72f1e745` (matched), and every file was read without
 importing: pure Python, depends on `httpx` and `pydantic`, no subprocess, eval, dynamic import, `.pth` or entry
 points, network calls only to the gateway URL or a caller-supplied base URL, license headers name MongoDB,
 Inc. The PyPI project page lists no author, maintainer, project URLs or provenance attestation, so the publisher
-is not verified from PyPI; the rule that the publisher must be verifiably MongoDB is therefore not met by the
-public index, and the REST client in `agent_engine.py` calls the documented routes directly instead. The import
-name the documentation uses for the older package, `agentic_platform_memory`, resolves on PyPI to a package that
-describes itself as a benign security-research placeholder and does nothing; it must not be installed. The
-PyPI package named `agentengine` is an unrelated framework.
+is not verified from PyPI, and the REST client in `agent_engine.py` calls the documented routes directly
+instead. The import name the documentation uses for an older package, `agentic_platform_memory`, resolves on
+PyPI to a package that describes itself as a benign security-research placeholder and does nothing; it must not
+be installed. The PyPI package named `agentengine` is an unrelated framework.
 
 ## 5. MongoDB MCP server at runtime
 

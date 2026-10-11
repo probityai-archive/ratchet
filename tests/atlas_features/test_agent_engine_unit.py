@@ -189,3 +189,38 @@ def test_main_prints_the_blocker_and_returns_one(
     monkeypatch.setattr(ProbeResult, "save", lambda self, *_a, **_k: tmp_path / "x.json")
     assert ae.main() == 1
     assert "PROJECT_OWNER" in capsys.readouterr().out
+
+
+def test_session_engine_reads_the_cli_auth_file_and_tolerates_its_absence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    auth = tmp_path / "auth.json"
+    auth.write_text(json.dumps({"credentials": {ae.GATEWAY: {"access_token": "t"}}}))
+    monkeypatch.setenv("AGENTENGINE_AUTH_FILE", str(auth))
+    assert isinstance(ae.session_engine(), ae.AgentEngine)
+    auth.write_text("not json")
+    assert ae.session_engine() is None
+    monkeypatch.setenv("AGENTENGINE_AUTH_FILE", str(tmp_path / "missing.json"))
+    assert ae.session_engine() is None
+
+
+def test_install_can_target_the_organization_scope() -> None:
+    engine, seen = recording_engine({})
+    ae.install_tool_allowlist(engine, "o1", ["a"], "organizations")
+    assert seen[-1][:2] == ("POST", "/api/v1/organizations/o1/policies")
+
+
+def test_run_records_the_organization_policy_step_and_its_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ae, "configured_engine", lambda: StubEngine())
+    monkeypatch.setattr(ae, "gateway_evidence", lambda: {})
+    monkeypatch.setenv("AGENTENGINE_PROJECT_ID", "p1")
+    monkeypatch.setenv("AGENTENGINE_ORG_TOOLS", "a,b,c")
+    monkeypatch.setenv("AGENTENGINE_ORG_ID", "o1")
+    monkeypatch.setattr(ae, "session_engine", lambda: None)
+    result = ae.run()
+    assert result.data["org_policy"]["status"] == 0
+    assert "no CLI session" in result.data["org_policy"]["refused"]
+    session = StubEngine()
+    monkeypatch.setattr(ae, "session_engine", lambda: session)
+    result = ae.run()
+    assert "installed" in result.data["org_policy"]

@@ -24,9 +24,11 @@ document `agentengine-openapi.json`.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -115,18 +117,20 @@ class AgentEngine:
         return self._call("POST", f"/api/v1/organizations/{org_id}/policies/preview", body)
 
 
-def install_tool_allowlist(engine: AgentEngine, project_id: str, tool_allowlist: Iterable[str]) -> Any:
-    """Create or replace the project `AUTHORIZED_TOOLS` policy with a harness's allowlist."""
+def install_tool_allowlist(
+    engine: AgentEngine, scope_id: str, tool_allowlist: Iterable[str], scope: str = "projects"
+) -> Any:
+    """Create or replace the `AUTHORIZED_TOOLS` policy of a project (or, with `scope`, an organization)."""
     body = tool_allowlist_policy(tool_allowlist)
-    for policy in engine.list_policies("projects", project_id).get("policies", []):
+    for policy in engine.list_policies(scope, scope_id).get("policies", []):
         if policy.get("type") == AUTHORIZED_TOOLS:
             return engine.update_policy(
-                "projects",
-                project_id,
+                scope,
+                scope_id,
                 str(policy["id"]),
                 {"string_list": body["string_list"], "enabled": True},
             )
-    return engine.create_policy("projects", project_id, body)
+    return engine.create_policy(scope, scope_id, body)
 
 
 def prove_authority_cannot_grow(
@@ -247,6 +251,20 @@ def configured_engine() -> AgentEngine | None:
     return None
 
 
+def session_engine() -> AgentEngine | None:
+    """An engine on the signed-in CLI user's session token, for the organization-scope policy only.
+
+    The organization policy needs an `ORG_ADMIN` user: a service account cannot hold that role. The token is
+    read from the CLI's own auth file (`AGENTENGINE_AUTH_FILE` overrides the path) and is never printed.
+    """
+    path = Path(os.environ.get("AGENTENGINE_AUTH_FILE", str(Path.home() / ".agentengine" / "auth.json")))
+    try:
+        creds = json.loads(path.read_text())["credentials"][GATEWAY]
+        return AgentEngine(str(creds["access_token"]))
+    except (OSError, KeyError, ValueError):
+        return None
+
+
 def gateway_evidence() -> dict[str, Any]:
     """What the gateway answers with no credential: proof it is live and what it demands."""
     out: dict[str, Any] = {}
@@ -303,6 +321,16 @@ def run() -> ProbeResult:
                 error="set AGENTENGINE_PROJECT_ID and AGENTENGINE_ORG_TOOLS (comma separated)",
             )
         harness = org_tools[:-1] or org_tools
+        org_id = os.environ.get("AGENTENGINE_ORG_ID", "")
+        org_step: dict[str, Any] = {"skipped": "AGENTENGINE_ORG_ID unset"}
+        if org_id:
+            session = session_engine()
+            try:
+                if session is None:
+                    raise AgentEngineError(0, "no CLI session in the auth file", "org policy")
+                org_step = {"installed": install_tool_allowlist(session, org_id, org_tools, "organizations")}
+            except AgentEngineError as exc:
+                org_step = {"refused": exc.body, "status": exc.status}
         steps = prove_authority_cannot_grow(engine, project_id, org_tools, harness)
         try:
             steps["procedural_memory"] = procedural_roundtrip(
@@ -310,6 +338,7 @@ def run() -> ProbeResult:
             )
         except AgentEngineError as exc:
             steps["procedural_memory"] = {"error": str(exc)}
+        steps["org_policy"] = org_step
         return ProbeResult(
             probe="agent_engine_policy",
             works=bool(steps["widen_refused"]),
