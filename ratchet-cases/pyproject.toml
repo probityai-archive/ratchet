@@ -21,6 +21,9 @@ classifiers = [
 # The benign-twin suite for AgentDojo (ratchet_cases.agentdojo); pinned to the release it was built on.
 agentdojo = ["agentdojo==0.1.35"]
 
+[project.entry-points."tau2.plugins"]
+ratchet_cases = "ratchet_cases.tau2:register"
+
 [project.urls]
 Source = "https://github.com/probityai/ratchet/tree/main/ratchet-cases"
 Issues = "https://github.com/probityai/ratchet/issues"
@@ -39,7 +42,7 @@ path = "src/ratchet_cases/__init__.py"
 packages = ["src/ratchet_cases"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/ratchet_cases", "tests", "tests_agentdojo", "README.md", "pyproject.toml"]
+include = ["src/ratchet_cases", "tests", "tests_agentdojo", "tests_tau2", "README.md", "pyproject.toml"]
 
 [tool.ruff]
 line-length = 110
@@ -58,6 +61,11 @@ python_version = "3.10"
 # AgentDojo ships no py.typed marker; read its annotations rather than treating it as Any.
 [[tool.mypy.overrides]]
 module = ["agentdojo", "agentdojo.*"]
+follow_untyped_imports = true
+
+# tau2-bench ships no py.typed marker either; read its annotations the same way.
+[[tool.mypy.overrides]]
+module = ["tau2", "tau2.*"]
 follow_untyped_imports = true
 
 [tool.pytest.ini_options]
