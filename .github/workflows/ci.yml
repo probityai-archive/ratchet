@@ -177,3 +177,17 @@ jobs:
           uv run --with pytest-timeout python -m pytest -q -W error --timeout=120 -rfEs --tb=short
           -m "not sandbox and not live"
           --cov=src/ratchet --cov-report=term-missing:skip-covered
+
+  demo-image:
+    # The no-build demo: build the image, then run the reviewer sequence in a fresh container with no network
+    # and no host mount. The image is built here only; it is never pushed.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: build the demo image
+        run: docker build -f docker/demo.Dockerfile -t ratchet-demo:ci .
+      - name: run the reviewer sequence
+        run: docker/demo/check.sh ratchet-demo:ci
+      - name: image size
+        run: docker image ls ratchet-demo:ci

@@ -1,5 +1,41 @@
 # Running Ratchet
 
+## 0. The demo, with nothing to build
+
+One image holds the tool, a local Atlas store and the scripted double-refund scenario. The agent is a scripted
+worker with fixed replies, so the demo needs no model, no key, no GPU and no network once the image exists.
+Build it from a checkout, then run the scenario once:
+
+```sh
+docker build -f docker/demo.Dockerfile -t ratchet-demo:dev .
+docker run --rm ratchet-demo:dev ratchet demo double-refund
+```
+
+To read what the demo stored, keep one container running and run each command in it:
+
+```sh
+docker run -d --rm --name ratchet-demo ratchet-demo:dev        # starts the store (about 20 s)
+docker exec ratchet-demo ratchet demo double-refund                     # one admission end to end; prints the ids below
+docker exec ratchet-demo ratchet show decision 13881cee67fe     # the bad fix (block refunds of 50.00 or more): REJECTED
+docker exec ratchet-demo ratchet show decision ea3bd812059a     # the good fix (check for an existing refund): ADMITTED
+docker exec ratchet-demo ratchet replay 13881cee67fe ea3bd812059a
+docker exec ratchet-demo ratchet verify ea3bd812059a --pubkey-file /data/ratchet-demo/ratchet_demo-decision-key.pub
+docker rm -f ratchet-demo
+```
+
+The candidate ids are content addresses, so they are the same on every run. The demo signs with an Ed25519
+key it generates for the run and writes only the public half, to the path it prints; every decision it signs
+records that a demo key signed it. `ratchet verify` checks a demo decision against that file. Without
+`--pubkey-file` it checks against the pinned decision key, `keys/ratchet-decisions.pub`, and reports INVALID,
+because a demo key is never the pinned key. `docker/demo/check.sh` runs this sequence with `--network none` and
+fails unless every step gives the answer above; CI runs it on every push.
+
+Inside the image, guard children apply rlimits, seccomp and Landlock but not a network namespace: Docker's
+default seccomp profile refuses the user namespace that layer needs. Seccomp still refuses every socket.
+
+From a checkout instead, with the store of section 1 running, `uv run ratchet demo double-refund` uses that store when
+`RATCHET_MONGODB_URI` is unset and prints the follow-up commands with the variables they need.
+
 ## 1. A store
 
 Ratchet keeps everything in MongoDB Atlas. For development, the local Atlas image runs mongod and the search
@@ -27,6 +63,8 @@ cluster's connection string in `RATCHET_MONGODB_URI`.
 | `VOYAGE_API_KEY` | embeddings for failure retrieval |
 | `RAINDROP_WRITE_KEY` | with `--raindrop`, sends runs and decisions to Raindrop |
 | `RATCHET_IMPROVER_URI` | the improver's connection string, a database user with no access to held-out cases |
+| `RATCHET_GUARD_REQUIRE` | isolation layers a guard child must apply (default `rlimits,netns,seccomp,landlock`; must keep `netns` or `seccomp`) |
+| `RATCHET_DEMO_DIR` | where `ratchet demo` writes its public key (default `.ratchet-demo`) |
 
 Nothing is hard-coded and nothing secret is written to a trace, a log or the store.
 

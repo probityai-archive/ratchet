@@ -1,0 +1,70 @@
+#!/bin/bash
+# The demo image's entrypoint: own the in-container store, then run the command.
+#   ratchet-store serve        start the store in the foreground (the image's default command)
+#   ratchet-store wait         start the store unless it is running, and wait until it is ready
+#   ratchet-store <cmd ...>    wait, then run <cmd ...>  (docker run --rm IMAGE ratchet demo double-refund)
+set -euo pipefail
+
+# The image starts as root only to make the container's own hostname resolve (with --network none Docker
+# writes no entry for it, and the store's replica set cannot find itself) and to raise the open-file limit
+# the store needs; then everything runs as the unprivileged mongod user.
+ulimit -Sn "$(ulimit -Hn)" 2>/dev/null || true
+if [ "$(id -u)" = 0 ]; then
+    name=$(cat /etc/hostname)
+    grep -qw -- "$name" /etc/hosts || echo "127.0.0.1 $name" >> /etc/hosts
+    exec env HOME=/home/mongod setpriv --reuid=mongod --regid=mongod --init-groups -- "$0" "$@"
+fi
+
+LOCK=/tmp/ratchet-store.lock
+LOG=/tmp/ratchet-store.log
+TIMEOUT_S=${RATCHET_STORE_TIMEOUT_S:-180}
+
+probe() {
+    # The runner starts mongod once to initialise it and then restarts it, and the first instance already
+    # answers queries; only the runner's own healthcheck says the final instance is up.
+    /usr/local/bin/runner healthcheck >/dev/null 2>&1 || return 1
+    mongosh --quiet --eval \
+        "db.getSiblingDB('healthprobe').nothing.aggregate([{\$listSearchIndexes:{}}]).toArray().length" \
+        >/dev/null 2>&1
+}
+
+start_background() {
+    # mkdir is atomic: exactly one caller starts the store, every other caller only waits for it
+    if mkdir "$LOCK" 2>/dev/null; then
+        echo "ratchet-store: starting the in-container store (about 20 s)" >&2
+        setsid /usr/local/bin/runner server >"$LOG" 2>&1 < /dev/null &
+    fi
+}
+
+wait_ready() {
+    probe && return 0
+    start_background
+    local waited=0
+    until probe; do
+        if [ "$waited" -ge "$TIMEOUT_S" ]; then
+            echo "ratchet-store: the store did not answer within ${TIMEOUT_S} s; its log:" >&2
+            tail -n 40 "$LOG" >&2 || true
+            exit 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    echo "ratchet-store: store ready" >&2
+}
+
+case "${1:-serve}" in
+    serve)
+        if ! mkdir "$LOCK" 2>/dev/null; then
+            echo "ratchet-store: the store is already running in this container" >&2
+            exit 1
+        fi
+        exec /usr/local/bin/runner server
+        ;;
+    wait)
+        wait_ready
+        ;;
+    *)
+        wait_ready
+        exec "$@"
+        ;;
+esac

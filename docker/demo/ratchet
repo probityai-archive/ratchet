@@ -1,0 +1,8 @@
+#!/bin/bash
+# `ratchet` inside the demo image: make sure the in-container store is up, then run the tool.
+set -euo pipefail
+/usr/local/bin/ratchet-store wait
+if [ "$(id -u)" = 0 ]; then  # `docker exec` runs as root; the tool runs as the store's own user
+    exec env HOME=/home/mongod setpriv --reuid=mongod --regid=mongod --init-groups -- "$0" "$@"
+fi
+exec "${RATCHET_VENV:-/opt/ratchet/.venv}/bin/ratchet" "$@"

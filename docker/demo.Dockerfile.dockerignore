@@ -1,0 +1,16 @@
+# Build context for docker/demo.Dockerfile: only what the image installs. Nothing else, so no local
+# state, record, key seed or capture can reach the image.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!keys/ratchet-decisions.pub
+!src/
+!probity-ratchet-cases/pyproject.toml
+!probity-ratchet-cases/README.md
+!probity-ratchet-cases/LICENSE
+!probity-ratchet-cases/src/
+!docker/demo/
+**/__pycache__
+**/*.pyc
