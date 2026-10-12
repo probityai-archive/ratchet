@@ -1,4 +1,4 @@
-"""Guard sandbox child. Runs ONE guard's untrusted source; stdlib only; started as `python -I -S <this file>`.
+"""Guard sandbox child. Runs ONE guard's untrusted source; stdlib only; started as `python -I -S -c <source>`.
 
 This file is executed by the guard runtime in a fresh interpreter with an empty environment. It reads one
 JSON setup line, locks itself down, loads the guard, then answers one JSON request per line on stdin with

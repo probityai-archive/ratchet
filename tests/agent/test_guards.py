@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import subprocess
 import sys
 import textwrap
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from ratchet_cases.types import Event, ToolCall
 
+from ratchet.agent import guards
 from ratchet.agent.guards import (
     GUARD_ERROR_REASON,
     INFRASTRUCTURE_ERROR_REASON,
+    GuardDecision,
     GuardInfrastructureError,
     GuardItem,
     GuardLimits,
@@ -446,3 +450,51 @@ def test_sandbox_startup_failure_is_an_infrastructure_error() -> None:
         with pytest.raises(GuardInfrastructureError) as info:
             rt.batch(items)
         assert info.value.decisions[0].kind == "infrastructure_error"
+
+
+def stub_child(*replies: dict[str, object]) -> str:
+    """A child that reads the setup line, sends `replies`, then waits for its stdin to close."""
+    lines = "".join(f"sys.stdout.write({json.dumps(json.dumps(r))} + chr(10))\n" for r in replies)
+    return f"import sys\nsys.stdin.buffer.readline()\n{lines}sys.stdout.flush()\nsys.stdin.buffer.read()\n"
+
+
+def test_a_child_file_changed_on_disk_never_reaches_a_running_parent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A checkout replaced `_guard_child.py` while a replay ran; the running parent started children of
+    the new protocol and recorded each of their checks as an error with the text `None`. The child's code
+    is now fixed when the parent imports the runtime, so a changed file cannot reach it."""
+    changed = tmp_path / "_guard_child.py"
+    changed.write_text(stub_child({"protocol": 99}), encoding="utf-8")
+    monkeypatch.setattr(guards, "CHILD_PATH", changed)
+    with GuardRuntime(workers=1) as rt:
+        [decision] = rt.batch([GuardItem(LIMIT_GUARD, CALL, VIEW, [])])
+    assert decision.kind == "verdict" and decision.reason == "refund 50 exceeds limit 10"
+
+
+@pytest.mark.parametrize(
+    "replies",
+    [
+        ({"protocol": 99},),
+        ({"ready": False, "isolation": {}},),
+        ({"loading": True}, {"ready": False, "error": ""}),
+        ({"loading": True}, {"s": 0}),
+    ],
+)
+def test_an_out_of_protocol_startup_reply_is_an_infrastructure_error_that_quotes_it(
+    monkeypatch: pytest.MonkeyPatch, replies: tuple[dict[str, object], ...]
+) -> None:
+    monkeypatch.setattr(guards, "CHILD_SOURCE", stub_child(*replies))
+    quoted = json.dumps(replies[-1], sort_keys=True)
+    with GuardRuntime(workers=1) as rt, pytest.raises(GuardInfrastructureError) as info:
+        rt.batch([GuardItem(LIMIT_GUARD, CALL, VIEW, [])])
+    [decision] = info.value.decisions
+    assert decision.kind == "infrastructure_error"
+    assert decision.error == f"guard sandbox sent an out-of-protocol startup reply: {quoted}"
+
+
+@pytest.mark.parametrize("error", [None, "", "  "])
+@pytest.mark.parametrize("kind", ["guard_error", "infrastructure_error"])
+def test_an_error_decision_must_carry_its_message(kind: str, error: str | None) -> None:
+    with pytest.raises(ValueError, match="must carry its error message"):
+        GuardDecision("g", True, GUARD_ERROR_REASON, error, kind=kind)  # type: ignore[arg-type]
