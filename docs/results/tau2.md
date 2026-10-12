@@ -2,7 +2,7 @@
 
 tau2-bench airline, retail and telecom run through Ratchet's worker loop: pass^k per run, with every planned, recorded and lost conversation counted and every stopped run listed with its reason.
 
-Generated 2026-10-11 19:55 EDT by `python -m ratchet.bench.tau2 report` from the run records under the run directory; every number below is computed from those records.
+Generated 2026-10-12 09:29 EDT by `python -m ratchet.bench.tau2 report` from the run records under the run directory; every number below is computed from those records.
 
 Each conversation runs tau2-bench's own orchestrator, environment, user simulator and evaluator; only the agent's seat is taken by the Ratchet worker loop under the named harness. pass^k is tau2-bench's: the mean over tasks of C(c, k) / C(n, k) for c successes in n trials.
 
@@ -487,3 +487,71 @@ tau2-bench commit `4ce7c0397c1eb65c9bbe59aeacfe1ca44a1cd699` (data digest per ru
 | `[mms_issue]airplane_mode_on|bad_network_preference|bad_wifi_calling|break_apn_mms_setting|break_app_both_permissions|data_mode_off|data_usage_exceeded|unseat_sim_card|user_abroad_roaming_disabled_on[PERSONA:Hard]` | train | 0 / 4 |
 | `[mms_issue]airplane_mode_on|bad_network_preference|bad_wifi_calling|break_apn_mms_setting|break_app_storage_permission|data_mode_off|data_usage_exceeded|unseat_sim_card|user_abroad_roaming_disabled_off[PERSONA:Easy]` | train | 0 / 4 |
 | `[mms_issue]airplane_mode_on|bad_network_preference|bad_wifi_calling|break_apn_mms_setting|break_app_both_permissions|data_mode_off|data_usage_exceeded|unseat_sim_card|user_abroad_roaming_disabled_off[PERSONA:Hard]` | train | 0 / 4 |
+
+## Evolve runs
+
+Each evolve run measures the parent harness twice per generation on the held-out tasks (and once on the train tasks), lets the improver propose candidates from failed train conversations, evaluates some of them on the same tasks, and admits a candidate only through a signed decision whose checks all pass. A conversation lost to the model endpoint is not a pass: it counts as a failure in the passed counts and as invalid evidence in the held-out check, which then fails.
+
+### Evolve run `evolve/retail/oss-evolve-1`
+
+- agent model `gpt-oss-120b`, user model `gpt-oss-120b`, improver model `gpt-5.6-terra`.
+- Stopped (`STOPPED.txt`): Stopped at 18:49:04 EDT 2026-10-11 by the coordinator's workstation-load rule: the candidate evaluation would not finish by the 16:15 PT cut-off for workstation runs. Generation 1's two parent runs had finished; candidate 2c8f6781c4af had 46 conversations recorded and no decision was made. Re-run on a box as oss-evolve-2. (Recorded in evolve-retail-oss-evolve-1.log: "STOPPED 2026-10-11T18:49:04 by the coordinator's workstation-load rule (candidate evaluation would not finish by 16:15 PT); re-run on a box as oss-evolve-2".)
+- No decision was made.
+
+Parent runs (the parent harness measured twice per generation; train is run in the first only):
+
+| gen | parent | run | held-out passed | train passed | lost to the endpoint |
+|---|---|---|---|---|---|
+| 1 | `6d9a2a325e67` | 1 | 21/40 | 42/74 | 0 of 114 |
+| 1 | `6d9a2a325e67` | 2 | 27/40 | not run | 0 of 40 |
+
+Candidates (every evaluated candidate, with its decision):
+
+| gen | candidate | kind | held-out passed | train passed | lost to the endpoint | decision | failed checks |
+|---|---|---|---|---|---|---|---|
+| | none | | | | | | |
+
+- Candidate `2c8f6781c4af`: 46 recorded conversations that no finished evaluation counts (held-out passed 8/14, train passed 23/32). No decision rests on them.
+
+### Evolve run `box/evolve-retail/evolve/retail/oss-evolve-2`
+
+- agent model `gpt-oss-120b`, user model `gpt-oss-120b`, improver model `gpt-5.6-terra`.
+- Failed (`FAILED.txt`): Failed run: every improver call (gpt-5.6-terra through the local proxy, box port 18839 -> workstation 8787) was refused with HTTP 401, because the box launcher passed the agent key "unused" to the improver and the proxy accepts only "dummy-key". The generation record says so (note: improver model calls failed for 4 proposal task(s)); it proposed and evaluated no candidate, so this run says nothing about the improver. The parent's two runs (train 40/74, held-out 20/40 and 19/40) are valid measurements. Launcher fixed 2026-10-11 (TAU2_IMPROVER_KEY).
+- Generation 1: 0 candidates proposed, 0 evaluated, 0 admitted. Note: improver model calls failed for 4 proposal task(s).
+- No decision was made.
+
+Parent runs (the parent harness measured twice per generation; train is run in the first only):
+
+| gen | parent | run | held-out passed | train passed | lost to the endpoint |
+|---|---|---|---|---|---|
+| 1 | `6d9a2a325e67` | 1 | 20/40 | 40/74 | 0 of 114 |
+| 1 | `6d9a2a325e67` | 2 | 19/40 | not run | 0 of 40 |
+
+Candidates (every evaluated candidate, with its decision):
+
+| gen | candidate | kind | held-out passed | train passed | lost to the endpoint | decision | failed checks |
+|---|---|---|---|---|---|---|---|
+| | none | | | | | | |
+
+### Evolve run `box/evolve-retail3/evolve/retail/oss-evolve-3`
+
+- agent model `gpt-oss-120b`, user model `gpt-oss-120b`, improver model `gpt-5.6-terra`.
+- Finished: 1 of 1 planned generations ran.
+- Note (`NOTE.txt`): Candidates cf98c1481b70 and f7894282cb74 lost 38 and 109 of their 114 conversations to the agent endpoint between 01:04:32 and 01:13:54 PT on 2026-10-12 (box log, 08:04:32 to 08:13:54 UTC), each ending in 'OpenAIException - Connection error'; the box's tunnel log records connections to workstation port 8804, one of the two gpt-oss-120b endpoints, failing. Their counts (held-out 12 and 1 of 40) count those lost runs as failures and do not measure the candidates; their held-out checks had 15 and 38 tasks with no valid outcome, which alone fails the check. Candidate 5fcb50f1f4fc lost nothing: held-out 26 of 40 against the parent's 20 and 24, with 3 stable recoveries, rejected because 5 held-out tasks that passed in a parent run failed and 16 of the 67 must-succeed tasks that passed in a parent run regressed.
+- Generation 1: 9 candidates proposed, 3 evaluated, 0 admitted. Note: improver model calls failed for 1 proposal task(s).
+- 3 decisions, 0 admitted, signed with key `b61d7e39c111`.
+
+Parent runs (the parent harness measured twice per generation; train is run in the first only):
+
+| gen | parent | run | held-out passed | train passed | lost to the endpoint |
+|---|---|---|---|---|---|
+| 1 | `6d9a2a325e67` | 1 | 20/40 | 39/74 | 0 of 114 |
+| 1 | `6d9a2a325e67` | 2 | 24/40 | not run | 0 of 40 |
+
+Candidates (every evaluated candidate, with its decision):
+
+| gen | candidate | kind | held-out passed | train passed | lost to the endpoint | decision | failed checks |
+|---|---|---|---|---|---|---|---|
+| 1 | `5fcb50f1f4fc` | procedure | 26/40 | 36/74 | 0 of 114 | rejected | heldout, no_regression |
+| 1 | `cf98c1481b70` | prompt_edit | 12/40 | 31/74 | 38 of 114 | rejected | heldout, no_regression |
+| 1 | `f7894282cb74` | procedure | 1/40 | 2/74 | 109 of 114 | rejected | heldout, no_regression |
