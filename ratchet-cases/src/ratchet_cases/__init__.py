@@ -26,7 +26,7 @@ from ratchet_cases.cases.registry import released_digests
 from ratchet_cases.cases.solvers import NAIVE, REFERENCE, REFUSER, Habits, solve
 from ratchet_cases.world import Fault, World
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 SUITE_DIGEST = suite_digest()
 

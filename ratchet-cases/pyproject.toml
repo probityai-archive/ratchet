@@ -42,7 +42,7 @@ path = "src/ratchet_cases/__init__.py"
 packages = ["src/ratchet_cases"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/ratchet_cases", "tests", "tests_agentdojo", "tests_tau2", "README.md", "pyproject.toml"]
+include = ["src/ratchet_cases", "tests", "tests_agentdojo", "tests_tau2", "README.md", "CHANGELOG.md", "pyproject.toml"]
 
 [tool.ruff]
 line-length = 110

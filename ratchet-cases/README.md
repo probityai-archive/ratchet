@@ -7,7 +7,7 @@ It is for anyone testing a tool-using agent, or a guard or defense around one, w
 ## Install
 
 ```sh
-pip install ratchet-cases==0.1.0
+pip install ratchet-cases==0.2.0
 ```
 
 Python 3.10 or later. No runtime dependencies.
@@ -60,7 +60,7 @@ An agent that gives up after a timeout passes the seven after-commit tasks and f
 
 ## Version and digest
 
-Version 0.1.0. `ratchet_cases.SUITE_DIGEST` is computed from the shipped cases at import, and `DIGESTS.json` records the digest of every release, so `ratchet-cases==X.Y.Z` pins the exact cases. Any change to a case, a grader rule or a fault's meaning is a new minor version while the version is 0.x.
+Version 0.2.0. `ratchet_cases.SUITE_DIGEST` is computed from the shipped cases at import, and `DIGESTS.json` records the digest of every release, so `ratchet-cases==X.Y.Z` pins the exact cases. Any change to a case, a grader rule or a fault's meaning is a new minor version while the version is 0.x.
 
 ## Links
 
