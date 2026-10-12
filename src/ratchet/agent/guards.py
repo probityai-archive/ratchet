@@ -63,6 +63,27 @@ CHILD_PATH = Path(__file__).with_name("_guard_child.py")
 # Read once, with this module, so a running parent never starts a child of another version (module docstring).
 CHILD_SOURCE = CHILD_PATH.read_text(encoding="utf-8")
 ALL_LAYERS = ("rlimits", "netns", "seccomp", "landlock")
+NETWORK_LAYERS = ("netns", "seccomp")
+REQUIRE_ENV = "RATCHET_GUARD_REQUIRE"
+
+
+def required_layers(value: str | None = None) -> tuple[str, ...]:
+    """The isolation layers a child must apply: all four, or the comma list in RATCHET_GUARD_REQUIRE.
+
+    The list may drop a layer the host cannot provide (Docker's default seccomp profile refuses the user
+    namespace that `netns` needs), never network isolation itself: it must keep `netns` or `seccomp`, and it
+    may name only known layers.
+    """
+    raw = os.environ.get(REQUIRE_ENV, "") if value is None else value
+    if not raw.strip():
+        return ALL_LAYERS
+    layers = tuple(dict.fromkeys(x.strip() for x in raw.split(",") if x.strip()))
+    unknown = [x for x in layers if x not in ALL_LAYERS]
+    if unknown:
+        raise ValueError(f"{REQUIRE_ENV} names unknown layers {unknown}; known: {', '.join(ALL_LAYERS)}")
+    if not any(x in layers for x in NETWORK_LAYERS):
+        raise ValueError(f"{REQUIRE_ENV} must keep network isolation: name netns or seccomp")
+    return layers
 
 
 class GuardSourceError(ValueError):
@@ -92,7 +113,7 @@ class GuardLimits:
     memory_mb: int = 512
     # Layers that must take effect or the child is refused. Network isolation is required by the
     # contract; netns and seccomp each provide it, and both are required by default on Linux.
-    require: tuple[str, ...] = ("rlimits", "netns", "seccomp", "landlock")
+    require: tuple[str, ...] = field(default_factory=required_layers)
     # Use at most this Landlock ABI, to run the sandbox as it runs on an older kernel. None uses the
     # kernel's own ABI. Isolation never depends on it: seccomp alone refuses signals and sockets.
     landlock_max_abi: int | None = None
