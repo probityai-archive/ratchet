@@ -17,6 +17,19 @@ Measured, seed harness `2ccb14a29382` (tau-bench's retail policy, all tools, no 
 - The same harness on the same 40 tasks passed between 25 and 31: the run-to-run spread is 6 tasks, which is
   why the admission rule measures the parent twice and requires the candidate to beat the better run.
 
+Evolve rerun `run-3` (same split and settings as `run-2`: 30 train / 40 held-out, improver `gpt-5.6-terra`,
+run on a Hetzner box; decisions signed with the pinned decision key `b61d7e39c111`):
+
+- **Generation 1 finished, with two signed decisions, 0 admitted.** The seed's two held-out runs passed 31 and 26
+  of 40 (train 20 of 30). The improver proposed 9 candidates and 2 were evaluated:
+  - `b892b2f226b0` (one guard): held-out 28 of 40, train 23 of 30. Rejected: its guard fired falsely on 2
+    passing traces in replay, it has no stable held-out recovery, and 9 must-succeed cases regressed.
+  - `d1c609c0a474` (one procedure): held-out 28 of 40, train 21 of 30. Rejected: replay passed, but it has no
+    stable held-out recovery and 9 must-succeed cases regressed.
+- **Generation 2: NOT RUN past its parent runs (held-out 27 and 31 of 40).** At about 20:27 PT the workstation
+  lost its connections, and the box launcher removed the run's checkout on the box while the run was still
+  going. That launcher bug is fixed.
+
 NOT RUN, with the reason:
 
 - **Evolve generation 1 decisions (evolve run `run-2`).** The improver proposed candidates; candidate
@@ -50,6 +63,7 @@ NOT RUN, with the reason:
 
 ## Setup
 
+- `box/evolve-retail-run3/evolve/retail/run-3`: agent_model `gpt-5.6-luna`, user_model `gpt-5.6-luna`, improver_model `gpt-5.6-terra`, temperature `0.0`, tau_bench_commit `59a200c6d575d595120f1cb70fea53cef0632f6b`, workers `8`; split seed `20261011`, 30 train / 40 held-out, digest `ec6c39df6a347a06`. Stopped: Stopped after generation 1 of 2. Generation 1 is complete (9 candidates, 2 evaluated, 0 admitted, decisions signed with the pinned key). At about 20:27 PT 2026-10-11 the workstation lost its connections (its network address changed); the box launcher took box_run's exit 76 as the end of the job and removed the box checkout while the run was still in generation 2, so nothing after 20:27 PT could be written. The run was then stopped. Generation 2 is NOT RUN.
 - `evolve/retail/run-2`: agent_model `gpt-5.6-luna`, user_model `gpt-5.6-luna`, improver_model `gpt-5.6-terra`, temperature `0.0`, tau_bench_commit `59a200c6d575d595120f1cb70fea53cef0632f6b`, workers `8`; split seed `20261011`, 30 train / 40 held-out, digest `ec6c39df6a347a06`. Stopped: stopped at 18:19 EDT during generation 1's candidate evaluation (28 of 140 candidate runs done): the run could not end before the 16:15 PT cut-off the integrator set for workstation runs, so the candidate evaluations and admission decisions are NOT RUN
 - `runs/retail/2ccb14a29382/all-trial-1`: agent_model `gpt-5.6-luna`, user_model `gpt-5.6-luna`, temperature `0.0`, tau_bench_commit `59a200c6d575d595120f1cb70fea53cef0632f6b`, workers `8`; split seed `20261011`, 40 train / 115 held-out, digest `a8e83ef4377f9030`. Note: ran before user-simulator retries existed; its 7 crashed runs are endpoint rate limits (HTTP 429) in the user simulator, counted here as failures (held-out 70/115; 70/108 over the runs that finished)
 
@@ -64,13 +78,23 @@ A run that crashed is a failed run. pass^k is tau-bench's estimator, mean over t
 
 | harness | split | tasks | trials/task | runs | successes | crashed | pass^1 | pass^2 | pass^3 | pass^4 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `2ccb14a29382` | heldout | 115 | 1 | 195 | 127 | 7 | 62.9% | 57.5% (40 of 115 tasks) | 52.5% (40 of 115 tasks) |  |
-| `2ccb14a29382` | train | 40 | 1 | 70 | 53 | 0 | 76.2% | 70.0% (30 of 40 tasks) |  |  |
+| `2ccb14a29382` | heldout | 115 | 1 | 355 | 242 | 7 | 63.6% | 59.1% (40 of 115 tasks) | 51.6% (40 of 115 tasks) | 45.9% (40 of 115 tasks) |
+| `2ccb14a29382` | train | 40 | 1 | 130 | 96 | 0 | 75.0% | 65.0% (30 of 40 tasks) | 60.0% (30 of 40 tasks) | 56.7% (30 of 40 tasks) |
+| `b892b2f226b0` | heldout | 40 | 1 | 40 | 28 | 0 | 70.0% |  |  |  |
+| `b892b2f226b0` | train | 30 | 1 | 30 | 23 | 0 | 76.7% |  |  |  |
+| `d1c609c0a474` | heldout | 40 | 1 | 40 | 28 | 0 | 70.0% |  |  |  |
+| `d1c609c0a474` | train | 30 | 1 | 30 | 21 | 0 | 70.0% |  |  |  |
 
 ## Every evaluation
 
 | source | role | gen | harness | held-out passed | train passed | crashed |
 |---|---|---|---|---|---|---|
+| `box/evolve-retail-run3/evolve/retail/run-3` | parent_run_1 | 1 | `2ccb14a29382` | 31/40 | 20/30 | 0 |
+| `box/evolve-retail-run3/evolve/retail/run-3` | parent_run_2 | 1 | `2ccb14a29382` | 26/40 | 0/0 | 0 |
+| `box/evolve-retail-run3/evolve/retail/run-3` | candidate | 1 | `b892b2f226b0` | 28/40 | 23/30 | 0 |
+| `box/evolve-retail-run3/evolve/retail/run-3` | candidate | 1 | `d1c609c0a474` | 28/40 | 21/30 | 0 |
+| `box/evolve-retail-run3/evolve/retail/run-3` | parent_run_1 | 2 | `2ccb14a29382` | 27/40 | 23/30 | 0 |
+| `box/evolve-retail-run3/evolve/retail/run-3` | parent_run_2 | 2 | `2ccb14a29382` | 31/40 | 0/0 | 0 |
 | `evolve/retail/run-2` | parent_run_1 | 1 | `2ccb14a29382` | 31/40 | 21/30 | 0 |
 | `evolve/retail/run-2` | parent_run_2 | 1 | `2ccb14a29382` | 26/40 | 0/0 | 0 |
 | `runs/retail/2ccb14a29382/all-trial-1` | trial |  | `2ccb14a29382` | 70/115 | 32/40 | 7 |
