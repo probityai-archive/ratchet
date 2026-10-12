@@ -17,6 +17,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.entry-points."tau2.plugins"]
+ratchet_cases = "ratchet_cases.tau2:register"
+
 [project.urls]
 Source = "https://github.com/probityai/ratchet/tree/main/ratchet-cases"
 Issues = "https://github.com/probityai/ratchet/issues"
@@ -35,7 +38,7 @@ path = "src/ratchet_cases/__init__.py"
 packages = ["src/ratchet_cases"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/ratchet_cases", "tests", "README.md", "pyproject.toml"]
+include = ["src/ratchet_cases", "tests", "tests_tau2", "README.md", "pyproject.toml"]
 
 [tool.ruff]
 line-length = 110
@@ -50,6 +53,12 @@ known-first-party = ["ratchet_cases"]
 [tool.mypy]
 strict = true
 python_version = "3.10"
+
+# tau2-bench ships no type information.
+[[tool.mypy.overrides]]
+module = ["tau2", "tau2.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
