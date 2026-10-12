@@ -548,7 +548,7 @@ class _Ctx:
 
 
 def test_main_runs_the_comparison_and_writes_the_summary(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, decision_key: Signer
 ) -> None:
     import ratchet.agent.guards as guards_mod
     import ratchet.agent.model as model_mod
@@ -585,7 +585,6 @@ def test_main_runs_the_comparison_and_writes_the_summary(
     monkeypatch.setattr(worldsim_mod, "WorldSimulator", lambda cases: FakeSimulator())
     monkeypatch.setattr(seed_mod, "seed_harness", lambda: PARENT)
     monkeypatch.setenv("RATCHET_API_KEY", "k")
-    monkeypatch.delenv("RATCHET_SIGNING_KEY", raising=False)
     target = tmp_path / "l2.json"
     argv = [
         "--uri",

@@ -140,3 +140,16 @@ def test_render_of_failure_has_no_payload_line() -> None:
     out = render(verify_decision(signed_doc(), {}))
     assert "NOT VERIFIED" in out
     assert "ADMITTED" not in out
+
+
+def test_a_countersigned_decision_names_the_pinned_key_and_the_run_key() -> None:
+    from datetime import UTC, datetime
+
+    from ratchet.improve.countersign import countersign_doc
+
+    doc = signed_doc(OTHER)
+    doc.update(countersign_doc(doc, SIGNER, datetime(2026, 10, 11, tzinfo=UTC)) or {})
+    res = verify_decision(doc, keys())
+    assert res.ok and res.keyid == SIGNER.keyid
+    assert f"first signed by per-run key {OTHER.keyid[:12]}" in res.detail[-1]
+    assert "countersigned by the pinned key on 2026-10-11" in render(res)

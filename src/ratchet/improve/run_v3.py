@@ -102,7 +102,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     infos = [CaseInfo(c.id, c.kind, c.must_succeed) for c in cases]
     parent = seed_harness()
-    signer = Signer.from_env() if os.environ.get("RATCHET_SIGNING_KEY") else Signer.generate()
+    signer = Signer.for_decisions()
     originals: dict[str, dict[str, Any]] = {}
     arms: dict[str, Harness] = {"parent": parent, "identity_1": parent, "identity_2": parent}
     for spec in a.candidate:

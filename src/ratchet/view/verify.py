@@ -146,7 +146,16 @@ def _signature_check(doc: Mapping[str, Any], trusted: Mapping[str, Ed25519Public
     except (binascii.Error, ValueError):
         return VerifyResult(False, "INVALID", ["the stored envelope is not valid base64"])
     res = verify_envelope(envelope, trusted, doc)
-    return VerifyResult(res.ok, res.summary, res.detail, doc.get("keyid"), res.payload)
+    keyid, detail = doc.get("keyid"), res.detail
+    counter = doc.get("countersigned")
+    if isinstance(counter, Mapping) and counter.get("keyid") in trusted:
+        keyid = counter["keyid"]
+        detail = [
+            *detail,
+            f"countersigned by the pinned key on {str(counter.get('at', ''))[:10]}; "
+            f"first signed by per-run key {str(doc.get('keyid', ''))[:12]}",
+        ]
+    return VerifyResult(res.ok, res.summary, detail, keyid, res.payload)
 
 
 def recompute_lines(r: VerifyReport) -> list[Text]:

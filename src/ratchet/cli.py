@@ -213,7 +213,7 @@ class LiveBackend:
                 run_case=run_case,
                 simulator=WorldSimulator(all_cases()),
                 runner=SandboxRunner(runtime),
-                signer=Signer.from_env(),
+                signer=Signer.for_decisions(),
                 activator=activator,
                 workers=workers,
                 repeats=repeats,

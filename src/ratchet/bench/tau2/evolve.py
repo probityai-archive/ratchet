@@ -3,9 +3,9 @@
 `evolve` runs `ratchet.improve.loop.evolve` from the domain's seed harness over the domain's base tasks:
 tau2-bench's train split is what the improver reads, its test split is the held-out side of every
 admission. Every conversation the loop runs is kept twice, as a Ratchet trace in the run's store and as
-tau2-bench's scored `SimulationRun` under `simulations/`. Decisions are signed (the decision-signing key
-from `RATCHET_SIGNING_KEY`, else a fresh key whose id is recorded) and activation follows the decision log,
-as in every Ratchet run.
+tau2-bench's scored `SimulationRun` under `simulations/`. Decisions are signed with the pinned
+decision key (from `RATCHET_SIGNING_KEY` or the keyring; any other key is refused) and activation follows
+the decision log, as in every Ratchet run.
 
 The run ends by writing `frozen.json`: the active harness and the signed decision that admitted it (or the
 seed harness and no decision when nothing was admitted). That file is what a full run takes with
@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import threading
 import time
 from collections.abc import Callable
@@ -73,7 +72,7 @@ class RecordingRunner:
 
 
 def signer_from_env() -> Signer:
-    return Signer.from_env() if os.environ.get("RATCHET_SIGNING_KEY") else Signer.generate()
+    return Signer.for_decisions()
 
 
 def frozen_record(store: JsonlStore, active: str | None, seed: Harness) -> dict[str, Any]:

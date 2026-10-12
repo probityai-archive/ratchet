@@ -276,7 +276,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         store,
         len(cases),
     )
-    signer = Signer.from_env() if os.environ.get("RATCHET_SIGNING_KEY") else Signer.generate()
+    signer = Signer.for_decisions()
     log_path = root / "log.txt"
 
     def log(msg: str) -> None:

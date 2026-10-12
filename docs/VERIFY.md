@@ -128,6 +128,13 @@ untrusted keyid is never tried. The seed lives in the system keyring (`service r
 decision-signing-key`, 64 hex characters) and is never committed or printed; `RATCHET_SIGNING_KEY` overrides it
 for a run. Rotation: pass several keys to `verify_decision`.
 
+Every run signs with the pinned key or refuses to start (`Signer.for_decisions`); there is no fallback to a
+fresh key, because a decision signed by an unpublished key can never be checked. Decisions recorded before
+that rule by a per-run key are countersigned with `python -m ratchet.improve.countersign --db <db>`: the pinned
+key's signature is added beside the run's own (DSSE carries several), only when the stored decision still
+equals its signed payload, and the decision records `countersigned` with the date. `ratchet verify` then names
+the pinned key and the run key it was first signed with.
+
 ## Proposed predicate and vocabulary term
 
 Proposal for `agent-evidence-vocabulary`; it documents the receipt and does not verify one.

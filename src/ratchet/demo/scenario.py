@@ -236,7 +236,7 @@ def main(db: str, uri: str, reset: bool = False) -> int:
     if not db.startswith("ratchet_demo"):
         print("error: the demo writes only to a database whose name starts with ratchet_demo")
         return 2
-    signer = Signer.from_env()
+    signer = Signer.for_decisions()
     cases = demo_cases()
     client: MongoClient[dict[str, Any]] = MongoClient(uri)
     with client:

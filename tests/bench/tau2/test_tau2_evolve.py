@@ -14,7 +14,7 @@ from ratchet.bench.tau2.evolve import RecordingRunner, frozen_record, signer_fro
 from ratchet.bench.tau2.results import RunWriter
 from ratchet.bench.tau2.runner import Tau2Runner, seed_harness
 from ratchet.bench.tau2.tasks import family_of
-from ratchet.improve.receipt import Signer
+from ratchet.improve.receipt import ReceiptError, Signer
 
 
 def test_recording_runner_keeps_trace_and_simulation(tmp_path: Path) -> None:
@@ -55,13 +55,11 @@ def test_frozen_record_names_the_admitting_decision(tmp_path: Path) -> None:
     assert lone["decision"] is None
 
 
-def test_signer_comes_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    key = Signer.generate()
-    seed = key.private_key.private_bytes_raw().hex()
-    monkeypatch.setenv("RATCHET_SIGNING_KEY", seed)
-    assert signer_from_env().keyid == key.keyid
+def test_signer_is_the_pinned_decision_key(monkeypatch: pytest.MonkeyPatch, decision_key: Signer) -> None:
+    assert signer_from_env().keyid == decision_key.keyid
     monkeypatch.delenv("RATCHET_SIGNING_KEY")
-    assert signer_from_env().keyid != key.keyid
+    with pytest.raises(ReceiptError, match="no decision signing key"):
+        signer_from_env()
 
 
 def test_case_families() -> None:

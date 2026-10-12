@@ -1114,7 +1114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: set RATCHET_MONGODB_URI (or --uri) and RATCHET_API_KEY", file=sys.stderr)
         return 2
     cases = all_cases()
-    signer = Signer.from_env() if os.environ.get("RATCHET_SIGNING_KEY") else Signer.generate()
+    signer = Signer.for_decisions()
     model_config = {"base_url": a.base_url, "model": a.model, "improver_model": a.improver_model}
     with (
         AtlasStore(a.uri, a.db) as store,

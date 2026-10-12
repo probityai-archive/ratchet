@@ -175,7 +175,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     improver = _client(base_url, api_key, args.improver_model)
     # One `trial` of evolve's evaluations is about len(cases) runs; the counter just shows progress.
     runner = RecordingRunner(TauRunner(user_model=args.user_model), store, len(cases))
-    signer = Signer.from_env() if os.environ.get("RATCHET_SIGNING_KEY") else Signer.generate()
+    signer = Signer.for_decisions()
     log_path = root / "log.txt"
 
     def log(msg: str) -> None:

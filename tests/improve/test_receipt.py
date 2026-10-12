@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -128,3 +129,48 @@ def test_independent_dsse_implementation_verifies_our_envelope() -> None:
     accepted = env.verify([key], 1)
     assert list(accepted) == [signer.keyid]
     assert json.loads(env.pae()[env.pae().index(b"{") :]) == DECISION.payload
+
+
+def test_decision_signer_is_the_pinned_key(decision_key: Signer) -> None:
+    assert Signer.for_decisions().keyid == decision_key.keyid
+
+
+def test_decision_signer_refuses_a_key_that_is_not_pinned(
+    monkeypatch: pytest.MonkeyPatch, decision_key: Signer
+) -> None:
+    monkeypatch.setenv("RATCHET_SIGNING_KEY", "22" * 32)
+    with pytest.raises(ReceiptError, match="is not the pinned decision key"):
+        Signer.for_decisions()
+
+
+def test_decision_signer_never_falls_back_to_a_fresh_key(
+    monkeypatch: pytest.MonkeyPatch, decision_key: Signer
+) -> None:
+    monkeypatch.delenv("RATCHET_SIGNING_KEY")
+    with pytest.raises(ReceiptError, match="no decision signing key"):
+        Signer.for_decisions()
+
+
+def test_decision_signer_reads_the_keyring_when_the_environment_is_empty(
+    monkeypatch: pytest.MonkeyPatch, decision_key: Signer
+) -> None:
+    from ratchet.improve import receipt as receipt_mod
+
+    seed = decision_key.private_key.private_bytes_raw().hex()
+    monkeypatch.delenv("RATCHET_SIGNING_KEY")
+    monkeypatch.setattr(receipt_mod, "_keyring_seed", lambda: seed)
+    assert Signer.for_decisions().keyid == decision_key.keyid
+
+
+def test_decision_signer_needs_a_pinned_public_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, decision_key: Signer
+) -> None:
+    monkeypatch.setenv("RATCHET_DECISION_PUBKEY", str(tmp_path / "absent.pub"))
+    with pytest.raises(ReceiptError, match="no pinned decision key"):
+        Signer.for_decisions()
+
+
+def test_the_repository_pins_a_decision_key() -> None:
+    from ratchet.verify.keys import DEFAULT_KEY_PATH, load_trusted_key
+
+    assert load_trusted_key(DEFAULT_KEY_PATH) is not None

@@ -129,7 +129,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: set RATCHET_MONGODB_URI (or --uri) and RATCHET_API_KEY", file=sys.stderr)
         return 2
     cases = [c for c in all_cases() if not a.family or c.family in a.family]
-    signer = Signer.from_env() if os.environ.get("RATCHET_SIGNING_KEY") else Signer.generate()
+    signer = Signer.for_decisions()
     agent_cfg = ModelConfig(base_url=a.base_url, model=a.model, api_key=key, temperature=a.temperature)
     improver_url = a.improver_base_url or a.base_url
     improver_key = os.environ.get("RATCHET_IMPROVER_API_KEY", key)

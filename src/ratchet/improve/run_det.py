@@ -213,7 +213,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from dataclasses import replace as dc_replace
 
     d = dc_replace(d, policy={**RULING_2, "endpoint_config_digest": config_digest})
-    signer = Signer.from_env() if os.environ.get("RATCHET_SIGNING_KEY") else Signer.generate()
+    signer = Signer.for_decisions()
     env = receipt(d, signer)
     decision_id = f"det:{d.parent}->{d.candidate}:{config_digest[:12]}"
     store.put_decision(

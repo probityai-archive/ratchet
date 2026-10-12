@@ -170,10 +170,9 @@ class EndToEnd(LiveBackend):
 
 
 def test_evolve_runs_the_real_loop_against_atlas_and_the_views_read_it_back(
-    atlas_db: tuple[str, str, Store], monkeypatch: pytest.MonkeyPatch
+    atlas_db: tuple[str, str, Store], decision_key: Signer
 ) -> None:
     uri, db, store = atlas_db
-    monkeypatch.setenv("RATCHET_SIGNING_KEY", "66" * 32)
     buf = io.StringIO()
     env = {"RATCHET_MONGODB_URI": uri, "RATCHET_DB": db}
     code = main(

@@ -10,8 +10,10 @@ import base64
 import binascii
 import json
 import os
+import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from cryptography.exceptions import InvalidSignature
@@ -23,6 +25,9 @@ from ratchet.types import canonical_json, sha256_hex
 DECISION_TYPE = "application/vnd.ratchet.decision+json"
 HUMAN_APPROVAL_TYPE = "application/vnd.ratchet.human-approval+json"
 SIGNING_KEY_ENV = "RATCHET_SIGNING_KEY"
+TRUSTED_KEY_ENV = "RATCHET_DECISION_PUBKEY"
+KEYRING_SERVICE = "ratchet"
+KEYRING_ACCOUNT = "decision-signing-key"
 
 
 class ReceiptError(ValueError):
@@ -74,6 +79,37 @@ class Signer:
             raise ReceiptError(f"{SIGNING_KEY_ENV} is not set")
         return cls.from_seed_hex(value)
 
+    @classmethod
+    def for_decisions(cls, trusted_path: Path | None = None) -> Signer:
+        """The signer for admission decisions: the pinned decision key, or an error.
+
+        The seed comes from RATCHET_SIGNING_KEY, else the keyring (service `ratchet`, account
+        `decision-signing-key`). Its public key must equal the pinned key that `ratchet verify` trusts:
+        `trusted_path`, else the PEM named by RATCHET_DECISION_PUBKEY, else the repository's
+        `keys/ratchet-decisions.pub`. There is no fallback to a fresh key, because a decision signed by an
+        unpinned key can never be verified.
+        """
+        from ratchet.verify import keys  # deferred: ratchet.verify imports this module
+
+        seed = os.environ.get(SIGNING_KEY_ENV) or _keyring_seed()
+        if not seed:
+            raise ReceiptError(
+                f"no decision signing key: set {SIGNING_KEY_ENV} or store keyring "
+                f"service={KEYRING_SERVICE} account={KEYRING_ACCOUNT}"
+            )
+        signer = cls.from_seed_hex(seed)
+        path = trusted_path or Path(os.environ.get(TRUSTED_KEY_ENV) or keys.DEFAULT_KEY_PATH)
+        try:
+            pinned = keys.load_trusted_key(path)
+        except keys.TrustedKeyError as exc:
+            raise ReceiptError(f"no pinned decision key ({exc}); set {TRUSTED_KEY_ENV} to its PEM") from exc
+        if key_id(pinned) != signer.keyid:
+            raise ReceiptError(
+                f"signing key {signer.keyid[:12]} is not the pinned decision key "
+                f"{key_id(pinned)[:12]} ({path})"
+            )
+        return signer
+
     @property
     def public_key(self) -> Ed25519PublicKey:
         return self.private_key.public_key()
@@ -92,9 +128,48 @@ class Signer:
         return canonical_json(envelope)
 
 
+def _keyring_seed() -> str:
+    """The decision seed from the GNOME keyring; empty when the keyring or the entry is absent."""
+    try:
+        out = subprocess.run(
+            ["secret-tool", "lookup", "service", KEYRING_SERVICE, "account", KEYRING_ACCOUNT],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return out.stdout.strip()
+
+
 def receipt(decision: Payload, signer: Signer) -> bytes:
     """A signed DSSE envelope over the canonical JSON of the decision and its evidence."""
     return signer.sign(DECISION_TYPE, canonical_json(decision.to_payload()))
+
+
+def countersign(envelope: bytes, signer: Signer) -> bytes:
+    """Add `signer`'s signature over the same payload, keeping every signature already on the envelope.
+
+    DSSE allows several signatures on one envelope. This lets the pinned decision key vouch for a decision
+    that a run signed with a per-run key: the run's own signature and keyid stay as the first record.
+    Countersigning twice with the same key returns the envelope unchanged.
+    """
+    try:
+        doc = json.loads(envelope)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReceiptError("envelope is not JSON") from exc
+    if not isinstance(doc, dict) or doc.get("payloadType") != DECISION_TYPE:
+        raise ReceiptError("only a decision envelope can be countersigned")
+    signatures = doc.get("signatures")
+    if not isinstance(signatures, list):
+        raise ReceiptError("envelope carries no signature list")
+    if any(isinstance(e, dict) and e.get("keyid") == signer.keyid for e in signatures):
+        return envelope
+    body = _b64(doc.get("payload"), "payload")
+    sig = signer.private_key.sign(pae(DECISION_TYPE, body))
+    signatures.append({"keyid": signer.keyid, "sig": base64.b64encode(sig).decode("ascii")})
+    return canonical_json(doc)
 
 
 def _b64(value: Any, label: str) -> bytes:

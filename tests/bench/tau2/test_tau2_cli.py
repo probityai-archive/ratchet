@@ -22,6 +22,7 @@ from ratchet.bench.tau2.results import (
 )
 from ratchet.bench.tau2.runner import Tau2Runner, seed_harness
 from ratchet.improve.evaluate import INFRA_RETRIES
+from ratchet.improve.receipt import Signer
 from ratchet.types import Guard, Procedure
 
 
@@ -294,9 +295,8 @@ def test_git_commit_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_evolve_with_nothing_to_fix_freezes_the_seed(
-    monkeypatch: pytest.MonkeyPatch, scripted: SayDone, tmp_path: Path
+    scripted: SayDone, tmp_path: Path, decision_key: Signer
 ) -> None:
-    monkeypatch.delenv("RATCHET_SIGNING_KEY", raising=False)
     args = ["--out", str(tmp_path), "evolve", "--domain", "airline", "--tasks", "0,13", "--workers", "2"]
     assert cli.main(args) == 0
     root = tmp_path / "evolve" / "airline" / "evolve-1"

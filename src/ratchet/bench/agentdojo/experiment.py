@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
-import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -34,7 +33,7 @@ from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.evaluate import EvalReport, evaluate_many
 from ratchet.improve.loop import EvolveResult, Lab, evolve
 from ratchet.improve.propose import Instructions
-from ratchet.improve.receipt import SIGNING_KEY_ENV, Signer, public_key_bytes
+from ratchet.improve.receipt import Signer, public_key_bytes
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.types import Guard, Harness, Procedure, Split, canonical_json, sha256_hex
 
@@ -172,7 +171,7 @@ def model_config(s: Settings) -> dict[str, Any]:
 
 
 def _signer() -> Signer:
-    return Signer.from_env() if os.environ.get(SIGNING_KEY_ENV) else Signer.generate()
+    return Signer.for_decisions()
 
 
 def baseline(
