@@ -402,7 +402,7 @@ def with_replay(**changes: Any) -> dict[str, Any]:
         ({"snapshot_digest": "d" * 64}, "snapshot_digest"),
         ({"targets": [{"failure_id": "f1", "hit": True}, {"failure_id": "f2", "hit": False}]}, "targets_hit"),
         ({"targets": [{"failure_id": "f1", "hit": True}]}, "targets_hit"),
-        ({"false_positives": [{"run_id": "r1", "seq": 3}]}, "false_positives"),
+        ({"false_positives": [{"run_id": "r1", "seq": 3}]}, "false_fires"),
         ({"errors": [{"error": "boom"}]}, "errors"),
     ],
 )
@@ -411,6 +411,18 @@ def test_a_recomputed_replay_that_differs_from_the_claim_is_contradicted(
 ) -> None:
     r = run(signer, recomputed=with_replay(**changes))
     assert (r.decision, r.reason) == ("contradicted", f"replay_recompute_mismatch:{GUARD_ID}:{field}")
+
+
+def test_a_rejected_replay_whose_false_fires_recompute_exactly_agrees() -> None:
+    """The row the signer writes (admit.check_replay) names false fires as run_id@seq under false_fires;
+    a recomputation that finds the same fires is no contradiction, and a different set is."""
+    from ratchet.verify.recompute import replay_matches
+
+    fires = [{"run_id": "r1", "seq": 3}, {"run_id": "r2", "seq": 7}]
+    recomputed = {**REPLAY_REPORT, "passed": False, "false_positives": fires}
+    row = {**replay_row(), "passed": False, "false_fires": ["r2@7", "r1@3"]}
+    assert replay_matches(row, recomputed) == []
+    assert replay_matches({**row, "false_fires": ["r1@3"]}, recomputed) == ["false_fires"]
 
 
 def test_replay_snapshot_must_match_the_receipts_corpus_digest(signer: Signer) -> None:

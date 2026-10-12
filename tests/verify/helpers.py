@@ -108,7 +108,7 @@ def replay_row() -> dict[str, Any]:
         "snapshot_digest": SNAPSHOT,
         "targets_hit": 2,
         "targets_total": 2,
-        "false_positives": [],
+        "false_fires": [],
         "errors": 0,
     }
 

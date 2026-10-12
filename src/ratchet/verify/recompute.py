@@ -149,7 +149,7 @@ def replay_matches(claimed: dict[str, Any], recomputed: dict[str, Any]) -> list[
         "snapshot_digest": recomputed.get("snapshot_digest"),
         "targets_hit": sum(1 for t in targets if t.get("hit")),
         "targets_total": len(targets),
-        "false_positives": sorted(
+        "false_fires": sorted(
             f"{f.get('run_id')}@{f.get('seq')}" for f in recomputed.get("false_positives") or []
         ),
         "errors": len(recomputed.get("errors") or []),
@@ -159,7 +159,8 @@ def replay_matches(claimed: dict[str, Any], recomputed: dict[str, Any]) -> list[
         "snapshot_digest": claimed.get("snapshot_digest"),
         "targets_hit": claimed.get("targets_hit"),
         "targets_total": claimed.get("targets_total"),
-        "false_positives": sorted(claimed.get("false_positives") or []),
+        # the signed row (ratchet.improve.admit.check_replay) lists them as "run_id@seq" under false_fires
+        "false_fires": sorted(claimed.get("false_fires") or []),
         "errors": claimed.get("errors"),
     }
     return [k for k in fields if fields[k] != seen[k]]
