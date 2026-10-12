@@ -4842,6 +4842,15 @@ wheels = [
 name = "ratchet-cases"
 source = { editable = "ratchet-cases" }
 
+[package.optional-dependencies]
+agentdojo = [
+    { name = "agentdojo" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "agentdojo", marker = "extra == 'agentdojo'", specifier = "==0.1.35" }]
+provides-extras = ["agentdojo"]
+
 [[package]]
 name = "readchar"
 version = "4.2.2"
