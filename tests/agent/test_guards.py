@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -309,9 +310,9 @@ def _big_history(n: int, tag: int) -> list[Event]:
     return [Event(seq=i, kind="tool_call", payload={**payload, "tag": tag}, ts=float(i)) for i in range(n)]
 
 
-@pytest.fixture
-def cpu_hog() -> Iterator[int]:
-    """Saturate every CPU this process may run on with busy loops for the duration of the test."""
+@contextlib.contextmanager
+def saturated_cpus() -> Iterator[int]:
+    """Saturate every CPU this process may run on with busy loops while the block runs."""
     count = len(os.sched_getaffinity(0))
     hogs = [
         subprocess.Popen([sys.executable, "-c", "while True: pass"], stdin=subprocess.DEVNULL)
@@ -326,6 +327,12 @@ def cpu_hog() -> Iterator[int]:
             hog.wait()
 
 
+@pytest.fixture
+def cpu_hog() -> Iterator[int]:
+    with saturated_cpus() as count:
+        yield count
+
+
 INSTANT = guard(
     """
     def check(call, view, history):
@@ -336,15 +343,49 @@ INSTANT = guard(
     """,
     "instant",
 )
-HISTORY_EVENTS = 15_000
+HISTORY_EVENTS = 15_000  # where calibration starts; the size is only ever doubled from here
+MAX_HISTORY_EVENTS = HISTORY_EVENTS * 16  # stays inside the child's memory limit
 CALL_LIMIT_S = 0.2
+BATCH_ITEMS = 3
 
 
-def test_decoding_a_large_history_under_load_is_never_a_guard_timeout(cpu_hog: int) -> None:
-    items = [
-        GuardItem(INSTANT, ToolCall("lookup", {}, f"c{k}"), VIEW, _big_history(HISTORY_EVENTS, k))
-        for k in range(3)
+def _load_items(events: int) -> list[GuardItem]:
+    return [
+        GuardItem(INSTANT, ToolCall("lookup", {}, f"c{k}"), VIEW, _big_history(events, k))
+        for k in range(BATCH_ITEMS)
     ]
+
+
+def _seconds_per_item(rt: GuardRuntime, events: int) -> float:
+    items = _load_items(events)
+    started = time.monotonic()
+    rt.batch(items)
+    return (time.monotonic() - started) / len(items)
+
+
+@pytest.fixture(scope="module")
+def history_events() -> int:
+    """A history size at which moving one history into the child takes over twice a guard's time limit.
+
+    The tests below only mean something when that holds, and how many events it takes depends on the
+    machine. So double the size from HISTORY_EVENTS until the per-item time of the very batch the
+    first test asserts on, measured on a saturated machine as that test runs, clears twice the limit.
+    """
+    with saturated_cpus(), GuardRuntime(GuardLimits(call_timeout_s=CALL_LIMIT_S), workers=1) as rt:
+        events = HISTORY_EVENTS
+        while _seconds_per_item(rt, events) <= 2 * CALL_LIMIT_S:
+            assert events < MAX_HISTORY_EVENTS, (
+                f"even {events} events take under {2 * CALL_LIMIT_S}s per item to move into the child "
+                "here; raise MAX_HISTORY_EVENTS"
+            )
+            events *= 2
+        return events
+
+
+def test_decoding_a_large_history_under_load_is_never_a_guard_timeout(
+    cpu_hog: int, history_events: int
+) -> None:
+    items = _load_items(history_events)
     with GuardRuntime(GuardLimits(call_timeout_s=CALL_LIMIT_S), workers=1) as rt:
         started = time.monotonic()
         results = rt.batch(items)
@@ -353,12 +394,12 @@ def test_decoding_a_large_history_under_load_is_never_a_guard_timeout(cpu_hog: i
     assert wall / len(items) > CALL_LIMIT_S, wall
     # ... and none of that time was charged to the guard.
     assert [r.kind for r in results] == ["verdict"] * len(items), results
-    assert [r.reason for r in results] == [f"n={HISTORY_EVENTS}"] * len(items)
+    assert [r.reason for r in results] == [f"n={history_events}"] * len(items)
     assert all(r.elapsed_s < CALL_LIMIT_S for r in results), [r.elapsed_s for r in results]
 
 
-def test_a_looping_guard_still_times_out_under_the_same_load(cpu_hog: int) -> None:
-    history = _big_history(HISTORY_EVENTS, 0)
+def test_a_looping_guard_still_times_out_under_the_same_load(cpu_hog: int, history_events: int) -> None:
+    history = _big_history(history_events, 0)
     items = [
         GuardItem(INSTANT, ToolCall("lookup", {}, "a"), VIEW, history),
         GuardItem(INSTANT, ToolCall("lookup", {"loop": True}, "b"), VIEW, history),
