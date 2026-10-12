@@ -19,7 +19,7 @@ verdict was reached.
 | Package | Pin | Where |
 |---|---|---|
 | `probity-verify` | git commit `b920366397cb131232163706864a70723b867367` (version 0.1.0, no registry release) | `pyproject.toml` `[tool.uv.sources]`, `uv.lock` |
-| `agent-evidence-vectors` | `==0.17.7`, PyPI | `pyproject.toml`, `uv.lock` |
+| `agent-evidence-vectors` | `==0.17.9`, PyPI | `pyproject.toml`, `uv.lock` |
 
 `probity-verify` requires `cryptography>=50.0.2,<51`; the lock resolves 50.0.2. Only commits from `b920366` on have
 the `adapters=` argument this build uses. `tests/verify/test_pinned_dependencies.py` asserts both pins and runs the

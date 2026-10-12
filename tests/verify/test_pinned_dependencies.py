@@ -19,7 +19,7 @@ def test_probity_verify_is_pinned_to_the_full_commit() -> None:
 
 
 def test_agent_evidence_vectors_is_pinned_from_pypi() -> None:
-    assert metadata.version("agent-evidence-vectors") == "0.17.7"
+    assert metadata.version("agent-evidence-vectors") == "0.17.9"
 
 
 def test_pinned_vector_harness_self_test_passes(monkeypatch: pytest.MonkeyPatch) -> None:
