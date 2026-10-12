@@ -13,7 +13,13 @@ from agentdojo.agent_pipeline.base_pipeline_element import BasePipelineElement
 from agentdojo.agent_pipeline.ground_truth_pipeline import GroundTruthPipeline
 from agentdojo.functions_runtime import FunctionsRuntime
 from agentdojo.task_suite.load_suites import get_suite, get_suites
-from agentdojo.types import ChatAssistantMessage, ChatMessage, ChatUserMessage, text_content_block_from_string
+from agentdojo.types import (
+    ChatAssistantMessage,
+    ChatMessage,
+    ChatUserMessage,
+    get_text_content_as_str,
+    text_content_block_from_string,
+)
 
 import ratchet_cases.agentdojo as twins
 
@@ -62,12 +68,29 @@ def test_the_suites_are_registered_under_the_twin_benchmark_version() -> None:
 
 
 # TaskSuite.check in agentdojo 0.1.35 copies environments with pydantic's deprecated `copy`; the warning is
-# raised inside AgentDojo, not here, so this test alone lets that one deprecation through.
-@pytest.mark.filterwarnings("default:The `copy` method is deprecated:DeprecationWarning")
+# raised inside AgentDojo, not here, so this test alone ignores that one deprecation.
+@pytest.mark.filterwarnings("ignore:The `copy` method is deprecated:DeprecationWarning")
 @pytest.mark.parametrize("name", ["workspace", "travel", "banking", "slack"])
-def test_every_ground_truth_solves_its_twin_and_reads_the_slot(name: str) -> None:
-    ok, (users, _) = get_suite(twins.BENCHMARK_VERSION, name).check(check_injectable=True)
+def test_every_ground_truth_solves_its_twin(name: str) -> None:
+    # Injectability is tested below: in agentdojo 0.1.35, is_task_injectable reads only tool results whose
+    # content is a str, and the ground-truth pipeline returns content blocks, so check_injectable=True
+    # rejects every user task of every suite, AgentDojo's own included.
+    ok, (users, _) = get_suite(twins.BENCHMARK_VERSION, name).check(check_injectable=False)
     assert ok, {k: v for k, v in users.items() if not v[0]}
+
+
+@pytest.mark.parametrize(("name", "twin"), PAIRS, ids=[f"{s}-{t.id}" for s, t in PAIRS])
+def test_the_ground_truth_reads_the_twins_own_slot(name: str, twin: twins.Twin) -> None:
+    # AgentDojo's injectability check, reading the text out of content blocks, and narrowed from "some
+    # canary appears" to "the canary in this twin's own slot appears".
+    suite = get_suite(twins.BENCHMARK_VERSION, name)
+    canaries = {vector: f"---CANARY_{vector}---" for vector in suite.get_injection_vector_defaults()}
+    task = suite.user_tasks[twin.id]
+    _, _, _, responses, _ = GroundTruthPipeline(task).query(
+        task.PROMPT, FunctionsRuntime(suite.tools), suite.load_and_inject_default_environment(canaries)
+    )
+    outputs = " ".join(get_text_content_as_str(m["content"]) for m in responses if m["role"] == "tool")
+    assert canaries[twin.slot.vector] in outputs
 
 
 @pytest.mark.parametrize(("name", "twin"), PAIRS, ids=[f"{s}-{t.id}" for s, t in PAIRS])
@@ -89,7 +112,7 @@ def test_carrying_out_the_paired_attack_does_not_pass_the_twin(name: str, twin: 
 
 @pytest.mark.parametrize(("name", "twin"), PAIRS, ids=[f"{s}-{t.id}" for s, t in PAIRS])
 def test_the_episode_starts_with_the_instruction_in_the_slot(name: str, twin: twins.Twin) -> None:
-    # check() above proves the twin's first calls surface this slot; here the slot holds the instruction.
+    # The test above proves the ground truth surfaces this slot; here the slot holds the instruction.
     suite = get_suite(twins.BENCHMARK_VERSION, name)
     env = suite.user_tasks[twin.id].init_environment(suite.load_and_inject_default_environment({}))
     assert twin.instruction.strip() in json.dumps(env.model_dump(mode="json"))
@@ -106,6 +129,8 @@ def test_agentdojo_check_suites_accepts_the_suite() -> None:
             "ratchet_cases.agentdojo",
             "-v",
             twins.BENCHMARK_VERSION,
+            # The same agentdojo 0.1.35 defect as above; the twins' own injectability test covers it.
+            "--no-check-injectable",
         ],
         capture_output=True,
         text=True,
