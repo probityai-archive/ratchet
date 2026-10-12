@@ -74,6 +74,10 @@ def test_report_counts_every_run_and_lists_stopped_ones(tmp_path: Path) -> None:
         "evolve/retail/run-1",
     }
     text = render(tmp_path, "retail")
+    assert text.startswith(
+        "# tau-bench retail: Ratchet results\n\n"
+        "tau-bench is a set of simulated customer-service tasks, here the retail domain."
+    )
     assert "| `h1` | heldout | 2 | 2 | 4 | 3 | 0 | 75.0% | 50.0% |" in text
     assert "| `h1` | train | 1 | 1 | 1 | 0 | 0 | 0.0% |" in text
     assert "`runs/retail/h1/all-trial-9`: rate limits" in text
