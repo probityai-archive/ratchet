@@ -367,3 +367,46 @@ def test_a_stopped_run_shows_its_reason_until_it_is_resumed(scripted: SayDone, t
     page = render_report(tmp_path)
     assert "Stopped once after 1 conversations and resumed: endpoint cancelled" in page
     assert "| 4 / 4 | complete |" in page
+
+
+def test_report_lists_every_evolve_run_with_its_decisions_and_stop_reasons(tmp_path: Path) -> None:
+    def store(folder: Path, started: str) -> Path:
+        folder.mkdir(parents=True)
+        config = {"domain": "retail", "agent_model": "oss", "user_model": "oss", "improver_model": "terra",
+                  "generations": 1, "started": started}  # fmt: skip
+        (folder / "config.json").write_text(json.dumps(config), encoding="utf-8")
+        return folder
+
+    def lines(path: Path, records: list[dict[str, Any]]) -> None:
+        path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+
+    def evaluation(harness: str, role: str, held: int, lost: int = 0) -> dict[str, Any]:
+        results = [{"case_id": f"c{i}", "split": "heldout", "passed": i < held, "run_id": f"{role}-{i}",
+                    "error": "Connection error" if i >= 4 - lost else None} for i in range(4)]  # fmt: skip
+        return {"report": {"type": "eval", "harness_version": harness, "role": role, "generation": 1,
+                           "heldout": {"passed": held, "total": 4}, "train": {"passed": 0, "total": 0},
+                           "results": results}}  # fmt: skip
+
+    stopped = store(tmp_path / "evolve" / "retail" / "oss-evolve-1", "2026-10-11T17:18:59-0400")
+    (stopped / "STOPPED.txt").write_text("stopped by the workstation-load rule\n", encoding="utf-8")
+    lines(stopped / "evals.jsonl", [evaluation("seed", "parent_run_1", 2)])
+    failed = store(tmp_path / "box" / "a" / "evolve" / "retail" / "oss-evolve-2", "2026-10-11T22:51:03+0000")
+    (failed / "FAILED.txt").write_text("HTTP 401 on every improver call\n", encoding="utf-8")
+    done = store(tmp_path / "box" / "b" / "evolve" / "retail" / "oss-evolve-3", "2026-10-12T05:32:10+0000")
+    lines(done / "evals.jsonl", [evaluation("seed", "parent_run_1", 2), evaluation("seed", "parent_run_2", 3),
+                                 evaluation("cand", "candidate", 1, lost=3)])  # fmt: skip
+    checks = [{"name": "heldout", "passed": False}, {"name": "replay", "passed": True}]
+    lines(done / "decisions.jsonl", [{"decision_id": "seed->cand", "decision": {
+        "admitted": False, "candidate": "cand", "checks": checks, "context": {"kind": "procedure"},
+        "keyid": "b61d7e39c11179fd"}}])  # fmt: skip
+    gen = {"generation": 1, "level1": {"candidates": 9, "evaluated": 1, "admitted": 0}}
+    (done / "result.json").write_text(json.dumps({"generations": [gen]}), encoding="utf-8")
+    text = render_report(tmp_path)
+    assert "No runs recorded yet.\n\n## Evolve runs\n" in text
+    order = [text.index(f"### Evolve run `{p.relative_to(tmp_path)}`") for p in (stopped, failed, done)]
+    assert order == sorted(order)
+    assert "- Stopped (`STOPPED.txt`): stopped by the workstation-load rule" in text
+    assert "- Failed (`FAILED.txt`): HTTP 401 on every improver call" in text
+    assert "| 1 | `seed` | 2 | 3/4 | not run | 0 of 4 |" in text
+    assert "| 1 | `cand` | procedure | 1/4 | not run | 3 of 4 | rejected | heldout |" in text
+    assert "- 1 decision, 0 admitted, signed with key `b61d7e39c111`." in text

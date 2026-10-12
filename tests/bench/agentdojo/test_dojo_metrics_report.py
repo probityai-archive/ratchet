@@ -139,12 +139,18 @@ def test_render_lists_versions_metrics_and_admitted_guards() -> None:
     results["provenance"]["agentdojo_reference_clone_commit"] = None
     text = render(results)
     assert "No candidate was admitted" in text and "reference clone" not in text
+    assert "Stop reason" not in text
+    results["status"] = "stopped: the endpoint's\n8-hour limit ended it"
+    text = render(results)
+    assert text.startswith("### banking (v1.2.2), run `run-x`, stopped\n\n")
+    assert "\n- Stop reason (`STOPPED.txt`): the endpoint's 8-hour limit ended it\n" in text
 
 
 def test_overview_names_the_newest_version_and_its_latest_heldout_run() -> None:
     block = {"utility": _m(1, 2), "utility_under_attack": _m(3, 4), "targeted_attack_success": _m(1, 4),
              "ratchet_passed": _m(3, 6)}  # fmt: skip
     results = {
+        "run_id": "batch-2/slack",
         "provenance": {"suite": "slack", "model": "m"},
         "status": "in progress",
         "versions": ["v0", "v1"],
@@ -156,7 +162,9 @@ def test_overview_names_the_newest_version_and_its_latest_heldout_run() -> None:
         ],
     }
     row = overview_row(results)
-    assert row.startswith("| slack | `m` | in progress, 1 gen | 50.0% (1/2) | 75.0% (3/4) | 25.0% (1/4) ")
+    assert row.startswith(
+        "| slack | `batch-2/slack` | `m` | in progress, 1 gen | 50.0% (1/2) | 75.0% (3/4) | 25.0% (1/4) "
+    )
     assert "`v1` (e9)" in row
     results["versions"] = ["v0"]
     assert "none promoted | | | |" in overview_row(results)
@@ -164,5 +172,10 @@ def test_overview_names_the_newest_version_and_its_latest_heldout_run() -> None:
     assert "| stopped, 1 gen |" in overview_row(results)
     results["status"] = "in progress"
     results["metrics"] = []
-    assert overview_row(results).startswith("| slack | `m` | in progress, 1 gen | | | | none promoted")
-    assert document([], "pre").startswith("# AgentDojo results\n\npre\n")
+    assert overview_row(results).startswith(
+        "| slack | `batch-2/slack` | `m` | in progress, 1 gen | | | | none promoted"
+    )
+    assert document([], "pre").startswith("# AgentDojo results\n\npre\n\n## Overview")
+    assert document([], "pre", notes="## Notes\n\nlost runs\n").startswith(
+        "# AgentDojo results\n\npre\n\n## Notes\n\nlost runs\n\n## Overview"
+    )

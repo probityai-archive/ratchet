@@ -12,7 +12,15 @@ from ratchet_cases.types import Cost, Outcome, Trace
 from ratchet.bench.toolsandbox.cases import ToolSandboxCase
 from ratchet.bench.toolsandbox.grading import Graded, Score
 from ratchet.bench.toolsandbox.metrics import LOST, NOT_RUN, RAN
-from ratchet.bench.toolsandbox.report import collect, render, render_csv, rows_for
+from ratchet.bench.toolsandbox.report import (
+    Run,
+    _split_label,
+    _title,
+    collect,
+    render,
+    render_csv,
+    rows_for,
+)
 from ratchet.bench.toolsandbox.store import RunStore
 
 KEY_ERROR = "PermissionError: Please provide 'RAPID_API_KEY' in environment variable."
@@ -196,7 +204,48 @@ def test_runs_that_never_finished_are_listed_with_their_reason(tmp_path: Path) -
     assert lines["runs/h1/all-trial-3"].startswith("- `runs/h1/all-trial-3`: 2 conversations recorded")
     assert lines["runs/h1/all-trial-3"].endswith("no stop reason recorded")
     assert "runs/h1/all-trial-1`:" not in text
+    assert "### Evolve run `evolve/e1`\n\n- Models not recorded.\n- Stopped (`STOPPED.txt`): killed" in text
     (evolve / "result.json").write_text("{}", encoding="utf-8")
-    assert "evolve/e1" not in render(tmp_path)
+    assert "- `evolve/e1`" not in render(tmp_path)
+    assert "- Stopped (`STOPPED.txt`): killed with the session" in render(tmp_path)
+    (evolve / "STOPPED.txt").unlink()
+    assert "- Finished: 0 of 1 planned generations ran." in render(tmp_path)
     shutil.rmtree(tmp_path / "runs")
-    assert "No run recorded yet." in render(tmp_path) and "evolve/e1" not in render(tmp_path)
+    assert "No run recorded yet." in render(tmp_path) and "- `evolve/e1`" not in render(tmp_path)
+    assert "### Evolve run `evolve/e1`" in render(tmp_path)
+
+
+def test_an_evolve_run_shows_its_parent_scores_and_its_decision(tmp_path: Path) -> None:
+    folder = _write_run(tmp_path)
+    evolve = tmp_path / "box" / "evolve" / "smoke-2"
+    evolve.mkdir(parents=True)
+    config = {"agent_model": "llama", "user_model": "luna", "improver_model": "llama", "generations": 1}
+    (evolve / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    store = RunStore(evolve)
+    parent = {"type": "eval", "harness_version": "h1", "role": "parent_run_1", "generation": 1,
+              "heldout": {"passed": 6, "total": 24}, "train": {"passed": 5, "total": 24},
+              "results": []}  # fmt: skip
+    candidate = {**parent, "harness_version": "h2", "role": "candidate"}
+    candidate["heldout"] = {"passed": 10, "total": 24}
+    store.put_eval(parent, eval_id="e1")
+    store.put_eval(candidate, eval_id="e2")
+    checks = [{"name": "heldout", "passed": False}, {"name": "no_regression", "passed": False}]
+    decision = {"admitted": False, "candidate": "h2", "checks": checks, "context": {"kind": "procedure"},
+                "keyid": "b61d7e39c111ffff"}  # fmt: skip
+    store.put_decision(decision, decision_id="h1->h2")
+    gen = {"generation": 1, "level1": {"candidates": 6, "evaluated": 1, "admitted": 0}}
+    (evolve / "result.json").write_text(json.dumps({"generations": [gen]}), encoding="utf-8")
+    text = render(tmp_path)
+    section = text[text.index("## Evolve runs") :]
+    assert "### Evolve run `box/evolve/smoke-2`" in section
+    assert "- Generation 1: 6 candidates proposed, 1 evaluated, 0 admitted." in section
+    assert "- 1 decision, 0 admitted, signed with key `b61d7e39c111`." in section
+    assert "| 1 | `h1` | 1 | 6/24 | 5/24 | 0 of 0 |" in section
+    assert "| 1 | `h2` | procedure | 10/24 | 5/24 | 0 of 0 | rejected | heldout, no_regression |" in section
+    assert "| `h1` | all | `agent-m` |" in text and str(folder.relative_to(tmp_path)) in text
+    run = Run("box/evolve/smoke-2", config, candidate, [])
+    assert _title(run) == "`h2`, evolve candidate, generation 1" and _split_label(run) == "candidate"
+    trial = Run(
+        "runs/h1/all-trial-1", {"split": "all", "trial": 1, "limit": 10}, {"harness_version": "h1"}, []
+    )
+    assert _title(trial) == "`h1` on all (trial 1, seeded sample of 10)" and _split_label(trial) == "all"

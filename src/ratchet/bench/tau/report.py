@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ratchet.bench.evolve_report import unique_stores
 from ratchet.bench.tau.metrics import by_task, summary
 from ratchet.bench.tau.store import JsonlStore
 from ratchet.bench.tau.tasks import DOMAINS
@@ -36,15 +37,21 @@ PROTOCOL = """\
 """
 
 
+def _folders(root: Path, name: str) -> list[Path]:
+    """Every directory under `root` holding `name`, each run once: the box copies under `box/` sit beside
+    the workstation's runs, and a run found twice (same directory name and identical config) counts once."""
+    return unique_stores([p.parent for p in root.rglob(name)])
+
+
 def collect(root: Path) -> list[dict[str, Any]]:
     """Every recorded evaluation report: trial reports and every evaluation an evolve run persisted."""
     rows: list[dict[str, Any]] = []
-    for path in sorted(root.rglob("evals.jsonl")):
-        domain = _domain_of(path, root)
-        for rec in JsonlStore(path.parent).read("evals"):
+    for folder in _folders(root, "evals.jsonl"):
+        domain = _domain_of(folder / "evals.jsonl", root)
+        for rec in JsonlStore(folder).read("evals"):
             rep = rec["report"]
             if rep.get("type") == "eval" and "results" in rep:
-                rows.append({**rep, "domain": domain, "source": str(path.parent.relative_to(root))})
+                rows.append({**rep, "domain": domain, "source": str(folder.relative_to(root))})
     return rows
 
 
@@ -80,22 +87,32 @@ def _cell(row: dict[str, Any], k: int) -> str:
 
 def _configs(root: Path, domain: str) -> list[dict[str, Any]]:
     out = []
-    for path in sorted(root.rglob("config.json")):
-        cfg = json.loads(path.read_text(encoding="utf-8"))
+    for folder in _folders(root, "config.json"):
+        cfg = json.loads((folder / "config.json").read_text(encoding="utf-8"))
         if cfg.get("domain", "retail") == domain:
-            out.append({**cfg, "source": str(path.parent.relative_to(root))})
+            out.append({**cfg, "source": str(folder.relative_to(root))})
+    return out
+
+
+def _evolve(root: Path, domain: str) -> list[Path]:
+    """The domain's evolve stores, wherever they sit under `root` (box copies included, each run once)."""
+    out = []
+    for folder in _folders(root, "config.json"):
+        cfg = json.loads((folder / "config.json").read_text(encoding="utf-8"))
+        if cfg.get("domain", "retail") == domain and "generations" in cfg:
+            out.append(folder)
     return out
 
 
 def _decisions(root: Path, domain: str) -> list[dict[str, Any]]:
     rows = []
-    for path in sorted((root / "evolve" / domain).glob("*/decisions.jsonl")):
-        for rec in JsonlStore(path.parent).read("decisions"):
+    for folder in _evolve(root, domain):
+        for rec in JsonlStore(folder).read("decisions"):
             d = rec["decision"]
             failed = [c["name"] for c in d.get("checks", []) if not c.get("passed")]
             rows.append(
                 {
-                    "run": path.parent.name,
+                    "run": str(folder.relative_to(root)),
                     "id": rec["decision_id"],
                     "admitted": bool(d.get("admitted")),
                     "failed": failed,
@@ -106,9 +123,10 @@ def _decisions(root: Path, domain: str) -> list[dict[str, Any]]:
 
 def _results(root: Path, domain: str) -> list[dict[str, Any]]:
     out = []
-    for path in sorted((root / "evolve" / domain).glob("*/result.json")):
-        res = json.loads(path.read_text(encoding="utf-8"))
-        out.append({**res, "run": path.parent.name})
+    for folder in _evolve(root, domain):
+        if (folder / "result.json").is_file():
+            res = json.loads((folder / "result.json").read_text(encoding="utf-8"))
+            out.append({**res, "run": str(folder.relative_to(root))})
     return out
 
 
@@ -119,8 +137,11 @@ def unfinished(root: Path, domain: str, counted: set[tuple[str, str]]) -> list[d
     is reported as what it is: completed runs of an evaluation that did not complete.
     """
     out = []
-    for path in sorted((root / "evolve" / domain).glob("*/traces.jsonl")):
-        source = str(path.parent.relative_to(root))
+    for folder in _evolve(root, domain):
+        path = folder / "traces.jsonl"
+        if not path.is_file():
+            continue
+        source = str(folder.relative_to(root))
         cfg_path = path.parent / "config.json"
         record = (
             json.loads(cfg_path.read_text(encoding="utf-8")).get("split_record", {})
@@ -171,7 +192,7 @@ def render(root: Path, domain: str) -> str:
         lines += [notes.read_text(encoding="utf-8").rstrip(), ""]
     lines += [PROTOCOL, "## Setup", ""]
     keys = ("agent_model", "user_model", "improver_model", "temperature", "tau_bench_commit", "workers")
-    counted = {r["source"] for r in rows} | {f"evolve/{domain}/{r['run']}" for r in _results(root, domain)}
+    counted = {r["source"] for r in rows} | {r["run"] for r in _results(root, domain)}
     stopped = [c for c in configs if c["source"] not in counted]
     seen: set[str] = set()
     for cfg in configs:
@@ -246,7 +267,8 @@ def render(root: Path, domain: str) -> str:
         lines += ["", "## Admission decisions", ""]
         lines += ["| evolve run | parent -> candidate | admitted | failed checks |", "|---|---|---|---|"]
         for d in decisions:
-            lines.append(f"| {d['run']} | `{d['id']}` | {d['admitted']} | {', '.join(d['failed']) or '-'} |")
+            failed = ", ".join(d["failed"]) or "-"
+            lines.append(f"| `{d['run']}` | `{d['id']}` | {d['admitted']} | {failed} |")
     for res in _results(root, domain):
         lines += ["", f"## Evolve run `{res['run']}`", ""]
         lines.append(f"- final harness `{res['final_harness']}`, active pointer {res.get('active')}")

@@ -2,7 +2,9 @@
 
 `report` turns every run under `--out` into a Markdown page: setup, then per run the planned and recorded
 conversations, successes, tau2-bench's pass^k, pass^k with endpoint-lost units counted as failures, and
-the per-task success counts with exact task ids. No number on the page is typed by hand.
+the per-task success counts with exact task ids, then every evolve run (parent scores per generation, every
+candidate and every signed decision, and the stop or failure reason of a run that did not finish). No number
+on the page is typed by hand.
 
 `package` builds a custom-type leaderboard submission from finished runs, one per domain: tau2-bench's
 `Submission` model (validated by tau2-bench's own pydantic schema) with pass^k computed by tau2-bench's
@@ -23,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import ratchet.bench.tau2  # noqa: F401  # sets TAU2_DATA_DIR before tau2-bench is imported
+from ratchet.bench.evolve_report import evolve_stores, render_runs
 from ratchet.bench.tau2.results import by_task, load_results, read_jsonl, summarize_run
 from ratchet.bench.tau2.tasks import load_tasks
 
@@ -104,8 +107,9 @@ def render_report(out: Path) -> str:
         "tau2-bench's: the mean over tasks of C(c, k) / C(n, k) for c successes in n trials.",
         "",
     ]
+    evolve = evolve_section(out)
     if not runs:
-        return "\n".join([*lines, "No runs recorded yet.", ""])
+        return "\n".join([*lines, "No runs recorded yet.", "", *evolve])
     first = json.loads((runs[0] / "config.json").read_text(encoding="utf-8"))
     lines += [
         f"tau2-bench commit `{first['tau2_commit_installed']}` (data digest per run in its `config.json`).",
@@ -116,7 +120,24 @@ def render_report(out: Path) -> str:
     lines += [*summary_table(runs), ""]
     for r in runs:
         lines += run_section(r)
-    return "\n".join(lines)
+    return "\n".join([*lines, *evolve])
+
+
+EVOLVE_INTRO = (
+    "Each evolve run measures the parent harness twice per generation on the held-out tasks (and once on "
+    "the train tasks), lets the improver propose candidates from failed train conversations, evaluates "
+    "some of them on the same tasks, and admits a candidate only through a signed decision whose checks "
+    "all pass. A conversation lost to the model endpoint is not a pass: it counts as a failure in the "
+    "passed counts and as invalid evidence in the held-out check, which then fails."
+)
+
+
+def evolve_section(out: Path) -> list[str]:
+    """The `## Evolve runs` section: every evolve store under `out`, or nothing when there is none."""
+    stores = evolve_stores(Path(out))
+    if not stores:
+        return []
+    return ["## Evolve runs", "", EVOLVE_INTRO, "", *render_runs(Path(out), stores)]
 
 
 def summary_table(runs: list[Path]) -> list[str]:

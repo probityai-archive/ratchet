@@ -37,7 +37,7 @@ def test_report_counts_every_run_and_lists_stopped_ones(tmp_path: Path) -> None:
     _config(trial, note="first trial")
     JsonlStore(trial).put_eval(_eval("h1", [("x", "heldout", True), ("y", "heldout", False)]))
     evo = tmp_path / "evolve" / "retail" / "run-1"
-    _config(evo, improver_model="i", stopped="cut off")
+    _config(evo, improver_model="i", stopped="cut off", generations=1)
     store = JsonlStore(evo)
     store.put_eval({"type": "evaluator"})
     store.put_eval(
@@ -81,12 +81,36 @@ def test_report_counts_every_run_and_lists_stopped_ones(tmp_path: Path) -> None:
     assert "| `h1` | heldout | 2 | 2 | 4 | 3 | 0 | 75.0% | 50.0% |" in text
     assert "| `h1` | train | 1 | 1 | 1 | 0 | 0 | 0.0% |" in text
     assert "`runs/retail/h1/all-trial-9`: rate limits" in text
-    assert "| run-1 | `h1->h2` | False | heldout |" in text
+    assert "| `evolve/retail/run-1` | `h1->h2` | False | heldout |" in text
+    assert "## Evolve run `evolve/retail/run-1`" in text
     assert "parent_run_2" in text and "note: n" in text and "airline" not in text
     assert "Note: first trial" in text
     assert "Stopped: cut off" in text
     assert "| `evolve/retail/run-1` | `h2` | 1/1 | 0/1 |" in text
     assert "`h1` | 1/1" not in text
+
+
+def test_box_copies_are_read_and_a_run_found_twice_counts_once(tmp_path: Path) -> None:
+    def evolve_store(folder: Path) -> None:
+        _config(folder, domain="airline", generations=3, started="2026-10-12T03:50:57+0000")
+        store = JsonlStore(folder)
+        store.put_eval(
+            _eval("h1", [("x", "heldout", False), ("y", "heldout", True)], role="parent_run_1", generation=1)
+        )
+        store.put_decision(
+            {"admitted": False, "checks": [{"name": "heldout", "passed": False}]}, decision_id="h1->h3"
+        )
+        gen = {"generation": 1, "parent": "h1", "level1": {"candidates": 2}}
+        (folder / "result.json").write_text(json.dumps({"final_harness": "h1", "generations": [gen]}))
+
+    evolve_store(tmp_path / "box" / "evolve-airline-run3" / "evolve" / "airline" / "run-3")
+    evolve_store(tmp_path / "box" / "copy-taken-twice" / "evolve" / "airline" / "run-3")
+    text = render(tmp_path, "airline")
+    assert len(collect(tmp_path)) == 1
+    assert text.count("| `h1->h3` |") == 1
+    assert text.count("## Evolve run `box/") == 1
+    assert "| `box/copy-taken-twice/evolve/airline/run-3` | `h1->h3` | False | heldout |" in text
+    assert "Runs stopped before any evaluation finished" not in text
 
 
 def test_report_command_writes_the_page(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

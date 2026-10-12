@@ -181,12 +181,27 @@ def test_report_writes_one_document_over_runs(tmp_path: Path, monkeypatch: pytes
     doc = tmp_path / "doc.md"
     assert cli.main(["report", "--out", str(doc), "--runs", str(s.out)]) == 0
     text = doc.read_text()
-    assert text.startswith("# AgentDojo results\n\nAgentDojo v1.2.2 (package 0.1.35), run as a Ratchet world")
+    assert text.startswith("# AgentDojo results\n\nAgentDojo is a set of tasks where tool outputs carry")
+    assert "AgentDojo v1.2.2 (package 0.1.35), run as a Ratchet world" in text
     assert "et al" not in text and "NeurIPS" not in text
-    assert "| banking | `gpt-5.6-luna` | complete, 0 gen | " in text and "none promoted" in text
-    assert "### banking (v1.2.2)" in text
+    assert "| banking | `run` | `gpt-5.6-luna` | complete, 0 gen | " in text and "none promoted" in text
+    assert "### banking (v1.2.2), run `run`, complete" in text
+    notes = tmp_path / "notes.md"
+    notes.write_text("## Notes on the runs\n\nhand notes\n")
+    assert cli.main(["report", "--out", str(doc), "--notes", str(notes), "--runs", str(s.out)]) == 0
+    assert "\n## Notes on the runs\n\nhand notes\n\n## Overview" in doc.read_text()
     with pytest.raises(SystemExit):
         cli.parse(["report"])
+
+
+def test_run_labels_keep_same_named_runs_in_two_batches_apart(tmp_path: Path) -> None:
+    first, rerun = tmp_path / "box-1" / "banking-hpg", tmp_path / "box-2" / "banking-hpg"
+    alone = tmp_path / "banking-evolve"
+    labels = cli.run_labels([alone, first, rerun])
+    assert labels == ["banking-evolve", "box-1/banking-hpg", "box-2/banking-hpg"]
+    assert cli.run_labels([first]) == ["banking-hpg"]
+    assert cli.run_labels([first, first]) == ["banking-hpg", "banking-hpg"]
+    assert cli.run_labels([]) == []
 
 
 def test_transfer_reruns_every_version_under_another_attack(

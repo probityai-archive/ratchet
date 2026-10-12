@@ -45,6 +45,7 @@ def parse(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--suite", default="banking")
     ap.add_argument("--out", type=Path, help="run directory (report: the Markdown document to write)")
     ap.add_argument("--runs", type=Path, nargs="*", default=[], help="report: run directories, in order")
+    ap.add_argument("--notes", type=Path, default=None, help="report: a Markdown file of notes on the runs")
     ap.add_argument("--source", type=Path, default=None, help="transfer: the run whose versions to test")
     ap.add_argument("--model", default="gpt-5.6-luna")
     ap.add_argument("--improver-model", default="gpt-5.6-terra")
@@ -159,6 +160,18 @@ def summarize(out: Path) -> dict[str, Any]:
     return write_results(out, dojo, prov, versions, command, status)
 
 
+def run_labels(runs: Sequence[Path]) -> list[str]:
+    """Each run's name on the page: its path below the runs' common parent, so two runs with the same
+    directory name in different batches (a stopped run and its rerun) stay apart."""
+    if not runs:
+        return []
+    resolved = [r.resolve() for r in runs]
+    base = Path(os.path.commonpath(resolved))
+    if len(resolved) == 1 or base in resolved:
+        base = resolved[0].parent
+    return [str(r.relative_to(base)) for r in resolved]
+
+
 def transfer(source: Path, s: Settings) -> dict[str, Any]:
     """Every version a run promoted, run fresh on its held-out cases under a different attack.
 
@@ -201,7 +214,10 @@ def transfer(source: Path, s: Settings) -> dict[str, Any]:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(sys.argv[1:] if argv is None else argv)
     if args.command == "report":
-        args.out.write_text(document([summarize(r) for r in args.runs]))
+        notes = args.notes.read_text(encoding="utf-8") if args.notes else ""
+        labels = run_labels(args.runs)
+        all_results = [{**summarize(r), "run_id": label} for r, label in zip(args.runs, labels, strict=True)]
+        args.out.write_text(document(all_results, notes=notes))
         print(args.out.read_text())
         return 0
     if args.command == "summarize":

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ratchet.bench.evolve_report import evolve_stores, render_runs
 from ratchet.bench.toolsandbox.metrics import HEADLINE, LOST, NOT_RUN, RAN, Row, summarize, summarize_category
 from ratchet.bench.toolsandbox.store import RunStore
 
@@ -244,9 +245,17 @@ def _category_table(rows: list[Row], only: tuple[str, ...] | None = None) -> lis
 
 def _title(run: Run) -> str:
     cfg = run.config
+    if run.report.get("role"):
+        gen = f", generation {run.report['generation']}" if run.report.get("generation") else ""
+        return f"`{run.report['harness_version']}`, evolve {run.report['role']}{gen}"
     sample = f", seeded sample of {cfg['limit']}" if cfg.get("limit") else ""
     where = f"{cfg.get('split', '?')} (trial {cfg.get('trial', '?')}{sample})"
     return f"`{run.report['harness_version']}` on {where}"
+
+
+def _split_label(run: Run) -> str:
+    """The split column: the trial's split, or for an evolve evaluation its role."""
+    return str(run.report.get("role") or run.config.get("split", "?"))
 
 
 def _run_section(run: Run) -> list[str]:
@@ -303,16 +312,16 @@ def render(root: Path, csv_name: str = "toolsandbox-scenarios.csv") -> str:
     ]
     tail = tail if stopped else []
     if not runs:
-        return "\n".join([*out, "No run recorded yet.", "", *tail]).rstrip() + "\n"
+        return "\n".join([*out, "No run recorded yet.", "", *evolve_section(root), *tail]).rstrip() + "\n"
     out += [
-        "| Harness | Split | Agent model | n | ran | not run | lost | similarity (ran) | similarity (all n) "
-        "| milestone (ran) | exact | passed |",
+        "| Harness | Split or evolve role | Agent model | n | ran | not run | lost | similarity (ran) "
+        "| similarity (all n) | milestone (ran) | exact | passed |",
         "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for run in runs:
         s = summarize_category(run.rows)
         out.append(
-            f"| `{run.report['harness_version']}` | {run.config.get('split', '?')} "
+            f"| `{run.report['harness_version']}` | {_split_label(run)} "
             f"| `{run.config.get('agent_model', '?')}` | {s['n']} | {s['ran']} | {s['not_run']} "
             f"| {s['lost']} | {_fmt(s['similarity_ran'])} | {_fmt(s['similarity_all'])} "
             f"| {_fmt(s['milestone_ran'])} "
@@ -321,7 +330,23 @@ def render(root: Path, csv_name: str = "toolsandbox-scenarios.csv") -> str:
     out += ["", "## Runs", ""]
     for run in runs:
         out += _run_section(run)
-    return "\n".join([*out, *tail]).rstrip() + "\n"
+    return "\n".join([*out, *evolve_section(root), *tail]).rstrip() + "\n"
+
+
+EVOLVE_INTRO = (
+    "Each evolve run measures the parent harness twice per generation on its held-out scenarios (and once "
+    "on its train scenarios), lets the improver propose candidates from failed train conversations, "
+    "evaluates some of them, and admits a candidate only through a signed decision whose checks all pass. "
+    "Here a scenario passes at similarity 0.9 or more. Each evaluation is also listed above under `Runs`."
+)
+
+
+def evolve_section(root: Path) -> list[str]:
+    """The `## Evolve runs` section: parent scores, candidates and decisions of every evolve store."""
+    stores = evolve_stores(root)
+    if not stores:
+        return []
+    return ["## Evolve runs", "", EVOLVE_INTRO, "", *render_runs(root, stores)]
 
 
 def render_csv(root: Path) -> str:
