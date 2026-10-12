@@ -43,7 +43,7 @@ When the agent fails, the improver proposes a guard or a procedure (written step
 
 ## Status
 
-Version 0.1.0, built on 2026-10-11 at the MongoDB harness hackathon. The suite, graders and rule are frozen before each run. Measured results, with denominators, are in [docs/RESULTS.md](docs/RESULTS.md).
+Version 0.1.1, built on 2026-10-11 at the MongoDB harness hackathon. The suite, graders and rule are frozen before each run. Measured results, with denominators, are in [docs/RESULTS.md](docs/RESULTS.md).
 
 ## Docs
 
