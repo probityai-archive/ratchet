@@ -105,5 +105,13 @@ Completed runs of a harness whose evaluation was stopped before it finished. The
 
 | source | harness | held-out passed / runs | train passed / runs |
 |---|---|---|---|
+| `box/evolve-retail-run3/evolve/retail/run-3` | `46fc1393bf69` | 0/0 | 5/5 |
 | `evolve/retail/run-2` | `72cf3b712583` | 0/0 | 21/28 |
 | `evolve/retail/stopped-throughput-run-1` | `2ccb14a29382` | 0/0 | 23/25 |
+
+## Admission decisions
+
+| evolve run | parent -> candidate | admitted | failed checks |
+|---|---|---|---|
+| `box/evolve-retail-run3/evolve/retail/run-3` | `2ccb14a29382->b892b2f226b0` | False | replay, heldout, no_regression |
+| `box/evolve-retail-run3/evolve/retail/run-3` | `2ccb14a29382->d1c609c0a474` | False | heldout, no_regression |
