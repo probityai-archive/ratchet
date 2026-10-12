@@ -11,6 +11,7 @@ list disagree.
 | [archive.json](results/archive.json) | The version archive export: every harness version as a node with its clade pass rate and admission yield. |
 | [Atlas feature probes on the hackathon sandbox](results/atlas-probes.md) | Each Atlas feature run against the hackathon sandbox before the product claims it, with the result for each server version. |
 | [Guard replay over real coding-agent history](results/hooks-replay.md) | One Ratchet guard, `no-force-push-main`, tested by replay over the operator's own Claude Code session transcripts. |
+| [Improver-instruction search: seed, challenger and searched text](results/improver-instructions.md) | Three versions of the improver's instructions (the seed, the loop's own challenger and the text the instruction search returned) proposing harness changes for the same frozen failure clusters, with every candidate judged by the admission rule. |
 | [tau-bench airline: Ratchet results](results/tau-airline.md) | The loop on tau-bench airline with its own database and reward: pass^k by harness and split. |
 | [tau-bench retail: Ratchet results](results/tau-retail.md) | The loop on tau-bench retail with its own database and reward: pass^k by harness and split, with crashed and stopped runs listed. |
 | [tau2-bench: Ratchet results](results/tau2.md) | tau2-bench airline, retail and telecom run through Ratchet's worker loop: pass^k per run, with every planned, recorded and lost conversation counted and every stopped run listed with its reason. |
