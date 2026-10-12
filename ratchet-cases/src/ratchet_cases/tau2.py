@@ -83,8 +83,10 @@ class FaultedTask:
 def write_tools(environment: Environment | None = None) -> list[str]:
     """The retail tools tau2-bench marks as WRITE, in the toolkit's order."""
     env = environment if environment is not None else get_environment()
-    names: list[str] = list(env.tools.get_tools())
-    return [name for name in names if env.tools.tool_type(name) == ToolType.WRITE]
+    tools = env.tools
+    if tools is None:
+        raise ValueError("the retail environment has no assistant toolkit")
+    return [name for name in tools.get_tools() if tools.tool_type(name) == ToolType.WRITE]
 
 
 def _gold_calls(task: Task) -> list[Any]:
