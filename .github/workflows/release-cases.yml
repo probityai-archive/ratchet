@@ -7,6 +7,10 @@ name: release ratchet-cases
 on:
   push:
     tags: ["ratchet-cases-v*"]
+  # A pull request that touches the package or this file runs build and verify, so the release path is
+  # proven before a tag needs it. Only a tag reaches the release job.
+  pull_request:
+    paths: ["ratchet-cases/**", ".github/workflows/release-cases.yml"]
 
 permissions:
   contents: read
@@ -25,12 +29,15 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: uv build --package ratchet-cases --out-dir dist
       - name: the tag names the package version
+        if: github.event_name == 'push'
         run: |
           version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' ratchet-cases/src/ratchet_cases/__init__.py)
           test "ratchet-cases-v$version" = "$GITHUB_REF_NAME"
           ls dist/ratchet_cases-"$version"-py3-none-any.whl dist/ratchet_cases-"$version".tar.gz
       - id: digest
-        run: echo "digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' ratchet-cases/src/ratchet_cases/cases/DIGESTS.json "${GITHUB_REF_NAME#ratchet-cases-v}")" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' ratchet-cases/src/ratchet_cases/__init__.py)
+          echo "digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' ratchet-cases/src/ratchet_cases/cases/DIGESTS.json "$version")" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
@@ -49,7 +56,13 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: false
+          # This job checks out nothing: it tests the built wheel, never the source tree.
+          ignore-empty-workdir: true
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        # The action's bundled @actions/artifact calls the deprecated Buffer() constructor and Node
+        # prints DEP0005 for it; nothing in this repository can change that code, so the notice is muted.
+        env:
+          NODE_OPTIONS: --no-deprecation
         with:
           name: dist
           path: dist
@@ -64,6 +77,7 @@ jobs:
 
   release:
     needs: [build, verify]
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -72,6 +86,9 @@ jobs:
       attestations: write
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        # DEP0005 from the action's bundled code; see the verify job.
+        env:
+          NODE_OPTIONS: --no-deprecation
         with:
           name: dist
           path: dist
