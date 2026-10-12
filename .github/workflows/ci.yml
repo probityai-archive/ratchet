@@ -86,6 +86,48 @@ jobs:
         working-directory: ratchet-cases
         run: '"$RUNNER_TEMP/twins/bin/python" -m pytest -q -W error -p no:cacheprovider tests_agentdojo'
 
+  # retail_faults against tau2-bench itself. tau2-bench is not on PyPI under its own name (the PyPI project
+  # "tau2" is an unrelated package), so it is installed from its repository at the commit the harness pins,
+  # with that commit's retail data. websockets is installed beside it because importing tau2 needs it while
+  # tau2 declares it only in its voice extra.
+  cases-tau2:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TAU2_COMMIT: 4ce7c0397c1eb65c9bbe59aeacfe1ca44a1cd699
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: false
+      - name: fetch tau2-bench code and retail data at the pinned commit
+        run: |
+          d="$RUNNER_TEMP/tau2-bench"
+          git init -q "$d"
+          git -C "$d" remote add origin https://github.com/sierra-research/tau2-bench
+          git -C "$d" sparse-checkout set --no-cone '/*' '!/data/' '/data/tau2/domains/retail/' \
+            '!/data/tau2/domains/retail/task_issues/' '!/data/tau2/domains/retail/tasks_voice.json' \
+            '!/data/tau2/domains/retail/audio_difficulty.json'
+          git -C "$d" fetch -q --depth 1 --filter=blob:none origin "$TAU2_COMMIT"
+          git -C "$d" checkout -q FETCH_HEAD
+          test "$(git -C "$d" rev-parse HEAD)" = "$TAU2_COMMIT"
+          echo "TAU2_DATA_DIR=$d/data" >> "$GITHUB_ENV"
+      - run: uv build --package ratchet-cases --out-dir dist
+      - name: install the wheel beside tau2-bench
+        run: |
+          uv venv --no-project --python 3.12 "$RUNNER_TEMP/t2"
+          uv pip install --python "$RUNNER_TEMP/t2/bin/python" "$RUNNER_TEMP/tau2-bench" websockets==15.0.1 \
+            dist/ratchet_cases-*.whl pytest==9.1.1
+      # tau2-bench imports the standard library's audioop, deprecated since Python 3.11, from its voice
+      # utilities at import time. That one warning comes from tau2-bench and is ignored by its exact text;
+      # every other warning still fails the job.
+      - name: faulted retail tasks, graded on the live databases
+        working-directory: ratchet-cases
+        run: >-
+          "$RUNNER_TEMP/t2/bin/python" -m pytest -q -p no:cacheprovider tests_tau2
+          -W error -W "ignore:'audioop' is deprecated and slated for removal in Python 3.13:DeprecationWarning"
+
+
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 45

@@ -46,6 +46,18 @@ Eight families: a refund that commits while its reply is lost, an approval revok
 
 Splits: 18 train, 19 held-out, 15 audit. **All three splits are public.** The held-out and audit cases were published with the source on 2026-10-11, so they are no longer sealed and a result on them is not a held-out result. A sealed cohort, run by a steward, is separate planned work.
 
+## tau2-bench retail faults
+
+`ratchet_cases.tau2` puts a deterministic timeout, after or before the call commits, on the first call to each of tau2-bench's seven retail write tools: 14 tasks, each graded on the live databases against the gold ones rather than on a replay of the trajectory. Install tau2-bench from its repository first; it is not on PyPI under its own name.
+
+```python
+from ratchet_cases import tau2
+
+print([tau2.run(task, tau2.Policy.GIVE_UP).passed for task in tau2.faulted_tasks()])
+```
+
+An agent that gives up after a timeout passes the seven after-commit tasks and fails the seven before-commit ones. A tau2-bench that carries `Task.faults` and loads `tau2.plugins` entry points runs the same set as `retail_faults`.
+
 ## Version and digest
 
 Version 0.1.0. `ratchet_cases.SUITE_DIGEST` is computed from the shipped cases at import, and `DIGESTS.json` records the digest of every release, so `ratchet-cases==X.Y.Z` pins the exact cases. Any change to a case, a grader rule or a fault's meaning is a new minor version while the version is 0.x.
