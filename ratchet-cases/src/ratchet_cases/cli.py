@@ -16,6 +16,7 @@ from typing import Any
 from ratchet_cases import __version__, released_digest
 from ratchet_cases.adapters.openai_compat import EndpointError
 from ratchet_cases.adapters.python_callable import AdapterError
+from ratchet_cases.agentdojo_logs import report as agentdojo_report
 from ratchet_cases.cases import CASE_KINDS, SPLITS, Case, all_cases, get, grade, suite_digest
 from ratchet_cases.cases.solvers import NAIVE, REFERENCE, REFUSER, Habits, solve
 from ratchet_cases.run import Act, Regraded, TraceFileError, read_traces, regrade, run_case, trace_line
@@ -201,6 +202,14 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
+def cmd_agentdojo_report(args: argparse.Namespace) -> int:
+    table = agentdojo_report(Path(args.logdir))
+    if args.metric:
+        table = {name: {args.metric: row[args.metric], "twins": row["twins"]} for name, row in table.items()}
+    print(json.dumps(table, indent=2))
+    return 0
+
+
 def _filters(p: argparse.ArgumentParser) -> None:
     p.add_argument("--split", choices=SPLITS)
     p.add_argument("--kind", choices=CASE_KINDS)
@@ -237,6 +246,12 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("paths", nargs="+")
     p.add_argument("--metric", choices=METRICS)
     p.set_defaults(func=cmd_report)
+    p = sub.add_parser(
+        "agentdojo-report", help="false intervention rate per pipeline from AgentDojo benign-twin run logs"
+    )
+    p.add_argument("logdir", help="the --logdir of an AgentDojo run over ratchet-benign-twins-v0.1")
+    p.add_argument("--metric", choices=("false_intervention_rate",))
+    p.set_defaults(func=cmd_agentdojo_report)
     return ap
 
 
