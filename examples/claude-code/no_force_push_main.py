@@ -6,18 +6,22 @@ preloads can be imported (`re`, `string`, ...); `shlex` is not one, so the shell
 
 A push targets main when a refspec names it (`main`, `HEAD:main`, `+x:refs/heads/main`), when it
 pushes everything (`--all`, `--mirror`), or when it names no refspec and the checked-out branch,
-`view["git_branch"]`, is main. It is forced by `-f`, `--force`, `--force-with-lease` or a `+` refspec.
-Pushes inside `$(...)`, backticks, `sh -c`/`bash -c` scripts and `eval` are found too. Text that merely
-mentions a push, in a commit message, an echo, a grep or single quotes, is not a push.
+`view["git_branch"]`, is main. It is forced by `-f`, `--force`, `--force-with-lease`, a `+` refspec, or
+`--mirror`, which force-updates every remote branch. Pushes inside `$(...)`, backticks, `sh -c`/`bash -c`
+scripts, `eval`, and heredocs or here-strings fed to a shell are found too. Text that merely mentions a
+push, in a commit message, an echo, a grep, single quotes or a heredoc fed to any other program (a
+`python -` script writing a document, `cat > file`), is not a push.
 """
 
 import re
 from typing import Any
 
 PROTECTED = ("main", "master")
-FORCE_FLAGS = ("--force", "--force-with-lease")
-DELETE_FLAGS = ("--delete", "-d")
+FORCE_FLAGS = ("--force", "--force-with-lease")  # and `-f`, alone or in a group of short flags
+DELETE_FLAGS = ("--delete",)  # and `-d`, alone or in a group of short flags
+DRY_RUN_FLAGS = ("--dry-run",)  # and `-n`; a dry run reports what would be pushed and changes nothing
 EVERYTHING_FLAGS = ("--all", "--mirror", "--branches")
+FORCING_FLAGS = ("--mirror",)  # git: "locally updated refs will be force updated on the remote end"
 GIT_VALUE_OPTIONS = ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path")
 PUSH_VALUE_OPTIONS = ("-o", "--push-option", "--repo", "--receive-pack", "--exec")
 WRAPPERS = ("sudo", "command", "env", "nohup", "time", "exec", "nice")
@@ -64,10 +68,11 @@ class Scanner:
         self.text = text
         self.commands: list[list[str]] = []
         self.substitutions: list[str] = []
+        self.scripts: list[str] = []
         self.words: list[str] = []
         self.word: list[str] = []
         self.started = False
-        self.heredocs: list[tuple[str, bool, bool]] = []
+        self.heredocs: list[tuple[str, bool, bool, list[str]]] = []
         i = 0
         quote = ""
         while i < len(text):
@@ -101,12 +106,13 @@ class Scanner:
             j += 1
         raw = self.text[start:j]
         delimiter = raw.replace("'", "").replace('"', "").replace("\\", "")
-        self.heredocs.append((delimiter, raw != delimiter, strip_tabs))
+        self.heredocs.append((delimiter, raw != delimiter, strip_tabs, self.words))
         return j
 
     def bodies(self, i: int) -> int:
-        """Consume the heredoc bodies that start at `i`; return the index after the last delimiter line."""
-        for delimiter, quoted, strip_tabs in self.heredocs:
+        """Consume the heredoc bodies that start at `i`; return the index after the last delimiter line. A
+        body fed to a shell reading its script from stdin is a script; any other body is data."""
+        for delimiter, quoted, strip_tabs, words in self.heredocs:
             body: list[str] = []
             while i < len(self.text):
                 end = self.text.find("\n", i)
@@ -116,14 +122,20 @@ class Scanner:
                 if (line.lstrip("\t") if strip_tabs else line) == delimiter:
                     break
                 body.append(line)
-            if not quoted:
+            if shell_reads_stdin(words):
+                self.scripts.append("\n".join(body))
+            elif not quoted:
                 self.substitutions.extend(substitutions_in("\n".join(body)))
         self.heredocs = []
         return i
 
     def step(self, i: int, quote: str) -> tuple[int, str]:
         text, c = self.text, self.text[i]
-        if not quote and text.startswith("<<", i) and not text.startswith("<<<", i):
+        if not quote and text.startswith("<<<", i):
+            self.word.append("<<<")
+            self.started = True
+            return i + 3, quote
+        if not quote and text.startswith("<<", i):
             self.end_word()
             return self.heredoc(i), quote
         if not quote and c == "\n" and self.heredocs:
@@ -174,6 +186,31 @@ def command_start(words: list[str]) -> int:
     return i
 
 
+def shell_reads_stdin(words: list[str]) -> bool:
+    """True when the command is a shell that takes its script from stdin: no `-c`, no script file."""
+    i = command_start(words)
+    if i >= len(words) or words[i].rsplit("/", 1)[-1] not in SHELLS:
+        return False
+    j = i + 1
+    while j < len(words):
+        w = words[j]
+        if w.startswith("<<<"):
+            j += 2 if w == "<<<" else 1
+            continue
+        redirect = REDIRECT.match(w)
+        if redirect is not None:
+            j += 1 if redirect.group(1) else 2
+            continue
+        if w == "--" or not w.startswith(("-", "+")):
+            return False  # what follows is a script file; stdin is that script's data
+        if not w.startswith("--") and "c" in w[1:]:
+            return False
+        if not w.startswith("--") and "s" in w[1:]:
+            return True  # `-s`: the script is stdin and the remaining words are its arguments
+        j += 1
+    return True
+
+
 def push_args(words: list[str]) -> list[str] | None:
     """The arguments after `git ... push`, or None when the command is not a git push."""
     i = command_start(words)
@@ -201,6 +238,13 @@ def nested_scripts(words: list[str]) -> list[str]:
         flag = words[j]
         if flag.startswith("-") and not flag.startswith("--") and "c" in flag:
             return [words[j + 1]]
+    if not shell_reads_stdin(words):
+        return []
+    for j in range(i + 1, len(words)):  # a here-string fed to the shell is its script
+        if words[j] == "<<<" and j + 1 < len(words):
+            return [words[j + 1]]
+        if words[j].startswith("<<<") and words[j] != "<<<":
+            return [words[j][3:]]
     return []
 
 
@@ -214,7 +258,7 @@ def destination(refspec: str, branch: str) -> str:
 
 
 def verdict(args: list[str], branch: str) -> str | None:
-    forced = deleting = everything = False
+    forced = deleting = everything = dry_run = False
     positional: list[str] = []
     i = 0
     while i < len(args):
@@ -226,15 +270,16 @@ def verdict(args: list[str], branch: str) -> str | None:
         if redirect is not None:
             i += 1
             continue
-        if a.split("=", 1)[0] in FORCE_FLAGS or (a.startswith("-") and not a.startswith("--") and "f" in a):
-            forced = True
-        elif a in DELETE_FLAGS:
-            deleting = True
-        elif a in EVERYTHING_FLAGS:
-            everything = True
-        elif not a.startswith("-"):
+        short = a[1:] if a.startswith("-") and not a.startswith("--") else ""  # `-nf` is `-n -f`
+        forced = forced or a.split("=", 1)[0] in FORCE_FLAGS or a in FORCING_FLAGS or "f" in short
+        deleting = deleting or a in DELETE_FLAGS or "d" in short
+        dry_run = dry_run or a in DRY_RUN_FLAGS or "n" in short
+        everything = everything or a in EVERYTHING_FLAGS
+        if not a.startswith("-"):
             positional.append(a)
         i += 1
+    if dry_run:
+        return None
     refspecs = positional[1:]
     if not refspecs and not everything:
         refspecs = [branch or "?"]
@@ -265,7 +310,7 @@ def reason_for(text: str, branch: str, depth: int = 0) -> str | None:
             reason = reason or reason_for(script, branch, depth + 1)
         if reason is not None:
             return reason
-    for body in scan.substitutions:
+    for body in scan.substitutions + scan.scripts:
         reason = reason_for(body, branch, depth + 1)
         if reason is not None:
             return reason

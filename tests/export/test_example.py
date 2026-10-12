@@ -61,6 +61,50 @@ CASES = [
     ("git push -f origin feature >main", "f", False),
     ("git push -f origin main 2>&1", "f", True),
     ("git push -f origin sha1:refs/heads/main > log 2>&1", "f", True),
+    # The shapes of the six real force pushes found by replaying a developer's own session history.
+    ("cd /w && git -C mirror.git push --force --mirror git@host:o/r.git > p.log 2>&1; cat p.log", "", True),
+    ("cd /w && X_OK=1 git -C mirror.git push --force --mirror https://host/o/r.git > p.log 2>&1", "", True),
+    ("cd /w && A=1 B=1 git -C m.git push --force --mirror git@host:o/r.git > p.log 2>&1; echo $?", "", True),
+    (
+        "cd /r && git push --force-with-lease=main:75dc80d origin f744af9:refs/heads/main > /t/o 2>&1",
+        "",
+        True,
+    ),
+    (
+        "cd /r && PUSH_DIRECT=1 git push --force-with-lease=main:75dc80d origin f744af9:refs/heads/main",
+        "",
+        True,
+    ),
+    ('W=/s; cd "$W/repo" && git fetch -q && git push --force-with-lease=main:7d1fae6 origin main', "", True),
+    # The one false alarm: a python heredoc writing a document whose text names a force push.
+    (
+        'cd /r; python3 - <<\'PYEOF\'\nimport pathlib\nblock = """## Rulings\n'
+        'Rewrite with git push --force-with-lease origin main, then verify.\n"""\n'
+        "pathlib.Path('packet.md').write_text(block)\nPYEOF",
+        "main",
+        False,
+    ),
+    ('echo "git push --force origin main"', "main", False),
+    ("git push origin feature --force", "main", False),
+    ("git push --force-with-lease origin HEAD:main", "f", True),
+    ("PUSH_DIRECT=1 git -C repo push -f origin main", "f", True),
+    ("python3 -c \"print('git push -f origin main')\"", "main", False),
+    ("cat > notes.md <<EOF\nRun git push --force origin main to reset.\nEOF", "main", False),
+    # --mirror force-updates every remote branch, main included, with or without --force.
+    ("git push --mirror git@host:o/r.git", "f", True),
+    ("git push --mirror origin", "f", True),
+    # A dry run reports what would be pushed and changes nothing.
+    ("git push --mirror --dry-run origin", "f", False),
+    ("git push -nf origin main", "f", False),
+    # A heredoc or here-string fed to a shell is a script, not data.
+    ("bash <<'EOF'\ngit push -f origin main\nEOF", "f", True),
+    ("sh -s -- x <<EOF\ngit push --force origin main\nEOF", "f", True),
+    ("bash > out.log <<'EOF'\ngit push -f origin main\nEOF", "f", True),
+    ("bash run.sh <<'EOF'\ngit push -f origin main\nEOF", "f", False),
+    ("bash -c 'cat' <<'EOF'\ngit push -f origin main\nEOF", "f", False),
+    ("bash <<< 'git push -f origin main'", "f", True),
+    ("bash <<<'git push -f origin main'", "f", True),
+    ("bash -c 'echo hi' <<< 'git push -f origin main'", "f", False),
 ]
 
 
