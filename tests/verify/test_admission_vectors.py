@@ -21,9 +21,9 @@ from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from ratchet_cases.types import canonical_json
 
 from ratchet.improve.receipt import DECISION_TYPE, Signer
-from ratchet.types import canonical_json
 from ratchet.verify import PREDICATE_URI
 from ratchet.verify.receipt import NO_VERDICT, Options, verify_decision
 
