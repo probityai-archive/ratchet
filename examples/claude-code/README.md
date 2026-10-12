@@ -26,9 +26,9 @@ guard's reasons go to the `--out` file. Each call is judged with the inputs the 
 the view `{"cwd", "git_branch"}` and the events before it. Pass `--expect ids.txt` to require that the
 guard fires on exactly those calls.
 
-On one developer machine (13,712 sessions, 629,192 tool calls) the previous version of this guard fired
-on 7 calls in 4 sessions, with no guard error, at 1,599 checks per second. 6 were force pushes onto
-`main`. The seventh was text inside a quoted heredoc, which the current version reads as data.
+On one developer machine (13,739 sessions, 632,126 tool calls) this guard fired on 6 calls in 3 sessions,
+with no guard error and no false alarm; all 6 were force pushes onto `main`. An earlier version also fired
+on text inside a quoted heredoc that a Python script was writing to a document, which this one reads as data.
 
 ## Install
 
