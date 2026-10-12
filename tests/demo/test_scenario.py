@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from ratchet_cases.types import Trace
 
 from ratchet.agent.guards import GuardRuntime
-from ratchet.demo.scenario import demo_cases, run_demo
+from ratchet.demo.scenario import DB_ENV, URI_ENV, demo_cases, follow_up, run_demo
+from ratchet.demo.signing import KEY_NOTE
 from ratchet.demo.worker import NAME, ScriptedDemoWorker
 from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.receipt import Signer
@@ -71,3 +74,22 @@ def test_the_demo_admits_one_guard_rejects_the_other_and_activates() -> None:
     assert payload["context"]["scenario"]["agent"] == NAME
     assert payload["evaluator"]["components"]["suite_file"]
     assert r.failed_trace.endswith("/refund_lost_reply.v1")
+    assert payload["context"]["signing_key"] == {"kind": "demo", "keyid": signer.keyid, "note": KEY_NOTE}
+    assert doc["key_kind"] == "demo"
+    assert r.admitted_candidate == r.admitted.candidate and r.rejected_candidate == r.rejected.candidate
+
+
+def test_the_follow_up_commands_name_the_stored_candidates_and_the_demo_key(tmp_path: Path) -> None:
+    r = SimpleNamespace(rejected_candidate="bad123", admitted_candidate="good456")
+    pem = tmp_path / "with space" / "k.pub"
+    uri = "mongodb://127.0.0.1:27017/?directConnection=true"
+    bare = follow_up(r, "ratchet_demo", uri, pem, {URI_ENV: uri, DB_ENV: "ratchet_demo"})  # type: ignore[arg-type]
+    assert bare == [
+        "ratchet show decision bad123",
+        "ratchet show decision good456",
+        "ratchet replay bad123 good456",
+        f"ratchet verify good456 --pubkey-file '{pem}'",
+        f"ratchet verify bad123 --pubkey-file '{pem}'",
+    ]
+    prefixed = follow_up(r, "ratchet_demo", uri, pem, {})  # type: ignore[arg-type]
+    assert all(c.startswith(f"{URI_ENV}='{uri}' {DB_ENV}=ratchet_demo ratchet ") for c in prefixed)

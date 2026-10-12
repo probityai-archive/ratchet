@@ -504,6 +504,12 @@ def cmd_verify(args: argparse.Namespace, backend: Backend, console: Console) -> 
         res, name = verify_decision(doc, trusted, evidence), str(doc.get("_id"))
         for note in evidence.notes:
             console.print(Text(f"evidence: {note}", style="yellow"))
+        if doc.get("key_kind") == "demo" and not res.ok and not args.pubkey_file:
+            hint = (
+                "this decision was signed by a `ratchet demo` key, not the pinned decision key: "
+                "pass --pubkey-file with the demo public key that `ratchet demo` printed"
+            )
+            console.print(Text(hint, style="yellow"))
     console.print(render_verify(res, name))
     return 0 if res.ok else 1
 
@@ -577,10 +583,7 @@ def _raindrop_flags(p: argparse.ArgumentParser) -> None:
 def cmd_demo(args: argparse.Namespace, backend: Backend, console: Console) -> int:
     from ratchet.demo.scenario import main as demo_main
 
-    uri = os.environ.get(URI_ENV, "")
-    if not uri:
-        raise CliError(f"set {URI_ENV} to point at the store")
-    return demo_main(args.db, uri, reset=args.reset)
+    return demo_main(args.db, os.environ.get(URI_ENV) or None, reset=args.reset)
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -9,13 +9,20 @@ identity carries it in its model config, so no output can be read as a live-mode
 
 Also stored: one replay-rejected candidate of the same parent (a guard that blocks a recorded success), so
 the replay view shows a rejected column next to the admitted one.
+
+Signing: the demo signs with a key it generates for the run (`ratchet.demo.signing`), writes that key's public
+PEM beside the store, and records inside every signed decision that a demo key signed it. It never needs, and
+never uses, the pinned decision key, so it runs on a machine that holds no secret.
 """
 
 from __future__ import annotations
 
 import base64
+import os
+import shlex
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ratchet_cases.cases import all_cases
@@ -25,6 +32,7 @@ from ratchet_cases.types import Trace, sha256_hex
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.seed import seed_harness
 from ratchet.agent.worker import run_case
+from ratchet.demo.signing import demo_signer, pubkey_path, signing_label
 from ratchet.demo.worker import LABEL, NAME, ScriptedDemoWorker
 from ratchet.improve.activate import Activator
 from ratchet.improve.admit import Decision, admit, awaiting_confirmation
@@ -87,6 +95,8 @@ class DemoResult:
     rejected_id: str
     failed_trace: str
     activation: dict[str, Any]
+    admitted_candidate: str = ""
+    rejected_candidate: str = ""
 
 
 def demo_cases() -> list[Case]:
@@ -108,7 +118,9 @@ def _persist_replay(store: ImproveStore, parent: str, report: ReplayReport) -> N
                     **report.to_payload()})  # fmt: skip
 
 
-def _context(guard: Guard, candidate: Harness, cluster_id: str, targets: Sequence[str]) -> dict[str, Any]:
+def _context(
+    guard: Guard, candidate: Harness, cluster_id: str, targets: Sequence[str], signing: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "generation": 1,
         "arm": "demo",
@@ -122,6 +134,7 @@ def _context(guard: Guard, candidate: Harness, cluster_id: str, targets: Sequenc
         "rationale": "Demo scenario: the scripted agent retries a refund the provider already holds.",
         "targets": list(targets),
         "scenario": SCENARIO,
+        "signing_key": signing,
     }  # fmt: skip
 
 
@@ -129,7 +142,12 @@ def _sign_and_store(store: ImproveStore, d: Decision, signer: Signer) -> tuple[s
     env = receipt(d, signer)
     decision_id = f"{d.parent}->{d.candidate}"
     store.put_decision(
-        {**d.to_payload(), "envelope": base64.b64encode(env).decode("ascii"), "keyid": signer.keyid},
+        {
+            **d.to_payload(),
+            "envelope": base64.b64encode(env).decode("ascii"),
+            "keyid": signer.keyid,
+            "key_kind": "demo",
+        },
         decision_id=decision_id,
     )
     return decision_id, sha256_hex(env)
@@ -144,8 +162,13 @@ def run_demo(
     run: Callable[..., Trace] = run_case,
     cases: Sequence[CaseLike] | None = None,
     log: Callable[[str], None] = lambda _m: None,
+    signing: dict[str, Any] | None = None,
 ) -> DemoResult:
-    """Run the scenario and store every record. Raises when the active harness is not the seed parent."""
+    """Run the scenario and store every record. Raises when the active harness is not the seed parent.
+
+    `signing` is what each signed decision records about its key; by default, that `signer` is a demo key.
+    """
+    signing = signing or signing_label(signer)
     cases = list(cases if cases is not None else demo_cases())
     model = ScriptedDemoWorker()
     parent = seed_harness()
@@ -192,7 +215,7 @@ def run_demo(
         kw: dict[str, Any] = {
             "parent_runs": (p1, p2), "cand_eval": c1, "replays": {guard.id: rep}, "composed": composed,
             "literals": literals, "visible_case_ids": visible, "evaluator": evaluator,
-            "context": _context(guard, cand, clusters[0].id, targets),
+            "context": _context(guard, cand, clusters[0].id, targets, signing),
         }  # fmt: skip
         d = admit(parent, cand, confirm_eval=None, **kw)
         if awaiting_confirmation(d):
@@ -223,13 +246,39 @@ def run_demo(
         rejected_id=f"{rejected.parent}->{rejected_h.version}",
         failed_trace=f"{bad.run_id}/{bad.case_id}",
         activation=activation,
+        admitted_candidate=admitted_h.version,
+        rejected_candidate=rejected_h.version,
     )
 
 
-def main(db: str, uri: str, reset: bool = False) -> int:
-    """The CLI entry: Atlas store, sandboxed guard runtime, signing key from RATCHET_SIGNING_KEY."""
+# The local store of docker/compose.yaml, used when RATCHET_MONGODB_URI is unset.
+LOCAL_URI = "mongodb://ratchet:ratchet-local-dev@127.0.0.1:27018/?directConnection=true&authSource=admin"
+URI_ENV, DB_ENV = "RATCHET_MONGODB_URI", "RATCHET_DB"
+
+
+def follow_up(r: DemoResult, db: str, uri: str, pubkey_file: Path, env: dict[str, str]) -> list[str]:
+    """The commands that read what this run stored, runnable as printed in the same shell."""
+    prefix = []
+    if env.get(URI_ENV) != uri:
+        prefix.append(f"{URI_ENV}={shlex.quote(uri)}")
+    if env.get(DB_ENV, "ratchet") != db:
+        prefix.append(f"{DB_ENV}={shlex.quote(db)}")
+    head = " ".join([*prefix, "ratchet"])
+    bad, good, pem = r.rejected_candidate, r.admitted_candidate, shlex.quote(str(pubkey_file))
+    return [
+        f"{head} show decision {bad}",
+        f"{head} show decision {good}",
+        f"{head} replay {bad} {good}",
+        f"{head} verify {good} --pubkey-file {pem}",
+        f"{head} verify {bad} --pubkey-file {pem}",
+    ]
+
+
+def main(db: str, uri: str | None = None, reset: bool = False) -> int:
+    """The CLI entry: Atlas store, sandboxed guard runtime, and a demo signing key generated for this run."""
     from pymongo import MongoClient
 
+    from ratchet.agent.guards import required_layers
     from ratchet.improve.activate import MongoActivator
     from ratchet.improve.sandbox import SandboxRunner
     from ratchet.improve.worldsim import WorldSimulator
@@ -238,21 +287,37 @@ def main(db: str, uri: str, reset: bool = False) -> int:
     if not db.startswith("ratchet_demo"):
         print("error: the demo writes only to a database whose name starts with ratchet_demo")
         return 2
-    signer = Signer.for_decisions()
+    env = dict(os.environ)
+    if not uri:
+        uri = LOCAL_URI
+        print(f"{URI_ENV} is not set; using the local store of docker/compose.yaml (127.0.0.1:27018)")
     cases = demo_cases()
+    pem = pubkey_path(db)
     client: MongoClient[dict[str, Any]] = MongoClient(uri)
     with client:
         if reset:  # the hackathon user may not drop databases, so empty every collection instead
             for name in client[db].list_collection_names():
                 client[db][name].delete_many({})
+        elif "decisions" in client[db].list_collection_names() and client[db]["decisions"].find_one():
+            print(f"error: database {db} already holds a demo run; pass --reset to start it again")
+            return 2
+        signer = demo_signer(pem)
         with Store(uri, db) as store, GuardRuntime() as runtime:
             store.setup(wait_search=False)
             r = run_demo(store, MongoActivator(client, db), WorldSimulator(cases), SandboxRunner(runtime),
-                         signer, cases=cases, log=lambda m: print(m, flush=True))  # fmt: skip
+                         signer, cases=cases, log=lambda m: print(m, flush=True),
+                         signing=signing_label(signer, pem))  # fmt: skip
     print(f"DEMO SCENARIO ({LABEL}) db={db}")
     print(f"parent              {r.parent}")
     print(f"admitted decision   {r.admitted_id} admitted={r.admitted.admitted}")
     print(f"rejected decision   {r.rejected_id} admitted={r.rejected.admitted}")
+    print(f"rejected because    {', '.join(c.name for c in r.rejected.checks if not c.passed) or 'nothing'}")
     print(f"failed parent trace {r.failed_trace}")
     print(f"activation          {r.activation or 'not activated'}")
+    print(f"signed by           DEMO key {signer.keyid[:12]} (generated for this run; not the pinned key)")
+    print(f"demo public key     {pem}")
+    print(f"guard sandbox       required layers: {', '.join(required_layers())}")
+    print("next, on the decisions above:")
+    for line in follow_up(r, db, uri, pem, env):
+        print(f"  {line}")
     return 0 if r.admitted.admitted and r.activation else 1
