@@ -540,3 +540,12 @@ def test_main_serves_or_runs_one_call(monkeypatch: pytest.MonkeyPatch, private_r
     sock.unlink()
     thread.join(timeout=5)
     assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("reply", [{"protocol": 99}, {"ready": False}])
+def test_an_out_of_protocol_startup_reply_is_quoted_in_the_verdict(reply: dict[str, Any]) -> None:
+    line = json.dumps(json.dumps(reply))
+    child = f"import sys\nsys.stdin.buffer.readline()\nprint({line}, flush=True)\nsys.stdin.buffer.read()\n"
+    verdict = evaluate_once(spec(ALLOW_GUARD, child), {"name": "Bash", "args": {}, "call_id": "c"}, {}, [])
+    quoted = json.dumps(reply, sort_keys=True)
+    assert verdict == Verdict(None, f"guard sandbox sent an out-of-protocol startup reply: {quoted}")
