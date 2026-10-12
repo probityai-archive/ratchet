@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
+from ratchet.agent import guards
 from ratchet.agent.guards import GuardRuntime
 from ratchet.improve.diagnose import diagnose
 from ratchet.improve.replay import WalkCache, replay
@@ -52,3 +55,21 @@ def test_a_sandbox_failure_makes_replay_incomplete_not_a_fire() -> None:
                      WalkCache(FakeSimulator()), SandboxRunner(rt))  # fmt: skip
     assert rep.verdict == "INCOMPLETE" and not rep.false_positives and not any(t["hit"] for t in rep.targets)
     assert rep.errors[0]["error"].startswith("guard infrastructure error")
+
+
+def test_replay_reports_the_sandbox_reason_for_every_errored_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A child outside the protocol makes replay INCOMPLETE, and every error names what the sandbox sent."""
+    child = (
+        "import sys\nsys.stdin.buffer.readline()\n"
+        "print('{\"protocol\": 99}', flush=True)\nsys.stdin.buffer.read()\n"
+    )
+    monkeypatch.setattr(guards, "CHILD_SOURCE", child)
+    failing = [bad_timeout(i) for i in range(2)]
+    cluster = diagnose(failing, FakeSimulator())[0]
+    with GuardRuntime(workers=1) as rt:
+        rep = replay(Guard("g", "", NO_DUP_GUARD), cluster.members, cluster.traces, [good_plain(5)],
+                     WalkCache(FakeSimulator()), SandboxRunner(rt))  # fmt: skip
+    assert rep.verdict == "INCOMPLETE" and rep.errors and len(rep.errors) == rep.checks
+    for e in rep.errors:
+        assert e["error"].startswith("guard infrastructure error: ")
+        assert 'out-of-protocol startup reply: {"protocol": 99}' in e["error"]

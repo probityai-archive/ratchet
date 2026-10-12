@@ -32,6 +32,12 @@ class Verdict:
     block: str | None
     error: str | None = None
 
+    def __post_init__(self) -> None:
+        # A failed check must say why: an empty error, or the text of a missing field, cannot be diagnosed
+        # from the record.
+        if self.error is not None and not (isinstance(self.error, str) and self.error.strip()):
+            raise ValueError(f"a failed guard check must carry its error message, got {self.error!r}")
+
 
 class GuardRunner(Protocol):
     """Runs untrusted guard source over many inputs in the sandbox, one verdict per input, in order."""
