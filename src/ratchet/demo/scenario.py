@@ -1,4 +1,4 @@
-"""`ratchet demo admit`: a labelled demo scenario that drives the real admission pipeline end to end.
+"""`ratchet demo double-refund`: a labelled demo scenario that drives the real admission pipeline end to end.
 
 The agent is the scripted demo worker (`ratchet.demo.worker`), which calls no model, so the parent's two
 runs agree and the candidate's two runs agree by construction. Everything else is the production path: the

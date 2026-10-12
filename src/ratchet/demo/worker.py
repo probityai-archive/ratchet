@@ -86,7 +86,7 @@ def _results(messages: Sequence[Message]) -> list[dict[str, Any]]:
 
 
 class ScriptedDemoWorker:
-    """The scripted agent behind `ratchet demo admit`. It never calls a model."""
+    """The scripted agent behind `ratchet demo double-refund`. It never calls a model."""
 
     @property
     def name(self) -> str:

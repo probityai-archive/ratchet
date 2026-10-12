@@ -615,3 +615,24 @@ def test_verify_a_jsonl_log_shows_the_pinned_countersignature(tmp_path: Path) ->
     assert code == 0 and "countersigned by the pinned key on 2026-10-12" in out
     assert run(["verify", "--jsonl", str(log), "--pubkey", pub], FakeBackend())[0] == 1
     assert run(["verify", "nope", "--jsonl", str(log), "--pubkey", pub], FakeBackend())[0] == 1
+
+
+def test_demo_double_refund_runs_the_scenario_with_the_store_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ratchet.demo import scenario
+
+    seen: list[tuple[str, str | None, bool]] = []
+    monkeypatch.setattr(
+        scenario, "main", lambda db, uri=None, reset=False: seen.append((db, uri, reset)) or 0
+    )
+    monkeypatch.setenv(cli.URI_ENV, "mongodb://example:1/")
+    assert main(["demo", "double-refund", "--reset"]) == 0
+    monkeypatch.delenv(cli.URI_ENV)
+    assert main(["demo", "double-refund"]) == 0
+    assert seen == [("ratchet_demo", "mongodb://example:1/", True), ("ratchet_demo", None, False)]
+
+
+def test_demo_names_only_the_double_refund_scenario() -> None:
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args(["demo", "admit"])

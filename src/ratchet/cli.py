@@ -657,7 +657,11 @@ def _parser() -> argparse.ArgumentParser:
     lv.set_defaults(func=cmd_live)
 
     dm = sub.add_parser("demo", help="labelled demo scenarios (scripted agent, real pipeline)")
-    dm.add_argument("scenario", choices=["admit"], help="admit: one admission end to end, scripted agent")
+    dm.add_argument(
+        "scenario",
+        choices=["double-refund"],
+        help="double-refund: an agent pays a refund twice; a bad and a good fix go through the gate",
+    )
     dm.add_argument("--db", default="ratchet_demo", help="database to write (must start with ratchet_demo)")
     dm.add_argument("--reset", action="store_true", help="drop the demo database first")
     dm.set_defaults(func=cmd_demo)

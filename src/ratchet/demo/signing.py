@@ -1,10 +1,11 @@
 """The demo's own signing key: a fresh Ed25519 key per demo run, never the pinned decision key.
 
-`ratchet demo admit` must run on a machine that holds no secret, so it cannot use `Signer.for_decisions()`,
-which refuses any key but the pinned one. It generates a key instead, writes only the public half as PEM
-beside the demo store, and records in every signed decision that a demo key signed it. The private half
-lives in memory for the length of the run and is never written. `ratchet verify --pubkey-file <PEM>` checks
-those decisions against that file; under the pinned key (the default) they do not verify, by design.
+`ratchet demo double-refund` must run on a machine that holds no secret, so it cannot use
+`Signer.for_decisions()`, which refuses any key but the pinned one. It generates a key instead, writes only
+the public half as PEM beside the demo store, and records in every signed decision that a demo key signed
+it. The private half lives in memory for the length of the run and is never written.
+`ratchet verify --pubkey-file <PEM>` checks those decisions against that file; under the pinned key (the
+default) they do not verify, by design.
 """
 
 from __future__ import annotations
