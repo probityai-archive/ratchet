@@ -9,9 +9,10 @@ call is checked as if the guard had been installed before it ran.
 |---|---|
 | Sessions | 13,712 |
 | Tool calls checked | 629,192 |
-| Guard fires | 7 |
-| Guard errors | 0 |
+| Guard fires | 7: 6 real force-pushes to a main branch, 1 false alarm |
+| Checker crashes | 0 |
 | Check time | 393 s (about 1,600 checks per second) |
 
 Every fire gives the reason "force push to main rewrites shared history; push a branch and open a pull request
-instead". Unreadable transcript files (1) and malformed lines (118) are counted and skipped.
+instead". Six fires were real force-pushes to a main branch. One was a false alarm: the rule matched the text
+of a force-push command inside a document an agent was writing, and nothing was pushed. Unreadable transcript files (1) and malformed lines (118) are counted and skipped.
