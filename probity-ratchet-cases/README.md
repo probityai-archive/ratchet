@@ -1,4 +1,4 @@
-# ratchet-cases
+# probity-ratchet-cases
 
 Fifty-two agent tasks in a simulated company, each graded on the final state of every system it touches, never on what the agent says.
 
@@ -7,7 +7,7 @@ It is for anyone testing a tool-using agent, or a guard or defense around one, w
 ## Install
 
 ```sh
-pip install ratchet-cases==0.2.0
+pip install probity-ratchet-cases==0.2.0
 ```
 
 Python 3.10 or later. No runtime dependencies.
@@ -60,13 +60,13 @@ An agent that gives up after a timeout passes the seven after-commit tasks and f
 
 ## Version and digest
 
-Version 0.2.0. `ratchet_cases.SUITE_DIGEST` is computed from the shipped cases at import, and `DIGESTS.json` records the digest of every release, so `ratchet-cases==X.Y.Z` pins the exact cases. Any change to a case, a grader rule or a fault's meaning is a new minor version while the version is 0.x.
+Version 0.2.0. `ratchet_cases.SUITE_DIGEST` is computed from the shipped cases at import, and `DIGESTS.json` records the digest of every release, so `probity-ratchet-cases==X.Y.Z` pins the exact cases. Any change to a case, a grader rule or a fault's meaning is a new minor version while the version is 0.x.
 
 ## Links
 
 | Page | What is in it |
 |---|---|
-| [Source](https://github.com/probityai/ratchet/tree/main/ratchet-cases) | The package in the Ratchet repository |
+| [Source](https://github.com/probityai/ratchet/tree/main/probity-ratchet-cases) | The package in the Ratchet repository |
 | [Ratchet](https://github.com/probityai/ratchet) | The harness that turns failures on these cases into proven guards |
 | [Releases](https://github.com/probityai/ratchet/releases) | Wheels, provenance attestations and digests |
 

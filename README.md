@@ -16,7 +16,7 @@ uv sync
 Python 3.12 or later. The guard sandbox needs Linux.
 
 ```sh
-pip install ratchet-cases==0.1.0 && ratchet-cases selftest   # the case suite alone: ratchet-cases/README.md
+pip install probity-ratchet-cases==0.2.0 && ratchet-cases selftest   # the case suite alone: probity-ratchet-cases/README.md
 ```
 
 ## Try it in 30 seconds
@@ -59,7 +59,7 @@ Version 0.1.0, built on 2026-10-11 at the MongoDB harness hackathon. The suite, 
 
 ## Built today and reused
 
-The repository's first commit is from 2026-10-11, and everything under `src/ratchet`, `ratchet-cases`, `tests`, `examples` and `docs` was written at the event. The rest is a pinned dependency or a service.
+The repository's first commit is from 2026-10-11, and everything under `src/ratchet`, `probity-ratchet-cases`, `tests`, `examples` and `docs` was written at the event. The rest is a pinned dependency or a service.
 
 | Reused | Pin |
 |---|---|

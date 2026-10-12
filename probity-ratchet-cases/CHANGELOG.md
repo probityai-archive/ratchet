@@ -9,11 +9,15 @@ The 52 shipped cases are unchanged: the suite digest is still
 `7d4c38e0d18c39c7d6cb955a28cb9bbc134cd1f78958c2c4ac5b2f04dd9b6679`. This release adds two suites that
 run inside other benchmarks.
 
+The distribution is renamed from `ratchet-cases` to `probity-ratchet-cases`, to match `probity-ratchet`.
+The import name stays `ratchet_cases` and the command stays `ratchet-cases`. Version 0.1.0 was
+published under the old name.
+
 - `ratchet_cases.agentdojo`: benign twins for AgentDojo v1.2.2. Importing the module
   (`-ml ratchet_cases.agentdojo`) registers the benchmark version `ratchet-benign-twins-v0.1` with the
   workspace, travel, banking and slack suites. Each user task is the benign twin of one injection task:
   the slot an attack would fill holds an instruction the user asked for, graded by AgentDojo's own utility
-  checks. Install with `pip install 'ratchet-cases[agentdojo]'`, which pins `agentdojo==0.1.35`.
+  checks. Install with `pip install 'probity-ratchet-cases[agentdojo]'`, which pins `agentdojo==0.1.35`.
 - `ratchet-cases agentdojo-report <logdir>`: the false intervention rate per pipeline (twins failed over
   twins run) from AgentDojo run logs, read with the standard library only.
 - `ratchet_cases.tau2`: the `retail_faults` task set for tau2-bench. For each of the seven retail write

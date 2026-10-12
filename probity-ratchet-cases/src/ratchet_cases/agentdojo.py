@@ -14,7 +14,7 @@ reports that cost next to utility and attack success.
 The twins are no-attack episodes. The suites register no injection tasks, and each twin rewrites its
 slot when the episode starts, so other slots keep their default text.
 
-Requires ``agentdojo`` (``pip install 'ratchet-cases[agentdojo]'``).
+Requires ``agentdojo`` (``pip install 'probity-ratchet-cases[agentdojo]'``).
 """
 
 from __future__ import annotations

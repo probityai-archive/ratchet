@@ -19,7 +19,7 @@ resolution-markers = [
 [manifest]
 members = [
     "probity-ratchet",
-    "ratchet-cases",
+    "probity-ratchet-cases",
 ]
 overrides = [{ name = "litellm", specifier = "==1.102.1" }]
 
@@ -4009,10 +4009,10 @@ dependencies = [
     { name = "agent-evidence-vectors" },
     { name = "cryptography" },
     { name = "httpx" },
+    { name = "probity-ratchet-cases" },
     { name = "probity-verify" },
     { name = "pymongo" },
     { name = "raindrop-ai" },
-    { name = "ratchet-cases" },
     { name = "rich" },
 ]
 
@@ -4048,10 +4048,10 @@ requires-dist = [
     { name = "gepa", marker = "extra == 'gepa'", specifier = "==0.1.4" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "litellm", marker = "extra == 'bench'", specifier = "==1.102.1" },
+    { name = "probity-ratchet-cases", editable = "probity-ratchet-cases" },
     { name = "probity-verify", git = "https://github.com/probityai/probity-verify?rev=b920366397cb131232163706864a70723b867367" },
     { name = "pymongo", specifier = ">=4.10" },
     { name = "raindrop-ai", specifier = "==0.0.75" },
-    { name = "ratchet-cases", editable = "ratchet-cases" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "tau-bench", marker = "extra == 'bench'", git = "https://github.com/sierra-research/tau-bench?rev=59a200c6d575d595120f1cb70fea53cef0632f6b" },
     { name = "tau2", marker = "extra == 'bench'", git = "https://github.com/sierra-research/tau2-bench?rev=4ce7c0397c1eb65c9bbe59aeacfe1ca44a1cd699" },
@@ -4068,6 +4068,19 @@ dev = [
     { name = "ruff", specifier = ">=0.6" },
     { name = "securesystemslib", extras = ["crypto"], specifier = ">=1.0" },
 ]
+
+[[package]]
+name = "probity-ratchet-cases"
+source = { editable = "probity-ratchet-cases" }
+
+[package.optional-dependencies]
+agentdojo = [
+    { name = "agentdojo" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "agentdojo", marker = "extra == 'agentdojo'", specifier = "==0.1.35" }]
+provides-extras = ["agentdojo"]
 
 [[package]]
 name = "probity-verify"
@@ -4837,19 +4850,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/21/0e/8356ca3e190e2bcced9b80e374d95b0925c4716b51e65720a55399983f41/rapidfuzz-3.14.6-cp315-cp315t-win_amd64.whl", hash = "sha256:3d502769263318690d4f6638b08483979d1b88cdc7c6f087482eea935fde4031", size = 1823286, upload-time = "2026-08-30T21:45:28.368Z" },
     { url = "https://files.pythonhosted.org/packages/fb/04/a0b0e6324b6384d1ab40feb4d16400af3b3101d38cbd15957edd9d17cbe0/rapidfuzz-3.14.6-cp315-cp315t-win_arm64.whl", hash = "sha256:07c7aa0b1e4b9999a54f9e73317d6743ff85442c8ef7b7fbbe6b190fd37d9e75", size = 1243815, upload-time = "2026-08-30T21:45:31.187Z" },
 ]
-
-[[package]]
-name = "ratchet-cases"
-source = { editable = "ratchet-cases" }
-
-[package.optional-dependencies]
-agentdojo = [
-    { name = "agentdojo" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "agentdojo", marker = "extra == 'agentdojo'", specifier = "==0.1.35" }]
-provides-extras = ["agentdojo"]
 
 [[package]]
 name = "readchar"

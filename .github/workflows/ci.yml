@@ -27,9 +27,9 @@ jobs:
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run mypy src
-      - run: uv run mypy --config-file ratchet-cases/pyproject.toml ratchet-cases/src
+      - run: uv run mypy --config-file probity-ratchet-cases/pyproject.toml probity-ratchet-cases/src
       - run: python3 scripts/readme-lint.py README.md
-      - run: python3 scripts/readme-lint.py ratchet-cases/README.md
+      - run: python3 scripts/readme-lint.py probity-ratchet-cases/README.md
       # check-docs imports ratchet_cases to count the case families, so it runs inside the synced virtualenv
       - run: uv run python scripts/check-docs.py
 
@@ -48,17 +48,17 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: false
-      - run: uv build --package ratchet-cases --out-dir dist
+      - run: uv build --package probity-ratchet-cases --out-dir dist
       - name: install the wheel alone
         run: |
           uv venv --no-project --python "${{ matrix.python }}" "$RUNNER_TEMP/cases"
-          uv pip install --python "$RUNNER_TEMP/cases/bin/python" dist/ratchet_cases-*.whl pytest==9.1.1
+          uv pip install --python "$RUNNER_TEMP/cases/bin/python" dist/probity_ratchet_cases-*.whl pytest==9.1.1
       - name: selftest and digest from the installed wheel
         run: |
           "$RUNNER_TEMP/cases/bin/ratchet-cases" selftest
           "$RUNNER_TEMP/cases/bin/ratchet-cases" digest
       - name: pytest against the installed wheel
-        working-directory: ratchet-cases
+        working-directory: probity-ratchet-cases
         run: '"$RUNNER_TEMP/cases/bin/python" -m pytest -q -W error -p no:cacheprovider'
 
   # The AgentDojo benign-twin suite against the AgentDojo release it pins, from the installed wheel and its
@@ -76,14 +76,14 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: false
-      - run: uv build --package ratchet-cases --out-dir dist
+      - run: uv build --package probity-ratchet-cases --out-dir dist
       - name: install the wheel with the agentdojo extra
         run: |
           uv venv --no-project --python "${{ matrix.python }}" "$RUNNER_TEMP/twins"
-          wheel="$(ls dist/ratchet_cases-*.whl)"
+          wheel="$(ls dist/probity_ratchet_cases-*.whl)"
           uv pip install --python "$RUNNER_TEMP/twins/bin/python" "${wheel}[agentdojo]" pytest==9.1.1
       - name: pytest the twins against the installed wheel
-        working-directory: ratchet-cases
+        working-directory: probity-ratchet-cases
         run: '"$RUNNER_TEMP/twins/bin/python" -m pytest -q -W error -p no:cacheprovider tests_agentdojo'
 
   # retail_faults against tau2-bench itself. tau2-bench is not on PyPI under its own name (the PyPI project
@@ -112,17 +112,17 @@ jobs:
           git -C "$d" checkout -q FETCH_HEAD
           test "$(git -C "$d" rev-parse HEAD)" = "$TAU2_COMMIT"
           echo "TAU2_DATA_DIR=$d/data" >> "$GITHUB_ENV"
-      - run: uv build --package ratchet-cases --out-dir dist
+      - run: uv build --package probity-ratchet-cases --out-dir dist
       - name: install the wheel beside tau2-bench
         run: |
           uv venv --no-project --python 3.12 "$RUNNER_TEMP/t2"
           uv pip install --python "$RUNNER_TEMP/t2/bin/python" "$RUNNER_TEMP/tau2-bench" websockets==15.0.1 \
-            dist/ratchet_cases-*.whl pytest==9.1.1
+            dist/probity_ratchet_cases-*.whl pytest==9.1.1
       # tau2-bench imports the standard library's audioop, deprecated since Python 3.11, from its voice
       # utilities at import time. That one warning comes from tau2-bench and is ignored by its exact text;
       # every other warning still fails the job.
       - name: faulted retail tasks, graded on the live databases
-        working-directory: ratchet-cases
+        working-directory: probity-ratchet-cases
         run: >-
           "$RUNNER_TEMP/t2/bin/python" -m pytest -q -p no:cacheprovider tests_tau2
           -W error -W "ignore:'audioop' is deprecated and slated for removal in Python 3.13:DeprecationWarning"

@@ -1,5 +1,5 @@
 [project]
-name = "ratchet-cases"
+name = "probity-ratchet-cases"
 dynamic = ["version"]
 description = "Agent cases graded on final state: a simulated company, deterministic tool faults, exact graders and scripted solvers."
 readme = "README.md"
@@ -25,7 +25,7 @@ agentdojo = ["agentdojo==0.1.35"]
 ratchet_cases = "ratchet_cases.tau2:register"
 
 [project.urls]
-Source = "https://github.com/probityai/ratchet/tree/main/ratchet-cases"
+Source = "https://github.com/probityai/ratchet/tree/main/probity-ratchet-cases"
 Issues = "https://github.com/probityai/ratchet/issues"
 
 [project.scripts]

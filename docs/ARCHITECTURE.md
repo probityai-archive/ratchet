@@ -16,9 +16,9 @@ failures --> diagnose --> propose --> replay --> fresh evaluation --> admit --> 
 5. The admission rule decides. The decision, with its evidence digests, is signed.
 6. Activation moves the active-version pointer in one database transaction that checks the receipt.
 
-## The case suite (`ratchet-cases/`)
+## The case suite (`probity-ratchet-cases/`)
 
-The simulated company and the cases ship as their own package, [`ratchet-cases`](../ratchet-cases/README.md),
+The simulated company and the cases ship as their own package, [`probity-ratchet-cases`](../probity-ratchet-cases/README.md),
 which the harness depends on at an exact version. It has no runtime dependencies.
 
 | Module | Job |

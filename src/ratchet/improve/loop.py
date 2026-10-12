@@ -45,7 +45,7 @@ from ratchet.types import Guard, Harness, Procedure
 
 
 def frozen_suite_digest() -> str:
-    """The case suite digest the installed `ratchet-cases` release was published with."""
+    """The case suite digest the installed `probity-ratchet-cases` release was published with."""
     return released_digest()
 
 

@@ -1,16 +1,16 @@
-name: release ratchet-cases
+name: release probity-ratchet-cases
 
-# On a tag ratchet-cases-vX.Y.Z: build the wheel and sdist once, prove the built wheel on Python 3.10 and 3.12
+# On a tag probity-ratchet-cases-vX.Y.Z: build the wheel and sdist once, prove the built wheel on Python 3.10 and 3.12
 # (selftest, and the suite digest against DIGESTS.json), attest build provenance for exactly those files, and
 # publish them as a GitHub release. The PyPI upload takes these same files from the release.
 
 on:
   push:
-    tags: ["ratchet-cases-v*"]
+    tags: ["probity-ratchet-cases-v*"]
   # A pull request that touches the package or this file runs build and verify, so the release path is
   # proven before a tag needs it. Only a tag reaches the release job.
   pull_request:
-    paths: ["ratchet-cases/**", ".github/workflows/release-cases.yml"]
+    paths: ["probity-ratchet-cases/**", ".github/workflows/release-cases.yml"]
 
 permissions:
   contents: read
@@ -27,17 +27,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-      - run: uv build --package ratchet-cases --out-dir dist
+      - run: uv build --package probity-ratchet-cases --out-dir dist
       - name: the tag names the package version
         if: github.event_name == 'push'
         run: |
-          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' ratchet-cases/src/ratchet_cases/__init__.py)
-          test "ratchet-cases-v$version" = "$GITHUB_REF_NAME"
-          ls dist/ratchet_cases-"$version"-py3-none-any.whl dist/ratchet_cases-"$version".tar.gz
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' probity-ratchet-cases/src/ratchet_cases/__init__.py)
+          test "probity-ratchet-cases-v$version" = "$GITHUB_REF_NAME"
+          ls dist/probity_ratchet_cases-"$version"-py3-none-any.whl dist/probity_ratchet_cases-"$version".tar.gz
       - id: digest
         run: |
-          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' ratchet-cases/src/ratchet_cases/__init__.py)
-          echo "digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' ratchet-cases/src/ratchet_cases/cases/DIGESTS.json "$version")" >> "$GITHUB_OUTPUT"
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' probity-ratchet-cases/src/ratchet_cases/__init__.py)
+          echo "digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' probity-ratchet-cases/src/ratchet_cases/cases/DIGESTS.json "$version")" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
@@ -101,7 +101,7 @@ jobs:
           DIGEST: ${{ needs.build.outputs.digest }}
         run: |
           {
-            echo "ratchet-cases ${GITHUB_REF_NAME#ratchet-cases-v}"
+            echo "probity-ratchet-cases ${GITHUB_REF_NAME#probity-ratchet-cases-v}"
             echo
             echo "Suite digest (SUITE_DIGEST): \`$DIGEST\`"
             echo
@@ -112,4 +112,4 @@ jobs:
             echo "Verify a downloaded file: \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`"
           } > notes.md
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
-            --title "ratchet-cases ${GITHUB_REF_NAME#ratchet-cases-v}" --notes-file notes.md --verify-tag
+            --title "probity-ratchet-cases ${GITHUB_REF_NAME#probity-ratchet-cases-v}" --notes-file notes.md --verify-tag
