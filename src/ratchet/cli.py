@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import json
 import os
 import sys
 import traceback
@@ -486,6 +487,8 @@ def _load_trace(store: ViewStore, ref: str) -> Any:
 def cmd_verify(args: argparse.Namespace, backend: Backend, console: Console) -> int:
     pem = Path(args.pubkey_file) if args.pubkey_file else None
     trusted = trusted_keys(args.pubkey, backend_env(backend), pem)
+    if args.jsonl:
+        return _verify_jsonl(Path(args.jsonl), args.decision, trusted, console)
     envelope_file = args.envelope or (
         args.decision if args.decision and Path(args.decision).is_file() else None
     )
@@ -503,6 +506,30 @@ def cmd_verify(args: argparse.Namespace, backend: Backend, console: Console) -> 
             console.print(Text(f"evidence: {note}", style="yellow"))
     console.print(render_verify(res, name))
     return 0 if res.ok else 1
+
+
+def _verify_jsonl(path: Path, ref: str, trusted: Any, console: Console) -> int:
+    """Verify each decision of a JSONL decision log (bare, or wrapped as `{"decision": {...}}`), or the one
+    whose id or candidate is `ref`. Countersignatures by the pinned key are shown like stored ones."""
+    docs = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        doc = record["decision"] if isinstance(record.get("decision"), dict) else record
+        name = str(
+            doc.get("_id") or doc.get("decision_id") or record.get("decision_id") or doc.get("candidate")
+        )
+        if not ref or ref in (name, doc.get("candidate")):
+            docs.append((name, doc))
+    if not docs:
+        raise CliError(f"no decision {ref!r} in {path}" if ref else f"no decision in {path}")
+    ok = True
+    for name, doc in docs:
+        res = verify_decision(doc, trusted)
+        console.print(render_verify(res, name))
+        ok = ok and res.ok
+    return 0 if ok else 1
 
 
 def backend_env(backend: Backend) -> dict[str, str]:
@@ -617,6 +644,7 @@ def _parser() -> argparse.ArgumentParser:
         "--pubkey-file", help="trusted Ed25519 public key as PEM (default: keys/ratchet-decisions.pub)"
     )
     vf.add_argument("--envelope", help="verify a DSSE envelope file instead of a stored decision")
+    vf.add_argument("--jsonl", help="verify the decisions of a JSONL decision log (all, or the one named)")
     vf.set_defaults(func=cmd_verify)
 
     lv = sub.add_parser("live", help="follow the change streams and print what lands")
