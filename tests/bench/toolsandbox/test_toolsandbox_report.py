@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -174,3 +175,27 @@ def test_the_same_shards_under_two_directories_merge_once(tmp_path: Path) -> Non
     assert len(runs) == 1
     assert runs[0].path.endswith("(shards 0,1 of 2)")
     assert len(runs[0].rows) == 2 and all(r.status == RAN for r in runs[0].rows)
+
+
+def test_runs_that_never_finished_are_listed_with_their_reason(tmp_path: Path) -> None:
+    _write_run(tmp_path)
+    cut = tmp_path / "runs" / "h1" / "all-trial-3"
+    cut.mkdir(parents=True)
+    (cut / "config.json").write_text(json.dumps({"split": "all", "trial": 3}), encoding="utf-8")
+    (cut / "traces.jsonl").write_text("{}\n{}\n", encoding="utf-8")
+    evolve = tmp_path / "evolve" / "e1"
+    evolve.mkdir(parents=True)
+    (evolve / "config.json").write_text(json.dumps({"generations": 1}), encoding="utf-8")
+    (evolve / "STOPPED.txt").write_text("killed with the session\n", encoding="utf-8")
+    text = render(tmp_path)
+    assert "## Runs stopped before they finished" in text
+    lines = {line.split("`")[1]: line for line in text.splitlines() if line.startswith("- `")}
+    assert lines["evolve/e1"].startswith("- `evolve/e1`: 0 conversations recorded")
+    assert lines["evolve/e1"].endswith("killed with the session")
+    assert lines["runs/h1/all-trial-3"].startswith("- `runs/h1/all-trial-3`: 2 conversations recorded")
+    assert lines["runs/h1/all-trial-3"].endswith("no stop reason recorded")
+    assert "runs/h1/all-trial-1`:" not in text
+    (evolve / "result.json").write_text("{}", encoding="utf-8")
+    assert "evolve/e1" not in render(tmp_path)
+    shutil.rmtree(tmp_path / "runs")
+    assert "No run recorded yet." in render(tmp_path) and "evolve/e1" not in render(tmp_path)

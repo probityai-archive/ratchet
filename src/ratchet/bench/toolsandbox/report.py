@@ -49,6 +49,9 @@ PROTOCOL = """\
 """
 
 
+STOPPED = "STOPPED.txt"  # written by whoever stopped a run on purpose, with the reason
+
+
 @dataclass
 class Run:
     path: str
@@ -196,6 +199,27 @@ def collect(root: Path) -> list[Run]:
     return merge_shards(runs)
 
 
+def unfinished(root: Path) -> list[tuple[str, int, str]]:
+    """Every run directory whose work never finished: a trial with no evaluation record, or an evolve run with
+    no result. Each comes with the conversations it recorded and the reason in its `STOPPED.txt`."""
+    out: list[tuple[str, int, str]] = []
+    for path in sorted(root.rglob("config.json")):
+        folder = path.parent
+        config = json.loads(path.read_text(encoding="utf-8"))
+        if "generations" in config:
+            done = (folder / "result.json").exists()
+        else:
+            done = any(rec.get("report", {}).get("type") == "eval" for rec in RunStore(folder).read("evals"))
+        if done:
+            continue
+        traces = folder / "traces.jsonl"
+        recorded = len(traces.read_text(encoding="utf-8").splitlines()) if traces.exists() else 0
+        stop = folder / STOPPED
+        reason = stop.read_text(encoding="utf-8").strip() if stop.exists() else "no stop reason recorded"
+        out.append((str(folder.relative_to(root)), recorded, reason))
+    return out
+
+
 def _fmt(value: float | None, places: int = 3) -> str:
     return "" if value is None else f"{value:.{places}f}"
 
@@ -270,8 +294,16 @@ def render(root: Path, csv_name: str = "toolsandbox-scenarios.csv") -> str:
         "## Overview (all scenarios of each run)",
         "",
     ]
+    stopped = unfinished(root)
+    tail = ["## Runs stopped before they finished", ""]
+    tail += [
+        f"- `{path}`: {recorded} conversations recorded and the run did not finish (an evaluation it did "
+        f"finish is listed above under its directory). {reason}"
+        for path, recorded, reason in stopped
+    ]
+    tail = tail if stopped else []
     if not runs:
-        return "\n".join([*out, "No run recorded yet.", ""])
+        return "\n".join([*out, "No run recorded yet.", "", *tail]).rstrip() + "\n"
     out += [
         "| Harness | Split | Agent model | n | ran | not run | lost | similarity (ran) | similarity (all n) "
         "| milestone (ran) | exact | passed |",
@@ -289,7 +321,7 @@ def render(root: Path, csv_name: str = "toolsandbox-scenarios.csv") -> str:
     out += ["", "## Runs", ""]
     for run in runs:
         out += _run_section(run)
-    return "\n".join(out).rstrip() + "\n"
+    return "\n".join([*out, *tail]).rstrip() + "\n"
 
 
 def render_csv(root: Path) -> str:
