@@ -22,8 +22,9 @@ from math import comb
 from pathlib import Path
 from typing import Any
 
+from ratchet_cases.types import Trace
+
 import ratchet.bench.tau2  # noqa: F401  # sets TAU2_DATA_DIR before tau2-bench is imported
-from ratchet.types import Trace
 
 SIMULATIONS = "simulations"
 

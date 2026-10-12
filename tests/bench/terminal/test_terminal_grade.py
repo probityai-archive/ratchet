@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ratchet_cases.types import Cost
 from terminal_testkit import Clock, FakeContainer, make_task
 
 from ratchet.bench.terminal import grade as G
 from ratchet.bench.terminal.tasks import load_task
 from ratchet.bench.terminal.world import TerminalWorld
-from ratchet.types import Cost
 
 PYTEST_OUT = """============================= test session starts ==============================
 collected 3 items

@@ -48,7 +48,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from ratchet.types import Event, Trace
+from ratchet_cases.types import Event, Trace
 
 log = logging.getLogger("ratchet.telemetry.raindrop")
 

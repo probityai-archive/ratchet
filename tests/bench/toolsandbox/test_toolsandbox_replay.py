@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ratchet_cases.types import Event, Trace
 from toolsandbox_testkit import make_world, user_factory
 
 from ratchet.agent.model import ScriptedModel, scripted_turn
@@ -15,7 +16,6 @@ from ratchet.bench.toolsandbox.replay import (
 )
 from ratchet.bench.toolsandbox.runner import ToolSandboxRunner, seed_harness
 from ratchet.improve.diagnose import locate
-from ratchet.types import Event, Trace
 
 
 def _trace(
@@ -36,8 +36,9 @@ def _on_off_on() -> list[Any]:
 
 def test_replay_user_speaks_then_ends_the_conversation() -> None:
     world = make_world("cellular_off", ["first", END])
+    from ratchet_cases.types import ToolCall
+
     from ratchet.bench.toolsandbox.world import RESPOND
-    from ratchet.types import ToolCall
 
     assert world.call(ToolCall(RESPOND, {"content": "a"}, "1")).data == {
         "observation": "first",
@@ -48,8 +49,9 @@ def test_replay_user_speaks_then_ends_the_conversation() -> None:
 
 def test_replay_user_ends_when_the_recording_runs_out() -> None:
     world = make_world("cellular_off", [])
+    from ratchet_cases.types import ToolCall
+
     from ratchet.bench.toolsandbox.world import RESPOND
-    from ratchet.types import ToolCall
 
     assert world.call(ToolCall(RESPOND, {"content": "a"}, "1")).data == {"observation": "", "done": True}
 

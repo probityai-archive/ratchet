@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ratchet_cases.types import Split, canonical_json, sha256_hex
+
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ChatModel, ModelClient, ModelConfig
 from ratchet.bench.agentdojo.cases import DEFAULT_ATTACK, DEFAULT_VERSION, DojoSuite
@@ -35,7 +37,7 @@ from ratchet.improve.loop import EvolveResult, Lab, evolve
 from ratchet.improve.propose import Instructions
 from ratchet.improve.receipt import Signer, public_key_bytes
 from ratchet.improve.sandbox import SandboxRunner
-from ratchet.types import Guard, Harness, Procedure, Split, canonical_json, sha256_hex
+from ratchet.types import Guard, Harness, Procedure
 
 DOJO_INSTRUCTIONS = Instructions.build("""\
 You improve the harness of an AI assistant that acts for one user through tools on that user's own systems

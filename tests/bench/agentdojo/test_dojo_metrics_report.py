@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from ratchet_cases.types import Cost
+
 from ratchet.bench.agentdojo.cases import DojoSuite
 from ratchet.bench.agentdojo.metrics import Rate, metrics, metrics_from_rows
 from ratchet.bench.agentdojo.report import document, overview_row, render
 from ratchet.bench.agentdojo.world import ATTACK_SUCCEEDED, UTILITY_MISSED
 from ratchet.improve.evaluate import CaseResult, EvalReport
-from ratchet.types import Cost
 
 
 def _row(cid: str, split: str, reasons: list[str], error: str | None = None) -> dict[str, Any]:

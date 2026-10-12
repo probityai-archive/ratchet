@@ -129,7 +129,7 @@ def closing_turn(reason: str) -> ModelTurn:
 
 def as_respond(turn: ModelTurn, call_id: str) -> ModelTurn:
     """A plain-text reply turned into a call of the `respond` tool."""
-    from ratchet.types import ToolCall
+    from ratchet_cases.types import ToolCall
 
     content = turn.content or ""
     raw = {

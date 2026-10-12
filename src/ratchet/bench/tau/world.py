@@ -25,10 +25,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from ratchet_cases.types import Cost, Outcome, ToolCall, ToolResult
 from tau_bench.envs.base import consistent_hash, to_hashable  # type: ignore[import-untyped]  # no type info
 from tau_bench.types import Action  # type: ignore[import-untyped]  # tau-bench ships no type information
-
-from ratchet.types import Cost, Outcome, ToolCall, ToolResult
 
 RESPOND = "respond"
 STOP = "###STOP###"

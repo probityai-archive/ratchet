@@ -6,13 +6,14 @@ import json
 from pathlib import Path
 
 import pytest
+from ratchet_cases.types import ToolCall, sha256_hex
 
 from ratchet.agent.guards import GuardItem, GuardRuntime
 from ratchet.export.claude_code import admitted_guard, harness_from_json, public_key, verify_hook
 from ratchet.export.hookrt import reads_history
 from ratchet.export.replay_transcripts import discover, replay_transcripts
 from ratchet.improve.receipt import key_id, verify
-from ratchet.types import Guard, ToolCall, sha256_hex
+from ratchet.types import Guard
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "claude-code"
 SOURCE = (EXAMPLE / "no_force_push_main.py").read_text(encoding="utf-8")

@@ -18,12 +18,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from ratchet_cases.types import Trace, canonical_json, sha256_hex
+
 from ratchet.improve.diagnose import FailurePoint
 from ratchet.improve.evaluate import EvalReport
 from ratchet.improve.overfit import lint, training_literals
 from ratchet.improve.replay import GuardRunner, WalkCache, replay
 from ratchet.improve.sim import Simulator
-from ratchet.types import Guard, Harness, Procedure, Trace, canonical_json, sha256_hex
+from ratchet.types import Guard, Harness, Procedure
 from ratchet.view.data import Doc, ViewStore
 from ratchet.view.matrix import CaseInfo
 

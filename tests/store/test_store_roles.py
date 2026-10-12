@@ -16,9 +16,10 @@ import httpx
 import pytest
 from conftest import HashEmbedder
 from pymongo.errors import OperationFailure
+from ratchet_cases.types import Cost, Event, Outcome, Trace
 
 from ratchet.store import Store, VoyageEmbedder, atlas_admin
-from ratchet.types import Cost, Event, Harness, Outcome, Trace
+from ratchet.types import Harness
 
 PRIVATE = Path(__file__).resolve().parents[2] / "private"
 UNAUTHORIZED = 13

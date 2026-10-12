@@ -26,6 +26,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
+from ratchet_cases.types import Split
 from tool_sandbox.common.execution_context import (
     ExecutionContext,
     ScenarioCategories,
@@ -41,7 +42,6 @@ from tool_sandbox.tools.rapid_api_search_tools import (
 )
 
 from ratchet.bench.toolsandbox.gate import GATE
-from ratchet.types import Split
 
 BENCHMARK_SEED = 42  # the seed the benchmark's own runner sets before building its scenarios
 DEFAULT_SEED = 20261011

@@ -18,11 +18,12 @@ from typing import Any
 
 import httpx
 from pymongo import ReplaceOne
+from ratchet_cases.types import Trace, canonical_json, sha256_hex, to_jsonable
 
 from ratchet.agent.model import ChatModel, Message, ModelClient, ModelConfig, ModelTurn, ToolSpec
 from ratchet.bench.transfer.analysis import summarize
 from ratchet.improve.evaluate import EvalReport, RunCase, evaluate_many
-from ratchet.types import Guard, Harness, Procedure, Trace, canonical_json, sha256_hex, to_jsonable
+from ratchet.types import Guard, Harness, Procedure
 
 PROBE_TOOL = {
     "type": "function",

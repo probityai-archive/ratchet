@@ -16,10 +16,11 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from ratchet_cases.types import Split
+
 from ratchet.bench.agentdojo.cases import DojoSuite
 from ratchet.bench.agentdojo.world import ATTACK_SUCCEEDED, UTILITY_MISSED
 from ratchet.improve.evaluate import EvalReport
-from ratchet.types import Split
 
 
 @dataclass(frozen=True)

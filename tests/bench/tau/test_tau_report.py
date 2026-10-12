@@ -61,7 +61,7 @@ def test_report_counts_every_run_and_lists_stopped_ones(tmp_path: Path) -> None:
         json.dumps({"final_harness": "h1", "active": ["h1", 1], "generations": [gen]})
     )
     _config(tmp_path / "runs" / "retail" / "h1" / "all-trial-9", stopped="rate limits")
-    from ratchet.types import Cost, Outcome, Trace
+    from ratchet_cases.types import Cost, Outcome, Trace
 
     for rid, cid, ok in [("r1", "x", True), ("r1", "x", True), ("r2", "z", False)]:
         store.put_trace(Trace(rid, cid, "h2", "m", [], Outcome(ok, [], "d", Cost())))

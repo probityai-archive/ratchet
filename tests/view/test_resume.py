@@ -3,9 +3,9 @@ from __future__ import annotations
 import io
 from typing import Any
 
+from ratchet_cases.types import Event
 from rich.console import Console
 
-from ratchet.types import Event
 from ratchet.view import resume
 
 from .fakes import make_trace
@@ -96,9 +96,9 @@ def test_a_run_that_had_committed_nothing() -> None:
 
 def lost_reply_checkpoint(case_id: str) -> tuple[Any, dict[str, Any]]:
     """A checkpoint built as the worker builds one: the calls run on a real world, its digest recorded."""
-    from ratchet.cases import get
-    from ratchet.types import ToolCall
-    from ratchet.world import World
+    from ratchet_cases.cases import get
+    from ratchet_cases.types import ToolCall
+    from ratchet_cases.world import World
 
     case = get(case_id)
     world = World.from_case(case)
@@ -123,7 +123,7 @@ def lost_reply_checkpoint(case_id: str) -> tuple[Any, dict[str, Any]]:
 
 
 def test_the_audit_log_decides_whether_a_timeout_committed() -> None:
-    from ratchet.world import World
+    from ratchet_cases.world import World
 
     case, committed = lost_reply_checkpoint("refund_lost_reply.v1")
     commits = resume.audit_commits(committed, lambda: World.from_case(case))
@@ -149,7 +149,7 @@ def test_the_audit_log_decides_whether_a_timeout_committed() -> None:
 
 
 def test_a_world_that_does_not_match_the_checkpoint_proves_nothing() -> None:
-    from ratchet.world import World
+    from ratchet_cases.world import World
 
     case, saved = lost_reply_checkpoint("refund_lost_reply.v1")
     saved["world_digest"] = "0" * 64

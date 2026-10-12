@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from ratchet_cases.types import Event, Trace
+
 from ratchet.improve.evaluate import evaluate, evaluate_many, interventions, model_calls
-from ratchet.types import Event, Guard, Harness, Trace
+from ratchet.types import Guard, Harness
 
 from .fakes import BLOCK_ALL_REFUNDS, NO_DUP_GUARD, FakeRunCase, fake_cases
 

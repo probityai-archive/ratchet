@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import pytest
+from ratchet_cases.types import Cost
 
 from ratchet.bench.transfer.analysis import discordant_pair_p, paired_rows, summarize
 from ratchet.improve.evaluate import CaseResult, EvalReport
-from ratchet.types import Cost
 
 CASES = [
     ("h1", "heldout", "trap", True),

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from ratchet_cases.types import Cost, ToolCall
 from tau_testkit import ScriptedUser, gold_actions, make_world
 
 from ratchet.bench.tau.world import RESPOND, STOP, outcome_of, record_diffs
-from ratchet.types import Cost, ToolCall
 
 
 def _do(world, name, args, cid="c"):  # type: ignore[no-untyped-def]

@@ -14,10 +14,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from ratchet_cases.types import Trace
+
 from ratchet.bench.tau.store import JsonlStore
 from ratchet.bench.toolsandbox.cases import ToolSandboxCase
 from ratchet.bench.toolsandbox.grading import Graded
-from ratchet.types import Trace
 
 
 class RunStore(JsonlStore):

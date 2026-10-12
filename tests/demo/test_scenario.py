@@ -6,6 +6,8 @@ import base64
 import json
 from typing import Any
 
+from ratchet_cases.types import Trace
+
 from ratchet.agent.guards import GuardRuntime
 from ratchet.demo.scenario import demo_cases, run_demo
 from ratchet.demo.worker import NAME, ScriptedDemoWorker
@@ -13,7 +15,7 @@ from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.receipt import Signer
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.improve.worldsim import WorldSimulator
-from ratchet.types import Harness, Trace
+from ratchet.types import Harness
 from ratchet.verify.dsse import parse
 
 

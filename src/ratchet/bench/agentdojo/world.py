@@ -22,9 +22,8 @@ from agentdojo.agent_pipeline.tool_execution import is_string_list, tool_result_
 from agentdojo.base_tasks import BaseInjectionTask, BaseUserTask
 from agentdojo.functions_runtime import FunctionCall, FunctionsRuntime, TaskEnvironment
 from agentdojo.task_suite.task_suite import TaskSuite
-
-from ratchet.types import Cost, Outcome, ToolCall, ToolResult, Trace, canonical_json, sha256_hex
-from ratchet.world.view import StateView
+from ratchet_cases.types import Cost, Outcome, ToolCall, ToolResult, Trace, canonical_json, sha256_hex
+from ratchet_cases.world.view import StateView
 
 UTILITY_MISSED = "utility: the user's task was not completed"
 ATTACK_SUCCEEDED = "security: the injected instruction was carried out"

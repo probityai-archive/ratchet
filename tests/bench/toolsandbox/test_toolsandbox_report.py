@@ -7,12 +7,13 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from ratchet_cases.types import Cost, Outcome, Trace
+
 from ratchet.bench.toolsandbox.cases import ToolSandboxCase
 from ratchet.bench.toolsandbox.grading import Graded, Score
 from ratchet.bench.toolsandbox.metrics import LOST, NOT_RUN, RAN
 from ratchet.bench.toolsandbox.report import collect, render, render_csv, rows_for
 from ratchet.bench.toolsandbox.store import RunStore
-from ratchet.types import Cost, Outcome, Trace
 
 KEY_ERROR = "PermissionError: Please provide 'RAPID_API_KEY' in environment variable."
 

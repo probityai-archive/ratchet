@@ -142,7 +142,7 @@ def test_report_the_receipt_does_not_name_fails_closed(signer: Signer) -> None:
 
 
 def test_reports_may_be_exact_stored_bytes(signer: Signer) -> None:
-    from ratchet.types import canonical_json
+    from ratchet_cases.types import canonical_json
 
     raw = {n: canonical_json(r) for n, r in REPORTS.items()}
     assert check(sign(payload(), signer), signer, reports=raw).reports_summary.startswith("5 of 5")

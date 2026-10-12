@@ -12,9 +12,10 @@ from typing import Any
 
 import pytest
 from conftest import HashEmbedder, make_client
+from ratchet_cases.types import Cost, Event, Outcome, Trace
 
 from ratchet.store import IntegrityError, NewFailure, Store, VoyageEmbedder, VoyageReranker, atlas_setup
-from ratchet.types import Cost, Event, Guard, Harness, Outcome, Procedure, Trace
+from ratchet.types import Guard, Harness, Procedure
 
 pytestmark = pytest.mark.integration
 

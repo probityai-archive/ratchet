@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from pymongo import MongoClient
+from ratchet_cases.types import Cost
 
 from ratchet.improve import archive as arc
 from ratchet.improve.admit import Check, Decision, report_digest
@@ -22,7 +23,7 @@ from ratchet.improve.archive import (
 )
 from ratchet.improve.evaluate import CaseResult, EvalReport
 from ratchet.store import Store
-from ratchet.types import Cost, Guard, Harness, Procedure
+from ratchet.types import Guard, Harness, Procedure
 
 # -- builders: the records are produced by the real report and decision types ------------------------------
 

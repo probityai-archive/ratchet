@@ -16,12 +16,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from ratchet_cases.types import Event, Trace
 from rich.console import Console
 
 from ratchet.agent.model import ModelTurn, ScriptedModel, scripted_turn
 from ratchet.cli import LiveBackend, main
 from ratchet.store import Store
-from ratchet.types import Event, Trace
 
 pytestmark = pytest.mark.integration
 
@@ -53,7 +53,7 @@ CHILD = textwrap.dedent(
     from ratchet.agent.model import ModelTurn, ScriptedModel, scripted_turn
     from ratchet.agent.seed import seed_harness
     from ratchet.agent.worker import run_case
-    from ratchet.cases import get
+    from ratchet_cases.cases import get
     from ratchet.store import Store
 
     uri, db, run_id, case_id, ticket, charge, cents = sys.argv[1:8]

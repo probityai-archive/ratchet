@@ -21,7 +21,7 @@ import random
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from ratchet.types import Split
+from ratchet_cases.types import Split
 
 Domain = Literal["retail", "airline"]
 TauSplit = Literal["train", "test"]

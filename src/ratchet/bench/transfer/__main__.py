@@ -59,9 +59,10 @@ def _key() -> str:
 
 
 def cmd_probe(args: argparse.Namespace) -> int:
+    from ratchet_cases.cases.registry import get
+
     from ratchet.agent.seed import seed_harness
     from ratchet.agent.worker import run_case
-    from ratchet.cases.registry import get
 
     info = endpoint_info(args.base_url, _key())
     with default_client(args.base_url, _key(), args.model) as model:
@@ -133,9 +134,10 @@ def _harness_meta(h: Harness, extra: dict[str, Any] | None = None) -> dict[str, 
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    from ratchet_cases.cases.registry import by_split, suite_digest
+
     from ratchet.agent.seed import seed_harness
     from ratchet.agent.worker import run_case
-    from ratchet.cases.registry import by_split, suite_digest
 
     uri = os.environ.get("RATCHET_MONGODB_URI")
     source = None
@@ -241,10 +243,11 @@ def cmd_store(args: argparse.Namespace) -> int:
 
 def case_first_request(case_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """The first request the worker sends for a case under the seed harness: system prompt, ticket, tools."""
+    from ratchet_cases.cases.registry import get
+    from ratchet_cases.world import World
+
     from ratchet.agent.seed import seed_harness
     from ratchet.agent.worker import read_procedure_spec, system_prompt
-    from ratchet.cases.registry import get
-    from ratchet.world import World
 
     case, harness = get(case_id), seed_harness()
     allowed = set(harness.tool_allowlist)

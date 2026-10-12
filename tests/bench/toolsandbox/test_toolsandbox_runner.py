@@ -5,6 +5,7 @@ from importlib import metadata
 from typing import Any
 
 import pytest
+from ratchet_cases.types import Trace
 from toolsandbox_testkit import Steady, user_factory
 
 from ratchet.agent.guards import GuardRuntime
@@ -25,7 +26,7 @@ from ratchet.bench.toolsandbox.runner import (
 )
 from ratchet.bench.toolsandbox.user import EndpointUser
 from ratchet.bench.toolsandbox.world import RESPOND, ToolSandboxWorld
-from ratchet.types import Guard, Harness, Trace
+from ratchet.types import Guard, Harness
 
 PINNED = "c8571d7854316d2e1c5f288e59fe1e34e53f6dd1"
 

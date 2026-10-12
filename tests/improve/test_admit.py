@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
+from ratchet_cases.types import canonical_json
 
 from ratchet.improve.admit import admit, awaiting_confirmation, check_fresh, check_structure
 from ratchet.improve.diagnose import diagnose
@@ -11,7 +12,7 @@ from ratchet.improve.evaluate import EvalReport, evaluate
 from ratchet.improve.overfit import training_literals
 from ratchet.improve.receipt import HUMAN_APPROVAL_TYPE, Signer, receipt, verify
 from ratchet.improve.replay import ReplayReport, WalkCache, replay
-from ratchet.types import Guard, Harness, canonical_json
+from ratchet.types import Guard, Harness
 
 from .fakes import BLOCK_ALL_REFUNDS, NO_DUP_GUARD, FakeRunCase, FakeSimulator, LocalRunner, fake_cases
 

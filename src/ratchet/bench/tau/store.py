@@ -14,7 +14,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from ratchet.types import Cost, Event, Guard, Harness, Outcome, Procedure, Trace
+from ratchet_cases.types import Cost, Event, Outcome, Trace
+
+from ratchet.types import Guard, Harness, Procedure
 
 
 def _default(value: Any) -> Any:

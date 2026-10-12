@@ -16,12 +16,21 @@ failures --> diagnose --> propose --> replay --> fresh evaluation --> admit --> 
 5. The admission rule decides. The decision, with its evidence digests, is signed.
 6. Activation moves the active-version pointer in one database transaction that checks the receipt.
 
+## The case suite (`ratchet-cases/`)
+
+The simulated company and the cases ship as their own package, [`ratchet-cases`](../ratchet-cases/README.md),
+which the harness depends on at an exact version. It has no runtime dependencies.
+
+| Module | Job |
+|---|---|
+| `ratchet_cases.world` | The simulated company: billing provider, payments, orders, subscriptions, tickets, approvals, mail, policy, and a fault layer that can lose a reply after the action committed |
+| `ratchet_cases.cases` | Eight case families, trap cases, benign twins and must-succeed cases, split into train, held-out and audit, with graders that read the final state of every system. `DIGESTS.json` pins the suite digest of every release |
+| `ratchet_cases.run` | A bare reference loop with no guards, the trace file format, and regrading by replay |
+
 ## Packages (`src/ratchet`)
 
 | Package | Job |
 |---|---|
-| `world` | The simulated company: billing provider, payments, orders, subscriptions, tickets, approvals, mail, policy, and a fault layer that can lose a reply after the action committed |
-| `cases` | Eight case families, trap cases, benign twins and must-succeed cases, split into train, held-out and audit, with graders that read the final state of every system. `FROZEN.sha256` pins the suite |
 | `agent` | The harness bundle, the worker loop, the guard runtime, the chat-completions model client |
 | `store` | Atlas persistence: versions, runs, traces, evaluations, decisions, failure memory, checkpoints, change streams, and the database roles that keep the improver away from held-out cases |
 | `improve` | Diagnosis, proposal, replay, the admission rule, receipts, activation, the version archive, retrieval of similar failures, and the search over the improver's own instructions |

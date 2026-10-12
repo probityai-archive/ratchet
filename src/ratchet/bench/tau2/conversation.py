@@ -23,9 +23,10 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from ratchet_cases.types import ToolCall
+
 from ratchet.agent.model import ChatModel, Message, ModelTurn, ToolSpec
 from ratchet.bench.tau2.world import RESPOND
-from ratchet.types import ToolCall
 
 CLOSED = "conversation_end"
 GREETING = "Hi! How can I help you today?"  # tau2-bench's DEFAULT_FIRST_AGENT_MESSAGE

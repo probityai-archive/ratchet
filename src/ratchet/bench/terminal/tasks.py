@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from ratchet.types import Split
+from ratchet_cases.types import Split
 
 Phase = Literal[1, 2]
 DEFAULT_SEED = 20261011

@@ -47,7 +47,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from ratchet.types import Event, Guard, ToolCall
+from ratchet_cases.types import Event, ToolCall
+
+from ratchet.types import Guard
 
 GUARD_ERROR_REASON = "guard error"
 INFRASTRUCTURE_ERROR_REASON = "guard infrastructure error"

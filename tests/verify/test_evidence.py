@@ -7,9 +7,10 @@ from dataclasses import asdict
 from typing import Any
 
 import pytest
+from ratchet_cases.types import canonical_json
 
 from ratchet.improve.receipt import HUMAN_APPROVAL_TYPE, Signer
-from ratchet.types import Guard, Harness, canonical_json
+from ratchet.types import Guard, Harness
 from ratchet.verify import DEFAULT_GATES, Options, report_digest, verify_decision
 from ratchet.verify import recompute as rc
 
@@ -215,7 +216,7 @@ def test_malformed_evaluation_report_is_contradicted(signer: Signer, mutate: Any
 
 def test_a_report_that_is_not_a_json_object_is_contradicted(signer: Signer) -> None:
     raw = b"[1]"
-    from ratchet.types import sha256_hex
+    from ratchet_cases.types import sha256_hex
 
     r = verify_decision(
         sign(
@@ -517,7 +518,7 @@ def test_a_gate_the_consumer_does_not_require_is_not_recomputed(signer: Signer) 
 
 
 def test_a_stored_report_that_is_not_json_is_contradicted(signer: Signer) -> None:
-    from ratchet.types import sha256_hex
+    from ratchet_cases.types import sha256_hex
 
     raw = b"\xff\xfe"
     digests = {**payload()["report_digests"], "parent_run_1": sha256_hex(raw)}

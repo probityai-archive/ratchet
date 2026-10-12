@@ -27,9 +27,39 @@ jobs:
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run mypy src
+      - run: uv run mypy --config-file ratchet-cases/pyproject.toml ratchet-cases/src
       - run: python3 scripts/readme-lint.py README.md
-      # check-docs imports ratchet.cases to count the case families, so it runs inside the synced virtualenv
+      - run: python3 scripts/readme-lint.py ratchet-cases/README.md
+      # check-docs imports ratchet_cases to count the case families, so it runs inside the synced virtualenv
       - run: uv run python scripts/check-docs.py
+
+  # The case suite on its own: built as a wheel and tested from a clean environment on the oldest and a
+  # current supported Python, so nothing in the harness's workspace can hide a missing file or dependency.
+  cases:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # No cache: the job installs one wheel and pytest, and two matrix legs saving one cache key race.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: false
+      - run: uv build --package ratchet-cases --out-dir dist
+      - name: install the wheel alone
+        run: |
+          uv venv --no-project --python "${{ matrix.python }}" "$RUNNER_TEMP/cases"
+          uv pip install --python "$RUNNER_TEMP/cases/bin/python" dist/ratchet_cases-*.whl pytest==9.1.1
+      - name: selftest and digest from the installed wheel
+        run: |
+          "$RUNNER_TEMP/cases/bin/ratchet-cases" selftest
+          "$RUNNER_TEMP/cases/bin/ratchet-cases" digest
+      - name: pytest against the installed wheel
+        working-directory: ratchet-cases
+        run: '"$RUNNER_TEMP/cases/bin/python" -m pytest -q -W error -p no:cacheprovider'
 
   test:
     runs-on: ubuntu-24.04

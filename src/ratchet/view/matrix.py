@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
+from ratchet_cases.types import Trace
 from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
 from rich.live import Live
 from rich.panel import Panel
@@ -25,7 +26,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ratchet.improve.replay import GuardInput, GuardRunner, WalkCache
-from ratchet.types import Guard, Trace
+from ratchet.types import Guard
 from ratchet.view.data import DecisionInfo
 
 RowKind = Literal["trap_failure", "past_success", "benign_twin", "other_failure"]

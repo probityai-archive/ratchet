@@ -13,6 +13,7 @@ dependencies = [
     "raindrop-ai==0.0.75",
     "probity-verify==0.1.0",
     "agent-evidence-vectors==0.17.7",
+    "ratchet-cases==0.1.0",
 ]
 
 [project.scripts]
@@ -77,7 +78,11 @@ follow_untyped_imports = true
 testpaths = ["tests"]
 addopts = "-W error"
 
+[tool.uv.workspace]
+members = ["ratchet-cases"]
+
 [tool.uv.sources]
+ratchet-cases = { workspace = true }
 tau-bench = { git = "https://github.com/sierra-research/tau-bench", rev = "59a200c6d575d595120f1cb70fea53cef0632f6b" }
 probity-verify = { git = "https://github.com/probityai/probity-verify", rev = "b920366397cb131232163706864a70723b867367" }
 tau2 = { git = "https://github.com/sierra-research/tau2-bench", rev = "4ce7c0397c1eb65c9bbe59aeacfe1ca44a1cd699" }

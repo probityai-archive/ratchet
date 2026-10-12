@@ -24,10 +24,10 @@ from agentdojo.attacks.base_attacks import BaseAttack, FixedJailbreakAttack
 from agentdojo.attacks.important_instructions_attacks import ImportantInstructionsAttack
 from agentdojo.task_suite.load_suites import get_suite
 from agentdojo.task_suite.task_suite import TaskSuite
+from ratchet_cases.cases.model import Case, Expect
+from ratchet_cases.types import Split
 
 from ratchet.bench.agentdojo.world import DojoTask
-from ratchet.cases.model import Case, Expect
-from ratchet.types import Split
 
 DEFAULT_VERSION = "v1.2.2"
 DEFAULT_ATTACK = "important_instructions_no_model_name"

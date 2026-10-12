@@ -12,9 +12,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ratchet_cases.types import Cost, Event, Outcome, ToolCall, ToolResult, Trace
+
 from ratchet.improve.replay import GuardInput, Verdict
 from ratchet.improve.sim import Step, Walk, result_ids, tool_call_of
-from ratchet.types import Cost, Event, Guard, Outcome, ToolCall, ToolResult, Trace
+from ratchet.types import Guard
 
 
 @dataclass

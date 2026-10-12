@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from ratchet_cases.cases import all_cases
+from ratchet_cases.types import Trace
+
 from ratchet.agent.model import ScriptedModel, scripted_turn
 from ratchet.agent.seed import seed_harness
 from ratchet.agent.worker import run_case
-from ratchet.cases import all_cases
 from ratchet.improve.diagnose import diagnose
 from ratchet.improve.replay import WalkCache, replay
 from ratchet.improve.worldsim import WorldSimulator
-from ratchet.types import Guard, Trace
+from ratchet.types import Guard
 
 from .fakes import LocalRunner
 

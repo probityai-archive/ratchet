@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from ratchet_cases.types import Event, ToolCall, sha256_hex
 
 from ratchet.agent.guards import CHILD_PATH, GuardLimits, GuardRuntime
 from ratchet.export import hookrt
@@ -33,7 +34,7 @@ from ratchet.export.claude_code import (
 from ratchet.export.hookrt import parse_transcript
 from ratchet.improve.admit import Check, Decision
 from ratchet.improve.receipt import Signer, public_key_bytes, receipt
-from ratchet.types import Event, Guard, Harness, ToolCall, sha256_hex
+from ratchet.types import Guard, Harness
 
 from .synth import Session, hook_event
 

@@ -14,7 +14,9 @@ from collections.abc import Callable, Mapping, Sequence
 from types import SimpleNamespace
 from typing import Any, Protocol
 
-from ratchet.types import Harness, Trace
+from ratchet_cases.types import Trace
+
+from ratchet.types import Harness
 from ratchet.view.data import RunStore
 
 

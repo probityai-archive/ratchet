@@ -26,12 +26,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from ratchet_cases.types import canonical_json, sha256_hex
 
 from ratchet.improve.evaluate import CaseResult, EvalReport
 from ratchet.improve.overfit import Literals, lint
 from ratchet.improve.receipt import HUMAN_APPROVAL_TYPE, ReceiptError, verify
 from ratchet.improve.replay import ReplayReport
-from ratchet.types import Harness, canonical_json, sha256_hex
+from ratchet.types import Harness
 from ratchet.verify.adapter import DEFAULT_GATES, PREDICATE_URI
 
 GATES = DEFAULT_GATES

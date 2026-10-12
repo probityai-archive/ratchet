@@ -25,6 +25,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from ratchet_cases.types import ToolCall, Trace
+
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ModelClient, ModelConfig
 from ratchet.bench.tau.store import JsonlStore
@@ -54,7 +56,7 @@ from ratchet.improve.loop import Lab, evolve
 from ratchet.improve.receipt import Signer
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.improve.sim import RecordedViews
-from ratchet.types import Guard, Harness, Procedure, ToolCall, Trace
+from ratchet.types import Guard, Harness, Procedure
 
 DEFAULT_SUITE = os.path.expanduser("~/Documents/git-clones/terminal-bench-2")
 

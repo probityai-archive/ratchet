@@ -9,6 +9,7 @@ import time
 from collections.abc import Iterator
 
 import pytest
+from ratchet_cases.types import Event, ToolCall
 
 from ratchet.agent.guards import (
     GUARD_ERROR_REASON,
@@ -21,7 +22,7 @@ from ratchet.agent.guards import (
     GuardSourceError,
     SandboxUnavailableError,
 )
-from ratchet.types import Event, Guard, ToolCall
+from ratchet.types import Guard
 
 CALL = ToolCall(name="refund", args={"amount": 50}, call_id="c1")
 VIEW = {"limit": 10}

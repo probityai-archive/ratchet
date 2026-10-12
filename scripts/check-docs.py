@@ -173,8 +173,8 @@ def check_family_claim() -> list[str]:
     if not found:
         return []
     try:
-        sys.path.insert(0, str(ROOT / "src"))
-        from ratchet.cases import all_cases
+        sys.path.insert(0, str(ROOT / "ratchet-cases" / "src"))
+        from ratchet_cases.cases import all_cases
     except ImportError as exc:
         return [f"cannot import the case suite to check the README's family count: {exc}"]
     actual = len({c.family for c in all_cases()})

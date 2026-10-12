@@ -7,13 +7,13 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from ratchet_cases.types import Event, Trace
 from rich.console import Group, RenderableType
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
 from ratchet.improve.stochastic import RUNS as V3_RUNS
-from ratchet.types import Event, Trace
 from ratchet.view.admission import (
     RUNS,
     FreshView,

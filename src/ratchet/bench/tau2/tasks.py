@@ -17,8 +17,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
+from ratchet_cases.types import Split
+
 import ratchet.bench.tau2  # noqa: F401  # sets TAU2_DATA_DIR before tau2-bench is imported
-from ratchet.types import Split
 
 Domain = Literal["retail", "airline", "telecom"]
 DOMAINS: tuple[Domain, ...] = ("retail", "airline", "telecom")

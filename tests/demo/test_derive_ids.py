@@ -10,8 +10,8 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+from ratchet_cases.types import Event
 
-from ratchet.types import Event
 from ratchet.view.admission import fresh_view
 from ratchet.view.data import resolve_candidates
 from ratchet.view.matrix import pick_rows

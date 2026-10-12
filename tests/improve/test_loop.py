@@ -5,10 +5,12 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
+from ratchet_cases.types import Trace
+
 from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.loop import Lab, compose, evolve
 from ratchet.improve.receipt import Signer, verify
-from ratchet.types import Harness, Trace
+from ratchet.types import Harness
 
 from .fakes import (
     BLOCK_ALL_REFUNDS,

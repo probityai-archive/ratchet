@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ratchet_cases.types import Cost, Outcome, Trace
+
 from ratchet.bench.toolsandbox.cases import ToolSandboxCase
 from ratchet.bench.toolsandbox.grading import Graded, Score
 from ratchet.bench.toolsandbox.store import RunStore
-from ratchet.types import Cost, Outcome, Trace
 
 
 def _case() -> ToolSandboxCase:

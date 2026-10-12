@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from ratchet_cases.types import canonical_json
 from rich.console import Console
 from view.fakes import (
     RULES,
@@ -28,7 +29,7 @@ from ratchet import cli
 from ratchet.cli import CliError, LiveBackend, main
 from ratchet.improve.receipt import DECISION_TYPE, Signer
 from ratchet.improve.sim import RecordedViews
-from ratchet.types import Harness, canonical_json
+from ratchet.types import Harness
 
 SIGNER = Signer.from_seed_hex("33" * 32)
 

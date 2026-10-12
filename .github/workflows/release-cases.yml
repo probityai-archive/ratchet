@@ -1,0 +1,98 @@
+name: release ratchet-cases
+
+# On a tag ratchet-cases-vX.Y.Z: build the wheel and sdist once, prove the built wheel on Python 3.10 and 3.12
+# (selftest, and the suite digest against DIGESTS.json), attest build provenance for exactly those files, and
+# publish them as a GitHub release. The PyPI upload takes these same files from the release.
+
+on:
+  push:
+    tags: ["ratchet-cases-v*"]
+
+permissions:
+  contents: read
+
+env:
+  UV_PYTHON: "3.14"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      digest: ${{ steps.digest.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - run: uv build --package ratchet-cases --out-dir dist
+      - name: the tag names the package version
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' ratchet-cases/src/ratchet_cases/__init__.py)
+          test "ratchet-cases-v$version" = "$GITHUB_REF_NAME"
+          ls dist/ratchet_cases-"$version"-py3-none-any.whl dist/ratchet_cases-"$version".tar.gz
+      - id: digest
+        run: echo "digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' ratchet-cases/src/ratchet_cases/cases/DIGESTS.json "${GITHUB_REF_NAME#ratchet-cases-v}")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  verify:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - name: install the built wheel in a clean environment
+        run: |
+          uv venv --no-project --python "${{ matrix.python }}" "$RUNNER_TEMP/v"
+          uv pip install --python "$RUNNER_TEMP/v/bin/python" dist/*.whl
+      - name: selftest, and the shipped digest equals the recorded one
+        run: |
+          "$RUNNER_TEMP/v/bin/ratchet-cases" selftest
+          test "$("$RUNNER_TEMP/v/bin/ratchet-cases" digest)" = "${{ needs.build.outputs.digest }}"
+
+  release:
+    needs: [build, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          {
+            echo "ratchet-cases ${GITHUB_REF_NAME#ratchet-cases-v}"
+            echo
+            echo "Suite digest (SUITE_DIGEST): \`$DIGEST\`"
+            echo
+            echo "Files (sha256):"
+            echo
+            (cd dist && sha256sum -- * | sed 's/^/    /')
+            echo
+            echo "Verify a downloaded file: \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`"
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "ratchet-cases ${GITHUB_REF_NAME#ratchet-cases-v}" --notes-file notes.md --verify-tag

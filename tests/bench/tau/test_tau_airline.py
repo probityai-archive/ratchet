@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import pytest
+from ratchet_cases.types import Cost, ToolCall
 from tau_testkit import ScriptedUser
 
 from ratchet.bench.tau.runner import make_env, seed_harness, tau_tool_names
 from ratchet.bench.tau.tasks import DEFAULT_SEED, VIEW_TABLES, default_cases, split_single, tau_tasks
 from ratchet.bench.tau.world import RESPOND, TauWorld, outcome_of
-from ratchet.types import Cost, ToolCall
 
 
 def test_airline_split_divides_the_fifty_test_tasks() -> None:

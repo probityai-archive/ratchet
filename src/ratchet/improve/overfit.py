@@ -14,7 +14,9 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from ratchet.types import Harness, Trace
+from ratchet_cases.types import Trace
+
+from ratchet.types import Harness
 
 _ID = re.compile(r"\b[A-Za-z]{1,6}[_-][A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\b")
 _NAME_KEYS = {"name", "full_name", "customer_name", "email", "to", "from"}

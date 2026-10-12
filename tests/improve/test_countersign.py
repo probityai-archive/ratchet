@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime
 
 import pytest
+from ratchet_cases.types import canonical_json
 
 from ratchet.improve.countersign import countersign_doc, payload_matches
 from ratchet.improve.receipt import (
@@ -15,7 +16,6 @@ from ratchet.improve.receipt import (
     countersign,
     verify,
 )
-from ratchet.types import canonical_json
 
 PAYLOAD = {"admitted": False, "parent": "p", "candidate": "c"}
 

@@ -5,6 +5,7 @@ import threading
 from typing import Any
 
 import pytest
+from ratchet_cases.types import Cost, ToolCall
 from tool_sandbox.common.execution_context import (
     DatabaseNamespace,
     RoleType,
@@ -15,7 +16,6 @@ from ratchet.bench.toolsandbox.cases import scenarios
 from ratchet.bench.toolsandbox.gate import GATE
 from ratchet.bench.toolsandbox.replay import END, ReplayUser
 from ratchet.bench.toolsandbox.world import ENDED, RESPOND, ToolSandboxWorld
-from ratchet.types import Cost, ToolCall
 
 
 def _call(world: ToolSandboxWorld, name: str, args: dict[str, Any], cid: str = "c") -> Any:

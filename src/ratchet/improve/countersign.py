@@ -21,8 +21,9 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from ratchet_cases.types import canonical_json
+
 from ratchet.improve.receipt import ReceiptError, Signer, countersign
-from ratchet.types import canonical_json
 
 NOTE = "countersigned by the pinned decision key; the run signed with a per-run key that was not published"
 

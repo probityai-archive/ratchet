@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ratchet.types import canonical_json, sha256_hex
+from ratchet_cases.types import canonical_json, sha256_hex
 
 
 @dataclass(frozen=True)

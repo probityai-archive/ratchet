@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 import pytest
+from ratchet_cases.types import Cost, Event, Outcome, Trace
 
 from ratchet.store import (
     EmbeddingError,
@@ -21,7 +22,7 @@ from ratchet.store import (
     atlas_setup,
 )
 from ratchet.store.embed import EMBEDDING_DIMS, CachedEmbedder, cache_key
-from ratchet.types import Cost, Event, Harness, Outcome, Trace
+from ratchet.types import Harness
 
 
 def _trace(n_events: int = 3) -> Trace:

@@ -15,6 +15,10 @@ uv sync
 
 Python 3.12 or later. The guard sandbox needs Linux.
 
+```sh
+pip install ratchet-cases==0.1.0 && ratchet-cases selftest   # the case suite alone: ratchet-cases/README.md
+```
+
 ## Try it in 30 seconds
 
 No database, no model key. This guard stops force pushes to `main`. It is a single standard-library file, exported from an admitted guard, and it is a Claude Code hook (a script run before each tool call). It denies the call:
@@ -29,7 +33,7 @@ blocked by guard no-force-push-main: force push to main rewrites shared history;
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "blocked by guard no-force-push-main: force push to main rewrites shared history; push a branch and open a pull request instead"}}exit 2
 ```
 
-Before it was exported, the guard was replayed over six recorded Claude Code sessions: it fired on the three calls it was written for and on none of the other twelve (`examples/claude-code/replay.json`). The hook's header names the receipt (the signed decision) that admitted it; `uv run python -m ratchet.export.claude_code --verify examples/claude-code/hooks/ratchet_no_force_push_main.py` checks that receipt.
+Before export, the guard was replayed over six recorded Claude Code sessions: it fired on the three calls it was written for and on none of the other twelve (`examples/claude-code/replay.json`). The hook's header names the receipt (the signed decision) that admitted it; `uv run python -m ratchet.export.claude_code --verify examples/claude-code/hooks/ratchet_no_force_push_main.py` checks that receipt.
 
 ## What it does
 
@@ -55,7 +59,7 @@ Version 0.1.0, built on 2026-10-11 at the MongoDB harness hackathon. The suite, 
 
 ## Built today and reused
 
-The repository's first commit is from 2026-10-11, and everything under `src/ratchet`, `tests`, `examples` and `docs` was written at the event. The rest is a pinned dependency or a service.
+The repository's first commit is from 2026-10-11, and everything under `src/ratchet`, `ratchet-cases`, `tests`, `examples` and `docs` was written at the event. The rest is a pinned dependency or a service.
 
 | Reused | Pin |
 |---|---|

@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from ratchet_cases.types import Cost, Event, Outcome, Trace
 
 from ratchet.telemetry import raindrop as rd
 from ratchet.telemetry.raindrop import CaseInfo, RaindropSink
-from ratchet.types import Cost, Event, Outcome, Trace
 
 
 class FakeInteraction:

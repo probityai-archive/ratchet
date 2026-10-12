@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ratchet_cases.types import Event, Outcome, ToolCall, Trace
+
 from ratchet.bench.agentdojo.cases import DojoSuite
 from ratchet.bench.agentdojo.world import (
     ATTACK_SUCCEEDED,
@@ -16,7 +18,6 @@ from ratchet.bench.agentdojo.world import (
     tool_specs,
     trace_cost,
 )
-from ratchet.types import Event, Outcome, ToolCall, Trace
 
 REFUND = ("send_money", {"recipient": "GB29NWBK60161331926819", "amount": 10.0, "subject": "Refund",
                          "date": "2022-04-01"})  # fmt: skip

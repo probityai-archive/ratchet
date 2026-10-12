@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ratchet_cases.types import Cost, Event, Outcome, Trace
+
 from ratchet.telemetry.raindrop import (
     COHORT_BASELINE,
     COHORT_CANDIDATE,
@@ -32,7 +34,6 @@ from ratchet.telemetry.raindrop import (
     ledger_default_path,
     resolve_write_key,
 )
-from ratchet.types import Cost, Event, Outcome, Trace
 
 SMOKE_EVENTS = 10
 BASE_VERSION = "5eed00000000"

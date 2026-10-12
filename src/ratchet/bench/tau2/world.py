@@ -37,8 +37,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from ratchet_cases.types import Cost, Outcome, ToolCall, ToolResult
+
 import ratchet.bench.tau2  # noqa: F401  # sets TAU2_DATA_DIR before tau2-bench is imported
-from ratchet.types import Cost, Outcome, ToolCall, ToolResult
 
 RESPOND = "respond"
 
