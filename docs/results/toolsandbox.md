@@ -40,11 +40,14 @@ every run is listed in [toolsandbox-scenarios.csv](toolsandbox-scenarios.csv).
 
 ## Overview (all scenarios of each run)
 
-| Harness | Split | Agent model | n | ran | not run | lost | similarity (ran) | similarity (all n) | milestone (ran) | exact | passed |
+| Harness | Split or evolve role | Agent model | n | ran | not run | lost | similarity (ran) | similarity (all n) | milestone (ran) | exact | passed |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `66092c731162` | all | `gpt-5.6-luna` | 1032 | 728 | 304 | 0 | 0.854 | 0.602 | 0.908 | 236/728 | 499/728 |
 | `66092c731162` | all | `gpt-oss-120b` | 1032 | 728 | 304 | 0 | 0.775 | 0.547 | 0.879 | 183/728 | 398/728 |
-| `66092c731162` | ? | `llama-3.3-70b-instruct` | 48 | 37 | 0 | 11 | 0.590 | 0.455 | 0.725 | 3/37 | 6/37 |
+| `66092c731162` | parent_run_1 | `llama-3.3-70b-instruct` | 48 | 48 | 0 | 0 | 0.586 | 0.586 | 0.690 | 3/48 | 11/48 |
+| `66092c731162` | parent_run_2 | `llama-3.3-70b-instruct` | 24 | 24 | 0 | 0 | 0.593 | 0.593 | 0.802 | 3/24 | 5/24 |
+| `2c61ac87add6` | candidate | `llama-3.3-70b-instruct` | 48 | 48 | 0 | 0 | 0.535 | 0.535 | 0.576 | 6/48 | 14/48 |
+| `66092c731162` | parent_run_1 | `llama-3.3-70b-instruct` | 48 | 37 | 0 | 11 | 0.590 | 0.455 | 0.725 | 3/37 | 6/37 |
 | `66092c731162` | all | `gpt-5.6-luna` | 10 | 10 | 0 | 0 | 0.930 | 0.930 | 0.930 | 6/10 | 8/10 |
 
 ## Runs
@@ -123,7 +126,111 @@ every run is listed in [toolsandbox-scenarios.csv](toolsandbox-scenarios.csv).
 | `ARG_DESCRIPTION_SCRAMBLED` | 129 | 91 | 38 | 0 | 0.758 | 0.534 | 0.867 | 0.612 | 0.110 | 23/91 | 47/91 | 9.0 |
 | `ARG_TYPE_SCRAMBLED` | 129 | 91 | 38 | 0 | 0.775 | 0.547 | 0.885 | 0.624 | 0.110 | 22/91 | 51/91 | 9.8 |
 
-### `66092c731162` on ? (trial ?)
+### `66092c731162`, evolve parent_run_1, generation 1
+
+- Run directory `box-smoke-llama-2/evolve/smoke-llama-2`; agent model `llama-3.3-70b-instruct`, user simulator model `gpt-5.6-luna`, temperature 0.0; tool-sandbox `c8571d785431`.
+- Started 2026-10-12T05:35:49+0000, finished ?.
+- 48 scenarios: 48 ran, 0 NOT RUN, 0 lost to the endpoint.
+
+**Headline categories**
+
+| Category | n | ran | not run | lost | similarity (ran) | similarity (all n) | milestone (ran) | milestone (all n) | minefield (ran) | exact | passed | turns (ran) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `ALL_CATEGORIES` | 48 | 48 | 0 | 0 | 0.586 | 0.586 | 0.690 | 0.690 | 0.104 | 3/48 | 11/48 | 23.6 |
+| `STATE_DEPENDENCY` | 16 | 16 | 0 | 0 | 0.758 | 0.758 | 0.758 | 0.758 | 0.000 | 0/16 | 3/16 | 21.2 |
+| `CANONICALIZATION` | 8 | 8 | 0 | 0 | 0.321 | 0.321 | 0.321 | 0.321 | 0.000 | 0/8 | 0/8 | 29.1 |
+| `INSUFFICIENT_INFORMATION` | 8 | 8 | 0 | 0 | 0.375 | 0.375 | 1.000 | 1.000 | 0.625 | 3/8 | 3/8 | 27.2 |
+
+**Every category**
+
+| Category | n | ran | not run | lost | similarity (ran) | similarity (all n) | milestone (ran) | milestone (all n) | minefield (ran) | exact | passed | turns (ran) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `ALL_CATEGORIES` | 48 | 48 | 0 | 0 | 0.586 | 0.586 | 0.690 | 0.690 | 0.104 | 3/48 | 11/48 | 23.6 |
+| `STATE_DEPENDENCY` | 16 | 16 | 0 | 0 | 0.758 | 0.758 | 0.758 | 0.758 | 0.000 | 0/16 | 3/16 | 21.2 |
+| `CANONICALIZATION` | 8 | 8 | 0 | 0 | 0.321 | 0.321 | 0.321 | 0.321 | 0.000 | 0/8 | 0/8 | 29.1 |
+| `INSUFFICIENT_INFORMATION` | 8 | 8 | 0 | 0 | 0.375 | 0.375 | 1.000 | 1.000 | 0.625 | 3/8 | 3/8 | 27.2 |
+| `SINGLE_TOOL_CALL` | 8 | 8 | 0 | 0 | 0.867 | 0.867 | 0.867 | 0.867 | 0.000 | 0/8 | 5/8 | 12.8 |
+| `MULTIPLE_TOOL_CALL` | 32 | 32 | 0 | 0 | 0.569 | 0.569 | 0.569 | 0.569 | 0.000 | 0/32 | 3/32 | 25.4 |
+| `SINGLE_USER_TURN` | 24 | 24 | 0 | 0 | 0.795 | 0.795 | 0.795 | 0.795 | 0.000 | 0/24 | 8/24 | 18.4 |
+| `MULTIPLE_USER_TURN` | 16 | 16 | 0 | 0 | 0.379 | 0.379 | 0.379 | 0.379 | 0.000 | 0/16 | 0/16 | 29.6 |
+| `NO_DISTRACTION_TOOLS` | 6 | 6 | 0 | 0 | 0.635 | 0.635 | 0.801 | 0.801 | 0.167 | 0/6 | 1/6 | 21.0 |
+| `THREE_DISTRACTION_TOOLS` | 6 | 6 | 0 | 0 | 0.549 | 0.549 | 0.716 | 0.716 | 0.167 | 0/6 | 2/6 | 24.7 |
+| `TEN_DISTRACTION_TOOLS` | 6 | 6 | 0 | 0 | 0.696 | 0.696 | 0.696 | 0.696 | 0.000 | 1/6 | 2/6 | 21.7 |
+| `ALL_TOOLS_AVAILABLE` | 6 | 6 | 0 | 0 | 0.440 | 0.440 | 0.440 | 0.440 | 0.000 | 1/6 | 1/6 | 27.3 |
+| `TOOL_NAME_SCRAMBLED` | 6 | 6 | 0 | 0 | 0.479 | 0.479 | 0.646 | 0.646 | 0.167 | 0/6 | 1/6 | 24.2 |
+| `TOOL_DESCRIPTION_SCRAMBLED` | 6 | 6 | 0 | 0 | 0.753 | 0.753 | 0.753 | 0.753 | 0.000 | 1/6 | 2/6 | 25.0 |
+| `ARG_DESCRIPTION_SCRAMBLED` | 6 | 6 | 0 | 0 | 0.614 | 0.614 | 0.780 | 0.780 | 0.167 | 0/6 | 1/6 | 23.0 |
+| `ARG_TYPE_SCRAMBLED` | 6 | 6 | 0 | 0 | 0.525 | 0.525 | 0.691 | 0.691 | 0.167 | 0/6 | 1/6 | 22.0 |
+
+### `66092c731162`, evolve parent_run_2, generation 1
+
+- Run directory `box-smoke-llama-2/evolve/smoke-llama-2`; agent model `llama-3.3-70b-instruct`, user simulator model `gpt-5.6-luna`, temperature 0.0; tool-sandbox `c8571d785431`.
+- Started 2026-10-12T05:35:49+0000, finished ?.
+- 24 scenarios: 24 ran, 0 NOT RUN, 0 lost to the endpoint.
+
+**Headline categories**
+
+| Category | n | ran | not run | lost | similarity (ran) | similarity (all n) | milestone (ran) | milestone (all n) | minefield (ran) | exact | passed | turns (ran) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `ALL_CATEGORIES` | 24 | 24 | 0 | 0 | 0.593 | 0.593 | 0.802 | 0.802 | 0.208 | 3/24 | 5/24 | 24.3 |
+| `STATE_DEPENDENCY` | 16 | 16 | 0 | 0 | 0.703 | 0.703 | 0.703 | 0.703 | 0.000 | 0/16 | 2/16 | 21.6 |
+| `INSUFFICIENT_INFORMATION` | 8 | 8 | 0 | 0 | 0.375 | 0.375 | 1.000 | 1.000 | 0.625 | 3/8 | 3/8 | 29.8 |
+
+**Every category**
+
+| Category | n | ran | not run | lost | similarity (ran) | similarity (all n) | milestone (ran) | milestone (all n) | minefield (ran) | exact | passed | turns (ran) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `ALL_CATEGORIES` | 24 | 24 | 0 | 0 | 0.593 | 0.593 | 0.802 | 0.802 | 0.208 | 3/24 | 5/24 | 24.3 |
+| `STATE_DEPENDENCY` | 16 | 16 | 0 | 0 | 0.703 | 0.703 | 0.703 | 0.703 | 0.000 | 0/16 | 2/16 | 21.6 |
+| `INSUFFICIENT_INFORMATION` | 8 | 8 | 0 | 0 | 0.375 | 0.375 | 1.000 | 1.000 | 0.625 | 3/8 | 3/8 | 29.8 |
+| `MULTIPLE_TOOL_CALL` | 16 | 16 | 0 | 0 | 0.703 | 0.703 | 0.703 | 0.703 | 0.000 | 0/16 | 2/16 | 21.6 |
+| `SINGLE_USER_TURN` | 16 | 16 | 0 | 0 | 0.703 | 0.703 | 0.703 | 0.703 | 0.000 | 0/16 | 2/16 | 21.6 |
+| `NO_DISTRACTION_TOOLS` | 3 | 3 | 0 | 0 | 0.501 | 0.501 | 0.834 | 0.834 | 0.333 | 0/3 | 0/3 | 24.3 |
+| `THREE_DISTRACTION_TOOLS` | 3 | 3 | 0 | 0 | 0.533 | 0.533 | 0.866 | 0.866 | 0.333 | 0/3 | 1/3 | 25.3 |
+| `TEN_DISTRACTION_TOOLS` | 3 | 3 | 0 | 0 | 0.919 | 0.919 | 0.919 | 0.919 | 0.000 | 1/3 | 1/3 | 21.3 |
+| `ALL_TOOLS_AVAILABLE` | 3 | 3 | 0 | 0 | 0.333 | 0.333 | 0.333 | 0.333 | 0.000 | 1/3 | 1/3 | 30.0 |
+| `TOOL_NAME_SCRAMBLED` | 3 | 3 | 0 | 0 | 0.529 | 0.529 | 0.863 | 0.863 | 0.333 | 0/3 | 1/3 | 23.3 |
+| `TOOL_DESCRIPTION_SCRAMBLED` | 3 | 3 | 0 | 0 | 0.834 | 0.834 | 0.834 | 0.834 | 0.000 | 1/3 | 1/3 | 25.0 |
+| `ARG_DESCRIPTION_SCRAMBLED` | 3 | 3 | 0 | 0 | 0.521 | 0.521 | 0.855 | 0.855 | 0.333 | 0/3 | 0/3 | 24.3 |
+| `ARG_TYPE_SCRAMBLED` | 3 | 3 | 0 | 0 | 0.577 | 0.577 | 0.910 | 0.910 | 0.333 | 0/3 | 0/3 | 20.7 |
+
+### `2c61ac87add6`, evolve candidate, generation 1
+
+- Run directory `box-smoke-llama-2/evolve/smoke-llama-2`; agent model `llama-3.3-70b-instruct`, user simulator model `gpt-5.6-luna`, temperature 0.0; tool-sandbox `c8571d785431`.
+- Started 2026-10-12T05:35:49+0000, finished ?.
+- 48 scenarios: 48 ran, 0 NOT RUN, 0 lost to the endpoint.
+
+**Headline categories**
+
+| Category | n | ran | not run | lost | similarity (ran) | similarity (all n) | milestone (ran) | milestone (all n) | minefield (ran) | exact | passed | turns (ran) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `ALL_CATEGORIES` | 48 | 48 | 0 | 0 | 0.535 | 0.535 | 0.576 | 0.576 | 0.042 | 6/48 | 14/48 | 23.7 |
+| `STATE_DEPENDENCY` | 16 | 16 | 0 | 0 | 0.551 | 0.551 | 0.551 | 0.551 | 0.000 | 0/16 | 4/16 | 22.0 |
+| `CANONICALIZATION` | 8 | 8 | 0 | 0 | 0.025 | 0.025 | 0.025 | 0.025 | 0.000 | 0/8 | 0/8 | 30.0 |
+| `INSUFFICIENT_INFORMATION` | 8 | 8 | 0 | 0 | 0.750 | 0.750 | 1.000 | 1.000 | 0.250 | 6/8 | 6/8 | 29.6 |
+
+**Every category**
+
+| Category | n | ran | not run | lost | similarity (ran) | similarity (all n) | milestone (ran) | milestone (all n) | minefield (ran) | exact | passed | turns (ran) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `ALL_CATEGORIES` | 48 | 48 | 0 | 0 | 0.535 | 0.535 | 0.576 | 0.576 | 0.042 | 6/48 | 14/48 | 23.7 |
+| `STATE_DEPENDENCY` | 16 | 16 | 0 | 0 | 0.551 | 0.551 | 0.551 | 0.551 | 0.000 | 0/16 | 4/16 | 22.0 |
+| `CANONICALIZATION` | 8 | 8 | 0 | 0 | 0.025 | 0.025 | 0.025 | 0.025 | 0.000 | 0/8 | 0/8 | 30.0 |
+| `INSUFFICIENT_INFORMATION` | 8 | 8 | 0 | 0 | 0.750 | 0.750 | 1.000 | 1.000 | 0.250 | 6/8 | 6/8 | 29.6 |
+| `SINGLE_TOOL_CALL` | 8 | 8 | 0 | 0 | 0.902 | 0.902 | 0.902 | 0.902 | 0.000 | 0/8 | 3/8 | 10.0 |
+| `MULTIPLE_TOOL_CALL` | 32 | 32 | 0 | 0 | 0.389 | 0.389 | 0.389 | 0.389 | 0.000 | 0/32 | 5/32 | 25.7 |
+| `SINGLE_USER_TURN` | 24 | 24 | 0 | 0 | 0.668 | 0.668 | 0.668 | 0.668 | 0.000 | 0/24 | 7/24 | 18.0 |
+| `MULTIPLE_USER_TURN` | 16 | 16 | 0 | 0 | 0.226 | 0.226 | 0.226 | 0.226 | 0.000 | 0/16 | 1/16 | 29.3 |
+| `NO_DISTRACTION_TOOLS` | 6 | 6 | 0 | 0 | 0.524 | 0.524 | 0.691 | 0.691 | 0.167 | 0/6 | 2/6 | 21.7 |
+| `THREE_DISTRACTION_TOOLS` | 6 | 6 | 0 | 0 | 0.554 | 0.554 | 0.554 | 0.554 | 0.000 | 1/6 | 2/6 | 24.3 |
+| `TEN_DISTRACTION_TOOLS` | 6 | 6 | 0 | 0 | 0.399 | 0.399 | 0.399 | 0.399 | 0.000 | 1/6 | 1/6 | 26.2 |
+| `ALL_TOOLS_AVAILABLE` | 6 | 6 | 0 | 0 | 0.316 | 0.316 | 0.316 | 0.316 | 0.000 | 1/6 | 1/6 | 26.2 |
+| `TOOL_NAME_SCRAMBLED` | 6 | 6 | 0 | 0 | 0.757 | 0.757 | 0.757 | 0.757 | 0.000 | 1/6 | 2/6 | 20.3 |
+| `TOOL_DESCRIPTION_SCRAMBLED` | 6 | 6 | 0 | 0 | 0.558 | 0.558 | 0.558 | 0.558 | 0.000 | 1/6 | 3/6 | 25.0 |
+| `ARG_DESCRIPTION_SCRAMBLED` | 6 | 6 | 0 | 0 | 0.475 | 0.475 | 0.642 | 0.642 | 0.167 | 0/6 | 1/6 | 23.8 |
+| `ARG_TYPE_SCRAMBLED` | 6 | 6 | 0 | 0 | 0.693 | 0.693 | 0.693 | 0.693 | 0.000 | 1/6 | 2/6 | 22.2 |
+
+### `66092c731162`, evolve parent_run_1, generation 1
 
 - Run directory `evolve/smoke-llama`; agent model `llama-3.3-70b-instruct`, user simulator model `gpt-5.6-luna`, temperature 0.0; tool-sandbox `c8571d785431`.
 - Started 2026-10-11T17:51:47-0400, finished ?.
@@ -201,6 +308,70 @@ every run is listed in [toolsandbox-scenarios.csv](toolsandbox-scenarios.csv).
 | `TOOL_NAME_SCRAMBLED` | 2 | 2 | 0 | 0 | 0.750 | 0.750 | 0.750 | 0.750 | 0.000 | 1/2 | 1/2 | 6.0 |
 | `TOOL_DESCRIPTION_SCRAMBLED` | 1 | 1 | 0 | 0 | 0.931 | 0.931 | 0.931 | 0.931 | 0.000 | 0/1 | 1/1 | 5.0 |
 | `ARG_DESCRIPTION_SCRAMBLED` | 2 | 2 | 0 | 0 | 0.990 | 0.990 | 0.990 | 0.990 | 0.000 | 1/2 | 2/2 | 8.0 |
+
+## Evolve runs
+
+Each evolve run measures the parent harness twice per generation on its held-out scenarios (and once on its train scenarios), lets the improver propose candidates from failed train conversations, evaluates some of them, and admits a candidate only through a signed decision whose checks all pass. Here a scenario passes at similarity 0.9 or more. Each evaluation is also listed above under `Runs`.
+
+### Evolve run `evolve-aborted-old-user-sim/smoke-llama`
+
+- agent model `llama-3.3-70b-instruct`, user model `llama-3.3-70b-instruct`, improver model `llama-3.3-70b-instruct`.
+- Stopped (`STOPPED.txt`): Aborted: it ran with llama-3.3-70b as the simulated user, replaced by evolve/smoke-llama with gpt-5.6-luna as the user simulator.
+- No decision was made.
+
+Parent runs (the parent harness measured twice per generation; train is run in the first only):
+
+| gen | parent | run | held-out passed | train passed | lost to the endpoint |
+|---|---|---|---|---|---|
+
+Candidates (every evaluated candidate, with its decision):
+
+| gen | candidate | kind | held-out passed | train passed | lost to the endpoint | decision | failed checks |
+|---|---|---|---|---|---|---|---|
+| | none | | | | | | |
+
+- Parent `66092c731162`: 6 recorded conversations that no finished evaluation counts (held-out passed 0/0, train passed 0/6). No decision rests on them.
+
+### Evolve run `evolve/smoke-llama`
+
+- agent model `llama-3.3-70b-instruct`, user model `gpt-5.6-luna`, improver model `llama-3.3-70b-instruct`.
+- Stopped (`STOPPED.txt`): Stopped at 16:00 PT (19:00 ET) during the seed harness's second held-out run, when the session running it was killed; its llama-3.3-70b endpoint (HiPerGator job 45568312) had been cancelled at 16:24 PT. The seed's first evaluation (48 episodes) is listed above; no generation ran.
+- No decision was made.
+
+Parent runs (the parent harness measured twice per generation; train is run in the first only):
+
+| gen | parent | run | held-out passed | train passed | lost to the endpoint |
+|---|---|---|---|---|---|
+| 1 | `66092c731162` | 1 | 4/24 | 2/24 | 11 of 48 |
+
+Candidates (every evaluated candidate, with its decision):
+
+| gen | candidate | kind | held-out passed | train passed | lost to the endpoint | decision | failed checks |
+|---|---|---|---|---|---|---|---|
+| | none | | | | | | |
+
+- Parent `66092c731162`: 44 recorded conversations that no finished evaluation counts (held-out passed 4/17, train passed 0/27). No decision rests on them.
+
+### Evolve run `box-smoke-llama-2/evolve/smoke-llama-2`
+
+- agent model `llama-3.3-70b-instruct`, user model `gpt-5.6-luna`, improver model `llama-3.3-70b-instruct`.
+- Finished: 1 of 1 planned generations ran.
+- Note (`NOTE.txt`): Candidate 2c61ac87add6 (one procedure) passed 10 of 24 held-out scenarios against the parent's 6 and 5 (train 4 of 24 against 5 of 24), with 6 stable recoveries, but was rejected: 2 held-out scenarios that passed in a parent run failed (toolsandbox-turn_on_location_low_battery_mode_3_distraction_tools_arg_description_scrambled and its tool_name_scrambled form), and 5 of the 11 must-succeed scenarios that passed in a parent run regressed. A scenario passes at similarity 0.9 or more. No conversation was lost.
+- Generation 1: 6 candidates proposed, 1 evaluated, 0 admitted.
+- 1 decision, 0 admitted, signed with key `b61d7e39c111`.
+
+Parent runs (the parent harness measured twice per generation; train is run in the first only):
+
+| gen | parent | run | held-out passed | train passed | lost to the endpoint |
+|---|---|---|---|---|---|
+| 1 | `66092c731162` | 1 | 6/24 | 5/24 | 0 of 48 |
+| 1 | `66092c731162` | 2 | 5/24 | not run | 0 of 24 |
+
+Candidates (every evaluated candidate, with its decision):
+
+| gen | candidate | kind | held-out passed | train passed | lost to the endpoint | decision | failed checks |
+|---|---|---|---|---|---|---|---|
+| 1 | `2c61ac87add6` | procedure | 10/24 | 4/24 | 0 of 48 | rejected | heldout, no_regression |
 
 ## Runs stopped before they finished
 
