@@ -14,6 +14,11 @@ another guard's decision. The child applies rlimits, a new network namespace, a 
 Landlock ruleset before it reads the guard source (see `_guard_child`), and reports which layers took
 effect; the runtime refuses to start a child that lacks a required layer.
 
+The child's code is read once, when this module is imported (`CHILD_SOURCE`), and handed to every child on its
+command line. A parent and its children therefore always speak one protocol version: a checkout that changes
+`_guard_child.py` under a running process never reaches that process's children. A startup reply outside the
+protocol is a `GuardInfrastructureError` that quotes the reply.
+
 Fail closed: a guard that does not compile, does not define `check`, raises, returns a non-string, runs
 past its time limit or kills its process yields a BLOCK decision with reason `GUARD_ERROR_REASON`, kind
 `guard_error`, and the underlying error in `GuardDecision.error`. Timed-out or dead children are killed and
@@ -55,6 +60,8 @@ GUARD_ERROR_REASON = "guard error"
 INFRASTRUCTURE_ERROR_REASON = "guard infrastructure error"
 DecisionKind = Literal["verdict", "guard_error", "infrastructure_error"]
 CHILD_PATH = Path(__file__).with_name("_guard_child.py")
+# Read once, with this module, so a running parent never starts a child of another version (module docstring).
+CHILD_SOURCE = CHILD_PATH.read_text(encoding="utf-8")
 ALL_LAYERS = ("rlimits", "netns", "seccomp", "landlock")
 
 
@@ -100,6 +107,10 @@ class GuardDecision:
     elapsed_s: float = 0.0
     kind: DecisionKind = "verdict"
 
+    def __post_init__(self) -> None:
+        if self.kind != "verdict" and not (isinstance(self.error, str) and self.error.strip()):
+            raise ValueError(f"a {self.kind} decision must carry its error message, got {self.error!r}")
+
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -135,6 +146,10 @@ def _infra_decision(guard_id: str, error: str) -> GuardDecision:
     )
 
 
+def _excerpt(reply: Mapping[str, Any]) -> str:
+    return json.dumps(reply, sort_keys=True, default=str)[:300]
+
+
 def compile_guard(source: str) -> None:
     """Parent-side syntax check. Compiling never executes the source."""
     try:
@@ -158,7 +173,7 @@ class GuardProcess:
         self._sent_history: list[Event] = []
         self._next = 0
         self._proc = subprocess.Popen(
-            [sys.executable, "-I", "-S", str(CHILD_PATH)],
+            [sys.executable, "-I", "-S", "-c", CHILD_SOURCE],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -189,17 +204,24 @@ class GuardProcess:
         except (TimeoutError, _ChildDiedError) as exc:
             raise GuardInfrastructureError(f"guard sandbox failed to start: {exc}") from exc
         reply = marker
-        if marker.get("loading"):
+        if marker.get("loading") is True:
             try:
                 reply = self._read(time.monotonic() + guard_bound)
             except (TimeoutError, _ChildDiedError) as exc:
                 raise GuardSourceError(f"guard failed to load: {exc}") from exc
-        self.isolation = dict(reply.get("isolation") or {})
-        if not reply.get("ready"):
-            error = str(reply.get("error"))
-            if error.startswith("isolation unavailable"):
-                raise SandboxUnavailableError(f"{error}; layers: {self.isolation}")
-            raise GuardSourceError(error)
+        isolation = reply.get("isolation")
+        self.isolation = dict(isolation) if isinstance(isolation, dict) else {}
+        if reply.get("ready") is True:
+            return
+        error = reply.get("error")
+        if reply.get("ready") is not False or not isinstance(error, str) or not error.strip():
+            # Not the guard's fault, and never reported as a guard error whose message is a missing field.
+            raise GuardInfrastructureError(
+                f"guard sandbox sent an out-of-protocol startup reply: {_excerpt(reply)}"
+            )
+        if error.startswith("isolation unavailable"):
+            raise SandboxUnavailableError(f"{error}; layers: {self.isolation}")
+        raise GuardSourceError(error)
 
     @property
     def alive(self) -> bool:

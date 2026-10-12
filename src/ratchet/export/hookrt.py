@@ -418,9 +418,13 @@ class GuardChild:
         except ChildError:
             self.close()
             raise
-        if not ready.get("ready"):
+        if ready.get("ready") is not True:
             self.close()
-            raise ChildError(f"{ready.get('error')}; layers: {ready.get('isolation')}")
+            error = ready.get("error")
+            if ready.get("ready") is not False or not isinstance(error, str) or not error.strip():
+                text = json.dumps(ready, sort_keys=True, default=str)[:300]
+                raise ChildError(f"guard sandbox sent an out-of-protocol startup reply: {text}")
+            raise ChildError(f"{error}; layers: {ready.get('isolation')}")
 
     @property
     def alive(self) -> bool:

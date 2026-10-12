@@ -10,7 +10,9 @@ is not committed; every number below is read from it and checked against the Atl
 
 Result: 0 of 84 candidate slots admitted (0 of 28 per arm). The search returned the seed instructions
 unchanged after 62 metric calls (budget 60). No guard from any arm reached a fresh evaluation, because every
-guard replay on the frozen batch ended incomplete (see [Guard replay](#guard-replay)).
+guard replay on the frozen batch ended incomplete. Those replays never ran the guards: a defect in the guard
+runtime, since fixed, failed every check (see [Guard replay](#guard-replay)). This run does not measure the
+three texts' guards and needs a rerun for that.
 
 ## What was compared
 
@@ -80,8 +82,31 @@ evaluated fresh.
 Earlier in the same run, the challenger's derivation on batch A replayed its 4 guards to complete verdicts
 (2 cleared, 2 failed). In the search, 0 of its 62 evaluations cleared a guard: 32 evaluations of the seed
 text and 2 of each of 15 proposed texts all scored 0 on both batch-A clusters, so no proposed text scored
-above the seed. The records do not say why the guard checks returned errors. This run therefore compares the
-three texts on procedures and prompt edits only; it does not measure their guards.
+above the seed.
+
+Cause. The guard runtime started each sandbox from the sandbox's source file on disk, read when the sandbox
+started. The run's process loaded the runtime at 21:11 UTC. By 21:24 UTC the checkout it ran
+from had moved to a sandbox version that opens with a new startup message (commit `341721f`). From then on every
+sandbox the run started spoke a protocol its runtime did not know; the runtime took the new message for a
+failed start and recorded the absent error field, `None`, as the error of every check. No guard code ran.
+Replaying three of these guards over their recorded traces reproduces it: with the run's runtime and the newer
+sandbox file every check errors with `None`; with a consistent runtime the same guards give complete verdicts
+(2 rejected, 1 incomplete on a real `AttributeError` in the guard). Commit `b164c59` fixes it: the runtime now
+reads the sandbox source once, when it is loaded, and a startup message outside the protocol is an
+infrastructure error that quotes the message.
+
+What it touched in this run, from the Atlas records and the run file:
+
+| Replay | Affected | Evidence |
+|---|---|---|
+| Frozen-batch screen, all arms | 44 of 44 guards, 3,271 of 3,271 checks | every error text is `None` |
+| Challenger derivation, screen | 0 of 4 guards | complete verdicts |
+| Challenger derivation, replay check at admission | 2 of 2 guard decisions, 276 of 276 checks | all checks errored, 21:24 to 21:25 UTC |
+| Search, 62 evaluations | not measurable per check | the search ran from 21:25 to 22:56 UTC, after the change; its record keeps only the count of cleared guards (0 in all 62) |
+
+The two derivation decisions also failed the held-out, no-regression and benign-twin checks. This run
+therefore compares the three texts on procedures and prompt edits only; it does not measure their guards or
+the search.
 
 ## Admission decisions in Atlas
 
@@ -121,6 +146,11 @@ scored 0.1944 on batch A against the seed's 0.1389. The challenger was `a5d88dba
 | seed | `942dc26006bf` | 8 / 8 | 4 / 2 / 2 | 3 | 2 / 0 / 0 | 5 | 0 / 8 |
 | challenger | `a5d88dbad0c8` | 8 / 8 | 4 / 2 / 2 | 2 | 2 / 1 / 0 | 5 | 0 / 8 |
 | search | `eb0ed1cfd7ba` | 7 / 8 | 4 / 1 / 2 | 1 | 2 / 2 / 0 | 4 | 0 / 8 |
+
+The same defect reached `level2-run1` at its end: the replay check at admission errored on all 151 checks
+for each of the 6 guard decisions of its frozen batch (2 per arm), decided from 21:42 to 21:45 UTC. Each of
+those 6 also failed the held-out, no-regression and benign-twin checks, so its 0 admitted stands. Its screen
+replays (27 guards) and its 9 derivation decisions with a guard ran before the change and are complete.
 
 `level2-run2` swapped the family split (families A `ordinary`, `policy_changed`, `reconciliation` and
 `refund_lost_reply`), and its improver formed 2 batch-A and 10 frozen clusters. It stopped at its 7,200 s

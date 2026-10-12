@@ -150,3 +150,10 @@ def test_similarity_order_puts_target_like_traces_first() -> None:
 
     order = similarity_order([good_plain(1), good_timeout(2)], [bad_timeout(3)], "payments_refund")
     assert [t.run_id for t in order] == ["plain-1", "good-2"]
+
+
+@pytest.mark.parametrize("error", ["", "  "])
+def test_a_failed_check_must_say_why(error: str) -> None:
+    with pytest.raises(ValueError, match="must carry its error message"):
+        Verdict(None, error)
+    assert Verdict(None, "RuntimeError: boom").error == "RuntimeError: boom" and Verdict("no").error is None
