@@ -15,13 +15,12 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ratchet_cases.types import ToolCall, Trace
+from ratchet_cases.world import AGENT, World
 from rich.console import Group, RenderableType
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-
-from ratchet.types import ToolCall, Trace
-from ratchet.world import AGENT, World
 
 READ_MARKS = ("_get", "_list")
 

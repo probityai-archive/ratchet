@@ -17,6 +17,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+from ratchet_cases.cases.model import Case, Expect
+from ratchet_cases.types import Cost, Trace
+from ratchet_cases.world import World
+
 import ratchet.bench.tau2  # noqa: F401  # sets TAU2_DATA_DIR before tau2-bench is imported
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ChatModel
@@ -24,9 +28,7 @@ from ratchet.agent.worker import RunLimits, run_case
 from ratchet.bench.tau2.conversation import CLOSED, ConversationModel
 from ratchet.bench.tau2.tasks import DEFAULT_SEED, Domain, Tau2Case, load_tasks
 from ratchet.bench.tau2.world import RESPOND, VIEWS, PuppetAgent, Tau2World, outcome_of
-from ratchet.cases.model import Case, Expect
-from ratchet.types import Cost, Harness, Trace
-from ratchet.world import World
+from ratchet.types import Harness
 
 MAX_STEPS = 200  # tau2-bench's DEFAULT_MAX_STEPS: orchestrator steps (agent, user and tool messages)
 MAX_ERRORS = 10  # tau2-bench's DEFAULT_MAX_ERRORS

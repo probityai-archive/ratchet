@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from ratchet_cases.cases.build import Company
+from ratchet_cases.cases.model import Case, Expect
+
 from ratchet.agent.model import ModelTurn, ScriptedModel, scripted_turn
 from ratchet.agent.seed import seed_harness
 from ratchet.agent.worker import run_case
-from ratchet.cases.build import Company
-from ratchet.cases.model import Case, Expect
 from ratchet.types import Guard
 
 

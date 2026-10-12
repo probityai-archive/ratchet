@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
-from ratchet.cases.grading import grade_state
-from ratchet.cases.model import Case
+from ratchet_cases.cases.grading import grade_state
+from ratchet_cases.cases.model import Case
+from ratchet_cases.types import Trace, canonical_json
+from ratchet_cases.world.core import World
+
 from ratchet.improve.sim import Step, Walk, result_ids, tool_call_of
-from ratchet.types import Trace, canonical_json
-from ratchet.world.core import World
 
 
 class WorldSimulator:

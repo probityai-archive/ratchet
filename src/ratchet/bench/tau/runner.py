@@ -16,15 +16,17 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import Any, cast
 
+from ratchet_cases.cases.model import Case, Expect
+from ratchet_cases.types import Cost, Trace
+from ratchet_cases.world import World
+
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ChatModel
 from ratchet.agent.worker import RunLimits, run_case
 from ratchet.bench.tau.conversation import CLOSED, OUT_OF_ACTIONS, ConversationModel
 from ratchet.bench.tau.tasks import VIEW_TABLES, Domain, TauCase
 from ratchet.bench.tau.world import RESPOND, TauWorld, outcome_of
-from ratchet.cases.model import Case, Expect
-from ratchet.types import Cost, Harness, Trace
-from ratchet.world import World
+from ratchet.types import Harness
 
 MAX_ACTIONS = 30  # tau-bench's `max_num_steps` for the tool-calling agent
 USER_PROVIDER = "openai"

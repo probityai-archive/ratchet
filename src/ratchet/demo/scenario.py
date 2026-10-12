@@ -18,11 +18,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ratchet_cases.cases import all_cases
+from ratchet_cases.cases.model import Case
+from ratchet_cases.types import Trace, sha256_hex
+
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.seed import seed_harness
 from ratchet.agent.worker import run_case
-from ratchet.cases import all_cases
-from ratchet.cases.model import Case
 from ratchet.demo.worker import LABEL, NAME, ScriptedDemoWorker
 from ratchet.improve.activate import Activator
 from ratchet.improve.admit import Decision, admit, awaiting_confirmation
@@ -34,7 +36,7 @@ from ratchet.improve.overfit import training_literals
 from ratchet.improve.receipt import Signer, receipt
 from ratchet.improve.replay import GuardRunner, ReplayReport, WalkCache, replay
 from ratchet.improve.sim import Simulator
-from ratchet.types import Guard, Harness, Trace, sha256_hex
+from ratchet.types import Guard, Harness
 
 CASE_IDS = (
     "refund_lost_reply.v1", "refund_lost_reply.v2", "refund_lost_reply.v3", "refund_lost_reply.v4",

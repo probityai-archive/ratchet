@@ -24,6 +24,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from ratchet_cases.types import Trace
+
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ModelClient, ModelConfig
 from ratchet.bench.tau.report import collect, render, summarize
@@ -36,7 +38,7 @@ from ratchet.improve.loop import Lab, evolve
 from ratchet.improve.receipt import Signer
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.improve.sim import RecordedViews
-from ratchet.types import Harness, Trace
+from ratchet.types import Harness
 
 
 def load_harness(spec: str, domain: Domain, root: Path) -> Harness:

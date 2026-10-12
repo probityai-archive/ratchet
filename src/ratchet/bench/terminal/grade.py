@@ -19,10 +19,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from ratchet_cases.types import Cost, Outcome
+
 from ratchet.bench.terminal.container import Container
 from ratchet.bench.terminal.tasks import TaskSpec
 from ratchet.bench.terminal.world import TerminalWorld
-from ratchet.types import Cost, Outcome
 
 TESTS_DIR = "/tests"
 VERIFIER_DIR = "/logs/verifier"

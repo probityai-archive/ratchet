@@ -35,6 +35,8 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
+from ratchet_cases.types import Trace
+
 import ratchet.bench.tau2  # noqa: F401  # sets TAU2_DATA_DIR before tau2-bench is imported
 from ratchet.agent.model import ModelClient, ModelConfig
 from ratchet.bench.tau2.data import (
@@ -72,7 +74,7 @@ from ratchet.bench.tau2.tasks import (
     trial_seeds,
 )
 from ratchet.improve.evaluate import INFRA_RETRIES, is_infra_failure
-from ratchet.types import Guard, Harness, Procedure, Trace
+from ratchet.types import Guard, Harness, Procedure
 
 Log = Callable[[str], None]
 

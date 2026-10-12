@@ -302,7 +302,7 @@ def test_replay_coverage_is_n_of_n_when_complete_and_incomplete_when_a_guard_err
 
 
 def test_a_trace_whose_views_were_not_recorded_cannot_be_checked() -> None:
-    from ratchet.types import Event, Trace
+    from ratchet_cases.types import Event, Trace
 
     t = sample_traces()[0]
     bare = [Event(e.seq, e.kind, {k: v for k, v in e.payload.items() if k != "view"}, e.ts) for e in t.events]

@@ -8,10 +8,10 @@ from typing import Any
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from ratchet_cases.types import canonical_json
 from rich.console import Console
 
 from ratchet.improve.receipt import DECISION_TYPE, ReceiptError, Signer
-from ratchet.types import canonical_json
 from ratchet.view.verify import (
     _independent,
     render_verify,

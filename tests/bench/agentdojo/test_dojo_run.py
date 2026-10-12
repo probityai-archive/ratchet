@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from dojo_fakes import GroundTruthModel
+from ratchet_cases.cases.model import Case
 
 from ratchet.agent.model import Message, ModelTurn, ToolSpec, scripted_turn
 from ratchet.agent.worker import RunLimits
@@ -19,7 +20,6 @@ from ratchet.bench.agentdojo.run import (
     seed_harness,
 )
 from ratchet.bench.agentdojo.world import ATTACK_SUCCEEDED, UTILITY_MISSED
-from ratchet.cases.model import Case
 from ratchet.types import Guard, Harness
 
 PROMPT_4 = "refund GB29NWBK60161331926819"

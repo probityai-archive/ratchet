@@ -7,10 +7,12 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from ratchet_cases.types import Cost, Event, Outcome, Trace
+
 from ratchet.improve.replay import GuardInput, Verdict, WalkCache
 from ratchet.improve.sim import RecordedViews
 from ratchet.store import ChangeEvent
-from ratchet.types import Cost, Event, Guard, Harness, Outcome, Trace
+from ratchet.types import Guard, Harness
 from ratchet.view.matrix import CaseInfo
 
 

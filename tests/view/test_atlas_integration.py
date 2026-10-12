@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from ratchet_cases.types import Trace, canonical_json
 from rich.console import Console
 
 from ratchet.cli import LiveBackend, main
@@ -20,7 +21,7 @@ from ratchet.improve.receipt import DECISION_TYPE, Signer
 from ratchet.improve.replay import GuardRunner
 from ratchet.improve.sim import RecordedViews, Simulator
 from ratchet.store import Store
-from ratchet.types import Harness, Trace, canonical_json
+from ratchet.types import Harness
 from ratchet.view.matrix import CaseInfo
 
 from .fakes import RULES, FakeRunner, info, make_trace, sample_guards, sample_traces

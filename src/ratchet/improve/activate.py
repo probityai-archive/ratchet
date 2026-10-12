@@ -19,8 +19,7 @@ from typing import Any, Protocol
 from pymongo import MongoClient
 from pymongo.client_session import ClientSession
 from pymongo.errors import DuplicateKeyError
-
-from ratchet.types import sha256_hex
+from ratchet_cases.types import sha256_hex
 
 ACTIVE_ID = "worker"
 

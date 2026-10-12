@@ -31,6 +31,7 @@ from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
     Function,
 )
+from ratchet_cases.types import Cost, Outcome, ToolCall, ToolResult
 from tool_sandbox.common.execution_context import (
     DatabaseNamespace,
     ExecutionContext,
@@ -52,7 +53,6 @@ from tool_sandbox.roles.execution_environment import (
 
 from ratchet.bench.toolsandbox.gate import GATE
 from ratchet.bench.toolsandbox.grading import Graded, grade, reasons_for
-from ratchet.types import Cost, Outcome, ToolCall, ToolResult
 
 RESPOND = "respond"
 RESPOND_SPEC: dict[str, Any] = {

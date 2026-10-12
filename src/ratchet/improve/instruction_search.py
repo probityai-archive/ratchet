@@ -37,6 +37,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from ratchet_cases.types import Trace, canonical_json, sha256_hex
+
 from ratchet.improve.admit import GATES, Decision, admit, awaiting_confirmation
 from ratchet.improve.diagnose import FailureCluster, FailurePoint, diagnose
 from ratchet.improve.evaluate import CaseLike, EvalReport, RunCase, evaluate_many
@@ -48,7 +50,7 @@ from ratchet.improve.propose import SEED, Candidate, Instructions, Proposal, pro
 from ratchet.improve.receipt import Signer, receipt
 from ratchet.improve.replay import GuardRunner, ReplayReport, WalkCache, replay
 from ratchet.improve.sim import Simulator
-from ratchet.types import Guard, Harness, Trace, canonical_json, sha256_hex
+from ratchet.types import Guard, Harness
 
 if TYPE_CHECKING:
     from gepa.core.adapter import EvaluationBatch, ProposalFn
@@ -1099,11 +1101,12 @@ def _args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from ratchet_cases.cases import all_cases
+
     from ratchet.agent.guards import GuardRuntime
     from ratchet.agent.model import ModelClient, ModelConfig
     from ratchet.agent.seed import seed_harness
     from ratchet.agent.worker import run_case
-    from ratchet.cases import all_cases
     from ratchet.improve.sandbox import SandboxRunner
     from ratchet.improve.worldsim import WorldSimulator
     from ratchet.store import Store as AtlasStore

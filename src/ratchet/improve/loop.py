@@ -25,8 +25,10 @@ import base64
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Protocol
+
+from ratchet_cases import released_digest
+from ratchet_cases.types import Trace, canonical_json, sha256_hex
 
 from ratchet.improve.activate import ActivationError, Activator
 from ratchet.improve.admit import Decision, admit, awaiting_confirmation
@@ -39,17 +41,12 @@ from ratchet.improve.propose import SEED, Candidate, Instructions, propose, revi
 from ratchet.improve.receipt import Signer, receipt
 from ratchet.improve.replay import GuardRunner, ReplayReport, WalkCache, replay
 from ratchet.improve.sim import Simulator
-from ratchet.types import Guard, Harness, Procedure, Trace, canonical_json, sha256_hex
-
-FROZEN_SUITE_FILE = Path(__file__).resolve().parents[1] / "cases" / "FROZEN.sha256"
+from ratchet.types import Guard, Harness, Procedure
 
 
-def frozen_suite_digest(path: Path = FROZEN_SUITE_FILE) -> str | None:
-    """The case suite's frozen digest, published by the case lane, or None until it exists."""
-    if not path.is_file():
-        return None
-    words = path.read_text(encoding="utf-8").split()
-    return words[0] if words else None
+def frozen_suite_digest() -> str:
+    """The case suite digest the installed `ratchet-cases` release was published with."""
+    return released_digest()
 
 
 class ParentChooser(Protocol):

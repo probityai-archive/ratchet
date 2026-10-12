@@ -39,12 +39,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Protocol
 
+from ratchet_cases.cases.grade import grade
+from ratchet_cases.cases.model import Case
+from ratchet_cases.types import Event, EventKind, Outcome, ToolCall, ToolResult, Trace
+from ratchet_cases.world import World
+
 from ratchet.agent.guards import GuardDecision, GuardRuntime
 from ratchet.agent.model import ChatModel, Message, ModelError, ModelTurn, ToolSpec
-from ratchet.cases.grade import grade
-from ratchet.cases.model import Case
-from ratchet.types import Event, EventKind, Harness, Outcome, Procedure, ToolCall, ToolResult, Trace
-from ratchet.world import World
+from ratchet.types import Harness, Procedure
 
 READ_PROCEDURE = "read_procedure"
 

@@ -17,6 +17,10 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import Any, cast
 
+from ratchet_cases.cases.model import Case, Expect
+from ratchet_cases.types import Cost, Event, Outcome, Trace
+from ratchet_cases.world import World
+
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ChatModel, Message, ModelTurn, ToolSpec
 from ratchet.agent.worker import RunLimits, run_case
@@ -24,9 +28,7 @@ from ratchet.bench.terminal.container import Container, DockerContainer
 from ratchet.bench.terminal.grade import outcome_of, verify
 from ratchet.bench.terminal.tasks import TaskSpec, TerminalCase
 from ratchet.bench.terminal.world import TOOL_NAMES, TerminalWorld
-from ratchet.cases.model import Case, Expect
-from ratchet.types import Cost, Event, Harness, Outcome, Trace
-from ratchet.world import World
+from ratchet.types import Harness
 
 AGENT_TIMEOUT = "agent_timeout"
 TICKET = "terminal-task"

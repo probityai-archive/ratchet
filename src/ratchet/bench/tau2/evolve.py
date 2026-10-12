@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from cryptography.hazmat.primitives import serialization
+from ratchet_cases.types import Trace
 
 import ratchet.bench.tau2  # noqa: F401  # sets TAU2_DATA_DIR before tau2-bench is imported
 from ratchet.agent.guards import GuardRuntime
@@ -36,7 +37,7 @@ from ratchet.improve.loop import Lab, evolve
 from ratchet.improve.receipt import Signer
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.improve.sim import RecordedViews
-from ratchet.types import Harness, Trace
+from ratchet.types import Harness
 
 Log = Callable[[str], None]
 

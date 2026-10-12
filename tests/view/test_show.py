@@ -4,9 +4,9 @@ import io
 from typing import Any
 
 import pytest
+from ratchet_cases.types import Event, Trace
 from rich.console import Console
 
-from ratchet.types import Event, Trace
 from ratchet.view.data import decision_info
 from ratchet.view.show import (
     clip,

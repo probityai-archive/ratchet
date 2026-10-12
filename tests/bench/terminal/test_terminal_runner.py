@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from ratchet_cases.types import Event
 from terminal_testkit import Clock, Command, FakeContainer, make_task
 
 from ratchet.agent.model import ModelTurn, ScriptedModel, scripted_turn
@@ -12,7 +13,6 @@ from ratchet.bench.terminal import runner as R
 from ratchet.bench.terminal.container import Container
 from ratchet.bench.terminal.tasks import TaskSpec, TerminalCase, load_suite, task_cases
 from ratchet.bench.terminal.world import TerminalWorld
-from ratchet.types import Event
 
 
 def one_case(tmp_path: Path) -> TerminalCase:

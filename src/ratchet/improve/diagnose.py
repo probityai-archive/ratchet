@@ -19,10 +19,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from ratchet_cases.types import Event, Trace, canonical_json, sha256_hex
+
 from ratchet.improve.evaluate import is_infra_failure
 from ratchet.improve.llm import Chat, Meter, ask_json
 from ratchet.improve.sim import Simulator, Walk, call_of, last_seq
-from ratchet.types import Event, Trace, canonical_json, sha256_hex
 
 Mode = Literal["commission", "omission", "unlocated"]
 

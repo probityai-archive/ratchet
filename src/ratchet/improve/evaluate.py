@@ -19,7 +19,9 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 
-from ratchet.types import Cost, Harness, Split, Trace
+from ratchet_cases.types import Cost, Split, Trace
+
+from ratchet.types import Harness
 
 Mode = Literal["FRESH", "RECORDED", "CACHED"]
 CaseKind = str  # "trap", "benign_twin" or "must_succeed", as the case suite labels them

@@ -18,12 +18,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from ratchet_cases.types import Trace
 from rich.console import Console
 from rich.text import Text
 
 from ratchet.improve.replay import GuardRunner, WalkCache
 from ratchet.improve.sim import Simulator
-from ratchet.types import Harness, Trace
+from ratchet.types import Harness
 from ratchet.view import resume as resume_view
 from ratchet.view.data import (
     CandidateRef,
@@ -133,7 +134,7 @@ class LiveBackend:
         return seed_harness()
 
     def cases(self, split: str, family: str | None, ids: Sequence[str]) -> list[Any]:
-        from ratchet.cases import all_cases
+        from ratchet_cases.cases import all_cases
 
         wanted = ("train", "heldout") if split == "all" else (split,)
         found = [
@@ -146,7 +147,7 @@ class LiveBackend:
         return found
 
     def get_case(self, case_id: str) -> Any:
-        from ratchet.cases import get
+        from ratchet_cases.cases import get
 
         try:
             return get(case_id)
@@ -154,7 +155,7 @@ class LiveBackend:
             raise CliError(f"unknown case {case_id!r}") from exc
 
     def committed_calls(self, case: Any, saved: Mapping[str, Any]) -> dict[str, bool] | None:
-        from ratchet.world import World
+        from ratchet_cases.world import World
 
         return resume_view.audit_commits(saved, lambda: World.from_case(case))
 
@@ -164,7 +165,7 @@ class LiveBackend:
         return run_case(harness, case, model, store, run_id=run_id)
 
     def case_info(self, case_id: str) -> CaseInfo | None:
-        from ratchet.cases import all_cases
+        from ratchet_cases.cases import all_cases
 
         for c in all_cases():
             if c.id == case_id:
@@ -195,9 +196,10 @@ class LiveBackend:
         repeats: int,
         log: Callable[[str], None],
     ) -> EvolveSummary:
+        from ratchet_cases.cases import all_cases
+
         from ratchet.agent.guards import GuardRuntime
         from ratchet.agent.worker import run_case
-        from ratchet.cases import all_cases
         from ratchet.improve.activate import MongoActivator
         from ratchet.improve.loop import Lab, evolve
         from ratchet.improve.receipt import Signer
@@ -228,7 +230,8 @@ class LiveBackend:
         return _Sandbox(GuardRuntime(), SandboxRunner)
 
     def simulator(self) -> Simulator:
-        from ratchet.cases import all_cases
+        from ratchet_cases.cases import all_cases
+
         from ratchet.improve.worldsim import WorldSimulator
 
         return WorldSimulator(all_cases())

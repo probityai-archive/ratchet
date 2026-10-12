@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 import pytest
+from ratchet_cases.cases.registry import by_split
+from ratchet_cases.types import Cost, Event, Outcome, Trace
 
 from ratchet.agent.model import ScriptedModel, scripted_turn
 from ratchet.agent.seed import seed_harness
@@ -22,8 +24,7 @@ from ratchet.bench.transfer.run import (
     trace_docs,
     trace_summary,
 )
-from ratchet.cases.registry import by_split
-from ratchet.types import Cost, Event, Guard, Harness, Outcome, Trace
+from ratchet.types import Guard, Harness
 
 
 def candidate() -> Harness:

@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from ratchet_cases.world import World
+
 from ratchet.types import Harness
-from ratchet.world import World
 
 SEED_PROMPT = """\
 You are a customer support agent for an online store. You resolve the customer's ticket by using the tools \

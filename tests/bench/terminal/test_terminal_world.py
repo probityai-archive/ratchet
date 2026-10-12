@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import pytest
+from ratchet_cases.types import ToolCall, ToolResult
 from terminal_testkit import Clock, Command, FakeContainer
 
 from ratchet.bench.terminal import world as W
 from ratchet.bench.terminal.container import ExecResult
-from ratchet.types import ToolCall, ToolResult
 
 
 def make(

@@ -17,11 +17,13 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from ratchet_cases.types import Trace, canonical_json, sha256_hex
+
 from ratchet.improve.diagnose import FailureCluster, FailurePoint, excerpt
 from ratchet.improve.llm import Chat, Meter, ask_json
 from ratchet.improve.replay import ReplayReport, WalkCache
 from ratchet.improve.sim import call_of
-from ratchet.types import Guard, Harness, Procedure, Trace, canonical_json, sha256_hex
+from ratchet.types import Guard, Harness, Procedure
 
 Kind = Literal["guard", "procedure", "prompt_edit"]
 KINDS: tuple[Kind, ...] = ("guard", "procedure", "prompt_edit")

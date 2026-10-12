@@ -20,8 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import httpx
-
-from ratchet.types import Cost, ToolCall
+from ratchet_cases.types import Cost, ToolCall
 
 Message = dict[str, Any]
 ToolSpec = dict[str, Any]

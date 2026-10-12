@@ -24,6 +24,7 @@ from urllib.parse import quote, urlsplit
 import pytest
 from pymongo import MongoClient
 from pymongo.errors import OperationFailure
+from ratchet_cases.types import Trace
 
 from ratchet.improve.admit import admit
 from ratchet.improve.diagnose import FailureCluster, diagnose
@@ -44,7 +45,7 @@ from ratchet.improve.recall import (
 from ratchet.improve.replay import ReplayReport, WalkCache, replay
 from ratchet.store import Store, VoyageEmbedder, atlas_admin
 from ratchet.store.embed import EMBEDDING_DIMS, InputType
-from ratchet.types import Harness, Trace
+from ratchet.types import Harness
 
 from .fakes import (
     BLOCK_ALL_REFUNDS,

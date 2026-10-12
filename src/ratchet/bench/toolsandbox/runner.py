@@ -20,6 +20,9 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import Any, cast
 
+from ratchet_cases.cases.model import Case, Expect
+from ratchet_cases.types import Cost, Event, Outcome, Trace
+from ratchet_cases.world import World
 from tool_sandbox.common.execution_context import (
     TOOL_AUGMENTATION_TYPE,
     DatabaseNamespace,
@@ -39,9 +42,7 @@ from ratchet.bench.toolsandbox.gate import GATE
 from ratchet.bench.toolsandbox.grading import Graded
 from ratchet.bench.toolsandbox.user import EndpointUser
 from ratchet.bench.toolsandbox.world import RESPOND, ToolSandboxWorld, UserFactory
-from ratchet.cases.model import Case, Expect
-from ratchet.types import Cost, Event, Harness, Outcome, Trace
-from ratchet.world import World
+from ratchet.types import Harness
 
 NOT_RUN = "NOT RUN"
 OnGraded = Callable[[ToolSandboxCase, Trace, Graded], None]

@@ -13,7 +13,9 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from ratchet.types import Guard, Harness, Trace
+from ratchet_cases.types import Trace
+
+from ratchet.types import Guard, Harness
 from ratchet.view.admission import check_reasons
 
 Doc = dict[str, Any]

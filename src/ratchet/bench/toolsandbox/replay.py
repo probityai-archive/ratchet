@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from ratchet_cases.types import Event, Trace
 from tool_sandbox.common.execution_context import RoleType
 from tool_sandbox.common.message_conversion import Message
 from tool_sandbox.roles.base_role import BaseRole
@@ -28,7 +29,6 @@ from ratchet.bench.toolsandbox.cases import scenarios
 from ratchet.bench.toolsandbox.grading import reasons_for
 from ratchet.bench.toolsandbox.world import RESPOND, ToolSandboxWorld
 from ratchet.improve.sim import Step, Walk, tool_call_of
-from ratchet.types import Event, Trace
 
 END = ""  # a reply of "" ends the conversation
 CASE_PREFIX = "toolsandbox-"

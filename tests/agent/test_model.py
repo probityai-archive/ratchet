@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 import pytest
+from ratchet_cases.types import ToolCall
 
 from ratchet.agent.model import (
     ModelClient,
@@ -17,7 +18,6 @@ from ratchet.agent.model import (
     parse_completion,
     scripted_turn,
 )
-from ratchet.types import ToolCall
 
 SECRET = "sk-test-secret-value"
 

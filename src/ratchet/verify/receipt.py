@@ -16,8 +16,8 @@ from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from probity_verify import CaseError, adjudicate  # type: ignore[import-untyped]
+from ratchet_cases.types import canonical_json, sha256_hex
 
-from ratchet.types import canonical_json, sha256_hex
 from ratchet.verify import adapter
 from ratchet.verify.dsse import keyid_of
 from ratchet.verify.keys import raw_b64

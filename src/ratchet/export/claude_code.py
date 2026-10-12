@@ -30,11 +30,12 @@ from pathlib import Path
 from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from ratchet_cases.types import sha256_hex
 
 from ratchet.agent.guards import CHILD_PATH, GuardLimits
 from ratchet.export import hookrt
 from ratchet.improve.receipt import ReceiptError, key_id, verify
-from ratchet.types import Guard, Harness, Procedure, sha256_hex
+from ratchet.types import Guard, Harness, Procedure
 
 RUNTIME_PATH = Path(hookrt.__file__)
 RUNTIME_BEGIN = hookrt.RUNTIME_BEGIN

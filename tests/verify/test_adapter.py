@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 from probity_verify import CaseError, adjudicate  # type: ignore[import-untyped]
+from ratchet_cases.types import sha256_hex
 
 from ratchet.improve.receipt import Signer
-from ratchet.types import sha256_hex
 from ratchet.verify import adapter
 from ratchet.verify.keys import raw_b64
 from ratchet.verify.receipt import Options, _build

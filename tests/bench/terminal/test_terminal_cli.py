@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from ratchet_cases.types import Cost, Outcome, Trace
 from terminal_testkit import FakeContainer, make_task
 
 from ratchet.agent.model import ScriptedModel, scripted_turn
@@ -14,7 +15,7 @@ from ratchet.bench.terminal import report
 from ratchet.bench.terminal import tasks as T
 from ratchet.bench.terminal.container import Container
 from ratchet.bench.terminal.runner import seed_harness
-from ratchet.types import Cost, Harness, Outcome, Trace
+from ratchet.types import Harness
 
 
 def suite(root: Path) -> Path:

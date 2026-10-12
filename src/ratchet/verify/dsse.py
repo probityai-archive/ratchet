@@ -15,8 +15,7 @@ from dataclasses import dataclass
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
-from ratchet.types import sha256_hex
+from ratchet_cases.types import sha256_hex
 
 MAX_ENVELOPE_BYTES = 4 * 1024 * 1024
 

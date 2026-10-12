@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
+from ratchet_cases.types import ToolCall
 from tool_sandbox.common.evaluation import (
     Milestone,
     SnapshotConstraint,
@@ -21,7 +22,6 @@ from ratchet.bench.toolsandbox.grading import (
     message_label,
     reasons_for,
 )
-from ratchet.types import ToolCall
 
 
 def _graded(

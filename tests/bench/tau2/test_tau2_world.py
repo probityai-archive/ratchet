@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from ratchet_cases.types import Cost, ToolCall
 from tau2_testkit import STOP, ScriptedUser, make_world, task
 
 from ratchet.bench.tau2.world import (
@@ -15,7 +16,6 @@ from ratchet.bench.tau2.world import (
     record_diffs,
     reward_reasons,
 )
-from ratchet.types import Cost, ToolCall
 
 
 def test_start_runs_until_the_customer_opens() -> None:

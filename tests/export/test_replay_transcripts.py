@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from ratchet_cases.types import Event
 
 from ratchet.agent.guards import CHILD_PATH, GuardLimits, GuardRuntime
 from ratchet.export import hookrt
@@ -14,7 +15,7 @@ from ratchet.export.replay_transcripts import (
     main,
     replay_transcripts,
 )
-from ratchet.types import Event, Guard
+from ratchet.types import Guard
 
 from .synth import Session, hook_event
 

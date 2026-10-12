@@ -5,6 +5,9 @@ from collections.abc import Iterator, Mapping
 from typing import Any, cast
 
 import pytest
+from ratchet_cases.cases.model import Case, Expect
+from ratchet_cases.types import Outcome, ToolCall, ToolResult, Trace
+from ratchet_cases.world import World
 
 from ratchet.agent.guards import GUARD_ERROR_REASON, GuardInfrastructureError, GuardLimits, GuardRuntime
 from ratchet.agent.model import ModelError, ModelTurn, ScriptedModel, scripted_turn
@@ -18,9 +21,7 @@ from ratchet.agent.worker import (
     run_case,
     system_prompt,
 )
-from ratchet.cases.model import Case, Expect
-from ratchet.types import Guard, Harness, Outcome, Procedure, ToolCall, ToolResult, Trace
-from ratchet.world import World
+from ratchet.types import Guard, Harness, Procedure
 
 
 class FakeView:

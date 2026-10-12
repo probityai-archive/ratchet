@@ -41,10 +41,11 @@ from pathlib import Path
 from typing import IO, Any
 
 import httpx
+from ratchet_cases.types import Event, EventKind, ToolCall, sha256_hex
 
 from ratchet.agent.guards import GuardDecision, GuardRuntime
 from ratchet.export.claude_code import ExportError, harness_from_json, trusted_keys, verify_admission
-from ratchet.types import Event, EventKind, Guard, ToolCall, sha256_hex
+from ratchet.types import Guard
 
 Write = Callable[[bytes], None]
 

@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from ratchet_cases.types import to_jsonable
 from toolsandbox_testkit import Steady, user_factory
 
 from ratchet.bench.toolsandbox import __main__ as cli
 from ratchet.bench.toolsandbox.cases import ToolSandboxCase
 from ratchet.bench.toolsandbox.replay import END
 from ratchet.bench.toolsandbox.runner import seed_harness
-from ratchet.types import to_jsonable
 
 
 @pytest.fixture

@@ -16,16 +16,17 @@ from pathlib import Path
 from typing import Any, cast
 
 from agentdojo.agent_pipeline.agent_pipeline import load_system_message
+from ratchet_cases.cases.model import Case
+from ratchet_cases.types import Trace, to_jsonable
+from ratchet_cases.world import World
 
 from ratchet.agent.model import ChatModel, Message, ModelTurn, ToolSpec
 from ratchet.agent.worker import RunLimits
 from ratchet.agent.worker import run_case as worker_run_case
 from ratchet.bench.agentdojo.cases import DojoSuite
 from ratchet.bench.agentdojo.world import DojoWorld, outcome
-from ratchet.cases.model import Case
 from ratchet.improve.sim import Step, Walk, result_ids, tool_call_of
-from ratchet.types import Harness, Trace, to_jsonable
-from ratchet.world import World
+from ratchet.types import Harness
 
 # AgentDojo's pipeline makes one model call, then up to 15 tool-execution rounds of one call each.
 DOJO_LIMITS = RunLimits(max_steps=16)

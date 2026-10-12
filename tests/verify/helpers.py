@@ -12,8 +12,10 @@ import base64
 from dataclasses import asdict
 from typing import Any
 
+from ratchet_cases.types import canonical_json
+
 from ratchet.improve.receipt import DECISION_TYPE, Signer
-from ratchet.types import Guard, Harness, canonical_json
+from ratchet.types import Guard, Harness
 from ratchet.verify import DEFAULT_GATES, PREDICATE_URI, report_digest
 
 SUITE = "a" * 64

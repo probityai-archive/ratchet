@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from ratchet_cases.types import Event
+
 from ratchet.improve.overfit import lint, new_text, training_literals
-from ratchet.types import Event, Guard, Harness, Procedure
+from ratchet.types import Guard, Harness, Procedure
 
 from .fakes import bad_timeout, make_trace
 

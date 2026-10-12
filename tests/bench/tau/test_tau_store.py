@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from ratchet_cases.types import Cost, Event, Outcome, Trace
 
 from ratchet.bench.tau.runner import seed_harness
 from ratchet.bench.tau.store import JsonlStore, _default
-from ratchet.types import Cost, Event, Outcome, Trace
 
 
 def test_store_round_trips_traces_and_dedupes_harnesses(tmp_path: Path) -> None:

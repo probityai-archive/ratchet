@@ -24,9 +24,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, overload
 
+from ratchet_cases.types import Event, ToolCall, sha256_hex
+
 from ratchet.agent.guards import GuardDecision, GuardItem, GuardRuntime
 from ratchet.export.hookrt import Transcript, parse_transcript, reads_history
-from ratchet.types import Event, Guard, ToolCall, sha256_hex
+from ratchet.types import Guard
 
 
 class Prefix(Sequence[Event]):

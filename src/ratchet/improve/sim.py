@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ratchet.types import Event, ToolCall, Trace
+from ratchet_cases.types import Event, ToolCall, Trace
 
 
 @dataclass(frozen=True)

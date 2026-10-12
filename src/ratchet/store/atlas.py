@@ -22,21 +22,11 @@ from typing import Any
 from pymongo import MongoClient, UpdateOne
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
+from ratchet_cases.types import Cost, Event, Outcome, Trace, canonical_json, sha256_hex, to_jsonable
 
 from ratchet.store import atlas_setup
 from ratchet.store.embed import CachedEmbedder, Embedder, Reranker, VoyageEmbedder, VoyageReranker
-from ratchet.types import (
-    Cost,
-    Event,
-    Guard,
-    Harness,
-    Outcome,
-    Procedure,
-    Trace,
-    canonical_json,
-    sha256_hex,
-    to_jsonable,
-)
+from ratchet.types import Guard, Harness, Procedure
 
 Doc = dict[str, Any]
 WATCHABLE = ("harness_versions", "runs", "traces", "evals", "decisions", "failures", "checkpoints")

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from ratchet_cases.types import Cost, Trace
 
 from ratchet.agent.guards import GuardRuntime
 from ratchet.improve import instruction_search as search
@@ -33,7 +34,7 @@ from ratchet.improve.propose import SEED, Instructions, Proposal, make_candidate
 from ratchet.improve.receipt import Signer
 from ratchet.improve.replay import GuardRunner, ReplayReport, WalkCache
 from ratchet.improve.sandbox import SandboxRunner
-from ratchet.types import Cost, Guard, Harness, Trace
+from ratchet.types import Guard, Harness
 
 from .fakes import (
     BLOCK_ALL_REFUNDS,
@@ -550,11 +551,12 @@ class _Ctx:
 def test_main_runs_the_comparison_and_writes_the_summary(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, decision_key: Signer
 ) -> None:
+    import ratchet_cases.cases as cases_mod
+
     import ratchet.agent.guards as guards_mod
     import ratchet.agent.model as model_mod
     import ratchet.agent.seed as seed_mod
     import ratchet.agent.worker as worker_mod
-    import ratchet.cases as cases_mod
     import ratchet.improve.sandbox as sandbox_mod
     import ratchet.improve.worldsim as worldsim_mod
     import ratchet.store as store_mod

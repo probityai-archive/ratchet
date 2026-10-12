@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from ratchet_cases.types import Event
+
 from ratchet.improve.diagnose import diagnose, excerpt, locate, normalize, render_event
 from ratchet.improve.llm import Meter
 from ratchet.improve.sim import RecordedViews
-from ratchet.types import Event
 
 from .fakes import FakeSimulator, ScriptedChat, bad_timeout, good_plain, lazy, without_views
 
