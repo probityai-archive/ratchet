@@ -44,11 +44,14 @@ jobs:
         python: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # No cache: the job installs one wheel and pytest, and two matrix legs saving one cache key race.
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: false
       - run: uv build --package ratchet-cases --out-dir dist
       - name: install the wheel alone
         run: |
-          uv venv --python "${{ matrix.python }}" "$RUNNER_TEMP/cases"
+          uv venv --no-project --python "${{ matrix.python }}" "$RUNNER_TEMP/cases"
           uv pip install --python "$RUNNER_TEMP/cases/bin/python" dist/ratchet_cases-*.whl pytest==9.1.1
       - name: selftest and digest from the installed wheel
         run: |
