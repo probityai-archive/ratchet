@@ -12,7 +12,7 @@ dependencies = [
     "rich>=15.0.0",
     "raindrop-ai==0.0.75",
     "probity-verify==0.1.0",
-    "agent-evidence-vectors==0.17.7",
+    "agent-evidence-vectors==0.17.9",
     "ratchet-cases==0.1.0",
 ]
 

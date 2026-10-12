@@ -48,11 +48,11 @@ wheels = [
 
 [[package]]
 name = "agent-evidence-vectors"
-version = "0.17.7"
+version = "0.17.9"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/85/66/6c67ad3d048a136a7edc8f2e51360f72888766e111eaaf4b093029038d25/agent_evidence_vectors-0.17.7.tar.gz", hash = "sha256:351a131706752aa0e680d4fc08b25eee09c3c3197ee55f3b5ac287e37fbca462", size = 1412391, upload-time = "2026-10-10T23:14:00.673Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0e/5d/3496e0e87a05f83f6bc869f138011504647c901dd6085fef10acd676acb1/agent_evidence_vectors-0.17.9.tar.gz", hash = "sha256:47d39ceb64352cafab6307b491fa02d0f73ee86d0c3b1d268c523bd0970c086d", size = 1541505, upload-time = "2026-10-12T02:38:33.029Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/3d/ead518a179821663df6f6dc0a7752dd17d656f97d0b06a66e80945d10938/agent_evidence_vectors-0.17.7-py3-none-any.whl", hash = "sha256:76fd06c83b6638160c57d12c9a20b457ee32df57c93702f5c663265883b6898a", size = 2661988, upload-time = "2026-10-10T23:13:58.773Z" },
+    { url = "https://files.pythonhosted.org/packages/53/e6/9825a959cf7accdceb0889313f88afc331bcb99b293312480e2ca9efad01/agent_evidence_vectors-0.17.9-py3-none-any.whl", hash = "sha256:5daef9fd1bcc7547eb8e991845edded75e2d22aeba256ac7cfe69ee9763ca150", size = 2952393, upload-time = "2026-10-12T02:38:31.36Z" },
 ]
 
 [[package]]
@@ -4041,7 +4041,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agent-evidence-vectors", specifier = "==0.17.7" },
+    { name = "agent-evidence-vectors", specifier = "==0.17.9" },
     { name = "agentdojo", marker = "extra == 'bench'", specifier = "==0.1.35" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13' and extra == 'bench'", specifier = "==0.2.2" },
     { name = "cryptography", specifier = ">=44" },
