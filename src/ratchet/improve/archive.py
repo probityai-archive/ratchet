@@ -473,7 +473,8 @@ def _verdict(d: Mapping[str, Any] | None, count: int) -> Verdict | None:
     if d is None:
         return None
     checks = {c["name"]: bool(c["passed"]) for c in d.get("checks", [])}
-    fresh = next((c for c in d.get("checks", []) if c["name"] == "fresh"), None)
+    # the held-out gate is "heldout" in decisions signed since 2026-10-11 and "fresh" before
+    fresh = next((c for c in d.get("checks", []) if c["name"] in ("heldout", "fresh")), None)
     evidence = (fresh or {}).get("evidence", {})
     stable = evidence.get("stable_recoveries")
     return Verdict(

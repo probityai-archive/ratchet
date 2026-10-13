@@ -15,6 +15,7 @@ from rich.text import Text
 
 from ratchet.improve.stochastic import RUNS as V3_RUNS
 from ratchet.view.admission import (
+    HELDOUT_CHECKS,
     RUNS,
     FreshView,
     ReplayRow,
@@ -115,14 +116,20 @@ def evidence_line(check: Mapping[str, Any]) -> str:
         rows = replay_rows(ev)
         guards = [r for r in rows if not r.guard_id.startswith("(")]
         return "; ".join(f"{r.guard_id}: {r.summary}" for r in rows) or f"{len(guards)} new guards"
-    if name == "fresh":
+    if name in HELDOUT_CHECKS:
         v = fresh_view(ev)
         if v is None:
             return ""
         return (
             f"{len(v.stable)} stable recoveries (need {v.needed}), {len(v.protected)} protected, "
             f"{len(v.broken)} broken, parent discordance D={v.discordance}"
-            + ("; C2 pending" if v.confirm_pending else "")
+            + (
+                "; C2 not run (refused after C1)"
+                if v.confirm_pending and ev.get("initial_ok") is False
+                else "; C2 pending"
+                if v.confirm_pending
+                else ""
+            )
         )
     if name == "no_regression":
         return (
@@ -130,9 +137,12 @@ def evidence_line(check: Mapping[str, Any]) -> str:
             f"regressed {len(ev.get('regressed') or [])}"
         )
     if name == "benign_twins":
-        runs = ev.get("heldout_benign_twin_runs")
-        prefix = f"{runs} twin runs, " if runs is not None else ""
-        return f"{prefix}{ev.get('interventions')} intervention(s)"
+        line = f"{ev.get('interventions')} intervention(s)"
+        hit = ev.get("intervened")
+        if isinstance(hit, list) and hit:
+            line += f" on {len(hit)} benign twin{'' if len(hit) == 1 else 's'}"
+        runs = ev.get("benign_twin_runs")
+        return f"{line} over {runs} twin runs" if runs is not None else line
     if name == "stochastic_v3":
         return stochastic_line(ev.get("comparison") or {})
     if name == "cohort_qualified":
@@ -145,7 +155,8 @@ def evidence_line(check: Mapping[str, Any]) -> str:
         return f"{added}; breaks: {', '.join(bad)}" if bad else f"{added}; additive only, tools a subset"
     if name == "cost":
         p, c = ev.get("parent") or {}, ev.get("candidate") or {}
-        return f"model calls {p.get('model_calls')} -> {c.get('model_calls')} (recorded, not a gate)"
+        # one count per agent turn, whether a model or the demo's scripted agent took it
+        return f"agent turns {p.get('model_calls')} -> {c.get('model_calls')} (recorded, not a gate)"
     return ""
 
 
@@ -265,7 +276,7 @@ def decision_view(d: DecisionInfo) -> RenderableType:
             evidence_line(c),
         )
         ev = c.get("evidence") or {}
-        if c["name"] == "fresh" and (v := fresh_view(ev)) is not None:
+        if c["name"] in HELDOUT_CHECKS and (v := fresh_view(ev)) is not None:
             detail += [Text(), fresh_table(v)]
         if c["name"] == "replay" and (rows := replay_rows(ev)):
             detail += [Text(), replay_table(rows, procedures_not_applicable(ev))]

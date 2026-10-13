@@ -28,7 +28,7 @@ def test_tree_shows_scores_receipts_and_rejections() -> None:
     assert "rej00000001" in out
     assert "protected case broke: ord.v3" in out
     assert "FRESH" in out
-    assert "intervenes on 1 held-out benign twin" in out
+    assert "intervenes on 1 benign twin" in out
     assert out.index(good.version) < out.index("rej00000001")  # the winner is listed before the losers
 
 

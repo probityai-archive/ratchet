@@ -40,7 +40,11 @@ def fresh(**kw: Any) -> dict[str, Any]:
         (
             {"name": "replay", "passed": False, "evidence": {"reports": [
                 rep(false_fires=["a", "b", "c"], benign_twin_fires=1, targets_hit=1, targets_total=3)]}},
-            ["blocks 2 past successes", "fires on 1 benign twin", "misses 2 of 3 target failures"],
+            [
+                "fires 2 times on past successes",
+                "fires 1 time on benign twins",
+                "misses 2 of 3 target failures",
+            ],
         ),
         (
             {
@@ -48,7 +52,7 @@ def fresh(**kw: Any) -> dict[str, Any]:
                 "passed": False,
                 "evidence": {"reports": [rep(false_fires=["a", "b"], benign_twin_fires=1)]},
             },
-            ["blocks 1 past success", "fires on 1 benign twin"],
+            ["fires 1 time on past successes", "fires 1 time on benign twins"],
         ),
         (
             {"name": "replay", "passed": False, "evidence": {"reports": [
@@ -83,7 +87,11 @@ def fresh(**kw: Any) -> dict[str, Any]:
         ({"name": "no_regression", "passed": False, "evidence": {"regressed": ["a", "b"]}},
          ["regresses 2 must-succeed cases"]),
         ({"name": "benign_twins", "passed": False, "evidence": {"intervened": ["a", "b"]}},
-         ["intervenes on 2 held-out benign twins"]),
+         ["intervenes on 2 benign twins"]),
+        ({"name": "heldout", "passed": False, "evidence": fresh(
+            confirm_pending=True, initial_ok=False, protected_broken=["p"], stable_recoveries_c1=[],
+            stable_recoveries=[])},
+         ["protected case broke: p", "0 stable recoveries on C1, needs 2", "refused after C1; C2 not run"]),
         ({"name": "overfit_lint", "passed": False, "evidence": {"hits": HITS}},
          ["copies 2 literal(s) from training traces (ch_1, 3200)"]),
         ({"name": "structure", "passed": False, "evidence": {

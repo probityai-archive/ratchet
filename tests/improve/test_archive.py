@@ -18,6 +18,7 @@ from ratchet.improve.archive import (
     Archive,
     ArchiveSelector,
     RebaseError,
+    _verdict,
     rebase,
     select_parent,
 )
@@ -591,3 +592,21 @@ def test_atlas_command_line_reads_the_same_archive(atlas: Store, atlas_uri: str,
     run = json.loads(out.read_text())["runs"][0]
     assert {n["version"] for n in run["archive"]["nodes"]} == {seed.version, a.version}
     assert run["selection"]["comparison_parent"] == seed.version  # A has no decision: not a parent
+
+
+@pytest.mark.parametrize("name", ["heldout", "fresh"])
+def test_the_verdict_reads_the_held_out_gate_under_either_name(name: str) -> None:
+    doc = {
+        "parent": "S",
+        "candidate": "A",
+        "admitted": True,
+        "checks": [
+            {
+                "name": name,
+                "passed": True,
+                "evidence": {"stable_recoveries": ["a", "b"], "parent_discordance": 0},
+            }
+        ],
+    }
+    v = _verdict(doc, 1)
+    assert v is not None and v.stable_recoveries == 2 and v.parent_discordance == 0
