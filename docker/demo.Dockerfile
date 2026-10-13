@@ -47,5 +47,9 @@ ENV RATCHET_MONGODB_URI="mongodb://127.0.0.1:27017/?directConnection=true" \
     RATCHET_DEMO_DIR=/data/ratchet-demo \
     RATCHET_GUARD_REQUIRE=rlimits,seccomp,landlock \
     RATCHET_VENV=/opt/ratchet/.venv
+# Healthy means the store answers search-index calls. It reports unhealthy, and starts nothing, until the
+# store is up (the default command starts it; a `docker exec ratchet ...` starts it on first use otherwise).
+HEALTHCHECK --interval=5s --timeout=30s --start-period=60s --retries=30 \
+    CMD ["/usr/local/bin/ratchet-store", "health"]
 ENTRYPOINT ["/usr/local/bin/ratchet-store"]
 CMD ["serve"]

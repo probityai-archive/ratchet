@@ -180,9 +180,19 @@ jobs:
 
   demo-image:
     # The no-build demo: build the image, then run the reviewer sequence in a fresh container with no network
-    # and no host mount. The image is built here only; it is never pushed.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # and no host mount, on x86-64 and on arm64 (the image runs on Apple-silicon hosts and arm64 servers).
+    # The image is built here only; it is never pushed.
+    name: demo-image (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: build the demo image

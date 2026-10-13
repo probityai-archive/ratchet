@@ -13,6 +13,18 @@ failures=0
 out=$(mktemp)
 trap 'docker rm -f "$NAME" >/dev/null 2>&1; rm -f "$out"' EXIT
 
+# Wait up to 3 minutes for the image's own HEALTHCHECK to report healthy, and print the status it reached.
+wait_healthy() {
+    local status=starting
+    for _ in $(seq 1 90); do
+        status=$(docker inspect --format '{{.State.Health.Status}}' "$NAME" 2>&1)
+        [ "$status" = healthy ] && break
+        sleep 2
+    done
+    echo "$status"
+    [ "$status" = healthy ]
+}
+
 # step EXPECTED_EXIT PATTERN COMMAND...: run, echo, and require the exit code and a line matching PATTERN
 step() {
     local want=$1 pattern=$2
@@ -31,6 +43,7 @@ step() {
 }
 
 step 0 . docker run -d --rm --network none --name "$NAME" "$IMAGE"
+step 0 "^healthy$" wait_healthy
 step 0 "admitted decision +dfdfffeeb388->$GOOD admitted=True" docker exec "$NAME" ratchet demo double-refund
 step 0 "REJECTED +dfdfffeeb388 -> $BAD" docker exec "$NAME" ratchet show decision "$BAD"
 step 0 "ADMITTED +dfdfffeeb388 -> $GOOD" docker exec "$NAME" ratchet show decision "$GOOD"

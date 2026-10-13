@@ -2,6 +2,7 @@
 # The demo image's entrypoint: own the in-container store, then run the command.
 #   ratchet-store serve        start the store in the foreground (the image's default command)
 #   ratchet-store wait         start the store unless it is running, and wait until it is ready
+#   ratchet-store health       exit 0 when the store answers search-index calls, 1 when it does not (the image's HEALTHCHECK)
 #   ratchet-store <cmd ...>    wait, then run <cmd ...>  (docker run --rm IMAGE ratchet demo double-refund)
 set -euo pipefail
 
@@ -59,6 +60,9 @@ case "${1:-serve}" in
             exit 1
         fi
         exec /usr/local/bin/runner server
+        ;;
+    health)
+        probe
         ;;
     wait)
         wait_ready
