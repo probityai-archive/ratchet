@@ -84,7 +84,6 @@ members = ["probity-ratchet-cases"]
 [tool.uv.sources]
 probity-ratchet-cases = { workspace = true }
 tau-bench = { git = "https://github.com/sierra-research/tau-bench", rev = "59a200c6d575d595120f1cb70fea53cef0632f6b" }
-probity-verify = { git = "https://github.com/probityai/probity-verify", rev = "b920366397cb131232163706864a70723b867367" }
 tau2 = { git = "https://github.com/sierra-research/tau2-bench", rev = "4ce7c0397c1eb65c9bbe59aeacfe1ca44a1cd699" }
 tool-sandbox = { git = "https://github.com/apple/ToolSandbox", rev = "c8571d7854316d2e1c5f288e59fe1e34e53f6dd1" }
 

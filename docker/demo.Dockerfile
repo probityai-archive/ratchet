@@ -12,9 +12,9 @@ ARG ATLAS_IMAGE=mongodb/mongodb-atlas-local:8.3.9-20260928T091948Z
 FROM ghcr.io/astral-sh/uv:0.12.23 AS uv
 
 # The store image is RHEL 9 (glibc 2.34) with no package manager; build on the same glibc so every
-# wheel uv picks loads there. git is for the one dependency pinned to a git commit.
+# wheel uv picks loads there. Every dependency the image installs comes from a registry pinned by hash in
+# uv.lock, so the build installs no system package and reads no distribution mirror.
 FROM almalinux:9.6 AS build
-RUN dnf install -y --setopt=install_weak_deps=False git-core && dnf clean all
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_PYTHON_INSTALL_DIR=/opt/python \
     UV_PYTHON_PREFERENCE=only-managed \
