@@ -49,8 +49,25 @@ def parse_coverage(text: Any) -> tuple[int | None, int | None]:
     return (int(m[1]), int(m[2])) if m else (None, None)
 
 
+def _target_counts(rep: Mapping[str, Any]) -> tuple[int | None, int | None]:
+    """(hit, total) failing steps. A failed run with several reasons at one step was signed as one target per
+    reason, so the same `run@seq` id repeats in `target_failures`; the step is one target, counted once.
+    Hit status is per step, so an all-hit or none-hit row collapses exactly. A mixed row cannot be
+    collapsed from the signed numbers alone and keeps them."""
+    hit, total = rep.get("targets_hit"), rep.get("targets_total")
+    ids = rep.get("target_failures")
+    if not isinstance(ids, list) or total is None or len(set(ids)) == len(ids) or len(ids) != total:
+        return hit, total
+    if hit == total:
+        return len(set(ids)), len(set(ids))
+    if hit == 0:
+        return 0, len(set(ids))
+    return hit, total
+
+
 def _row(guard_id: str, rep: Mapping[str, Any]) -> ReplayRow:
     checked, total = parse_coverage(rep.get("coverage"))
+    targets_hit, targets_total = _target_counts(rep)
     errors = rep.get("errors", 0)
     fires = rep.get("false_fires", rep.get("false_positives", 0))
     return ReplayRow(
@@ -58,8 +75,8 @@ def _row(guard_id: str, rep: Mapping[str, Any]) -> ReplayRow:
         verdict=str(rep.get("verdict") or ("CLEARED" if rep.get("passed") else "REJECTED")),
         checked=checked,
         total=total,
-        targets_hit=rep.get("targets_hit"),
-        targets_total=rep.get("targets_total"),
+        targets_hit=targets_hit,
+        targets_total=targets_total,
         false_fires=len(fires) if isinstance(fires, list) else int(fires or 0),
         benign_fires=int(rep.get("benign_twin_fires", 0)),
         errors=len(errors) if isinstance(errors, list) else int(errors or 0),

@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from ratchet.view.admission import check_reasons
+from ratchet.view.admission import check_reasons, replay_rows
 from ratchet.view.data import (
     DecisionInfo,
     build_lineage,
@@ -226,3 +226,42 @@ def test_find_decision_doc() -> None:
     assert find_decision_doc(store, "zzz") is None
     assert find_decision_doc(store, "") is None
     assert isinstance(decision_info(store.decision_docs[0]), DecisionInfo)
+
+
+def _signed_replay(hit: int, total: int, ids: list[str]) -> dict[str, Any]:
+    return {
+        "name": "replay",
+        "passed": False,
+        "evidence": {
+            "reports": [
+                {
+                    "guard_id": "g",
+                    "passed": False,
+                    "verdict": "REJECTED",
+                    "coverage": "6/6 traces checked",
+                    "targets_hit": hit,
+                    "targets_total": total,
+                    "target_failures": ids,
+                    "false_fires": [],
+                    "errors": 0,
+                }
+            ]
+        },
+    }
+
+
+def test_a_step_named_by_several_reasons_is_one_target_in_show_decision() -> None:
+    ids = ["r1@13", "r1@13", "r1@13", "r2@10", "r2@10", "r3@4", "r3@4", "r3@4"]
+    check = _signed_replay(0, 8, ids)
+    assert check_reasons(check) == ["misses 3 of 3 target failures"]
+    rows = replay_rows(check["evidence"])
+    assert (rows[0].targets_hit, rows[0].targets_total) == (0, 3)
+    assert replay_rows(_signed_replay(8, 8, ids)["evidence"])[0].targets_total == 3
+    assert replay_rows(_signed_replay(8, 8, ids)["evidence"])[0].targets_hit == 3
+
+
+def test_distinct_ids_and_mixed_rows_keep_the_signed_counts() -> None:
+    plain = replay_rows(_signed_replay(1, 3, ["a@1", "b@2", "c@3"])["evidence"])[0]
+    assert (plain.targets_hit, plain.targets_total) == (1, 3)
+    mixed = replay_rows(_signed_replay(5, 8, ["a@1", "a@1", "a@1", "b@2", "b@2", "c@3", "c@3", "c@3"])["evidence"])[0]
+    assert (mixed.targets_hit, mixed.targets_total) == (5, 8)
