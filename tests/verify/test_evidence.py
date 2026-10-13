@@ -181,6 +181,79 @@ def test_a_verified_rejection_agrees_with_failing_evidence(signer: Signer) -> No
     assert (r.ok, r.admitted, r.admission_verified, r.recomputation_complete) == (True, False, False, True)
 
 
+# --- a refusal made after the first candidate run (no confirming run C2) ------------------------------
+
+WITHOUT_C2 = {k: v for k, v in REPORTS.items() if k != "candidate_confirm_run"}
+
+
+def refused_after_c1(*gates: str) -> list[dict[str, Any]]:
+    checks = payload()["checks"]
+    for c in checks:
+        if c["name"] in gates:
+            c["passed"] = False
+    return checks
+
+
+def test_a_refusal_without_a_confirming_run_recomputes_every_gate_from_the_runs_it_names(
+    signer: Signer,
+) -> None:
+    """The bad fix of the demo: C1 breaks a protected case, regresses a must-succeed case and intervenes on a
+    benign twin; C2 never ran. All three gates are recomputed from P1, P2 and C1 alone."""
+    c1 = eval_report("c", {"h1", "h2"}, hits={"b2": 2})
+    reports = {**WITHOUT_C2, "candidate_run": c1}
+    r = run(
+        signer,
+        reports=reports,
+        admitted=False,
+        checks=refused_after_c1("heldout", "no_regression", "benign_twins"),
+    )
+    assert (r.ok, r.reason, r.recomputation_complete) == (True, "rejection_receipt_verified", True)
+    st = status(r)
+    assert {st[f"gate:{g}"] for g in ("heldout", "no_regression", "benign_twins")} == {"recomputed"}
+    assert len(r.recomputed) == 10 and "NOT SUPPLIED" not in r.summary
+    held = next(i for i in r.recomputed if i["id"] == "gate:heldout")["evidence"]
+    assert held["confirm_run"] == "not run" and held["stable_recoveries"] == []
+    assert held["stable_recoveries_c1"] == ["h1", "h2"] and held["protected_broken"] == ["b1", "b2", "h3"]
+
+
+def test_without_a_confirming_run_the_held_out_gate_cannot_pass(signer: Signer) -> None:
+    """C1 alone clears the held-out rule, but admission needs C2: a receipt claiming a pass is contradicted,
+    and a refusal for the missing run agrees."""
+    r = run(signer, reports=WITHOUT_C2)
+    assert (r.ok, r.reason) == (False, "gate_recompute_mismatch:heldout")
+    other_fail = refused_after_c1("heldout", "overfit_lint")
+    r = run(
+        signer,
+        reports=WITHOUT_C2,
+        admitted=False,
+        checks=other_fail,
+        recomputed={**RECOMPUTED, "overfit_lint": {"hits": [{"literal": "x"}]}},
+    )
+    assert (r.ok, r.recomputation_complete) == (True, True)
+
+
+def test_a_refusal_after_c1_that_claims_a_failure_c1_does_not_show_is_contradicted(signer: Signer) -> None:
+    r = run(signer, reports=WITHOUT_C2, admitted=False, checks=refused_after_c1("heldout", "no_regression"))
+    assert (r.ok, r.reason) == (False, "gate_recompute_mismatch:no_regression")
+
+
+def test_a_named_confirming_run_that_is_not_supplied_is_still_missing(signer: Signer) -> None:
+    body_digests = {n: report_digest(r) for n, r in REPORTS.items()}
+    r = run(signer, reports=WITHOUT_C2, report_digests=body_digests)
+    assert {status(r)[f"gate:{g}"] for g in ("heldout", "no_regression", "benign_twins")} == {"not_supplied"}
+    assert status(r)["report_digests"] == "partial" and not r.recomputation_complete
+
+
+def test_the_held_out_recomputation_without_c2_unit() -> None:
+    p = eval_report("p", ALWAYS)
+    gate = rc.heldout(p, p, eval_report("c", ALWAYS | {"h1", "h2"}), None)
+    assert not gate.passed and gate.evidence["confirm_run"] == "not run"
+    assert gate.evidence["stable_recoveries_c1"] == ["h1", "h2"] and gate.evidence["protected_broken"] == []
+    both = rc.heldout(p, p, eval_report("c", ALWAYS | {"h1", "h2"}), eval_report("c", ALWAYS | {"h1"}))
+    assert not both.passed and both.evidence["stable_recoveries"] == ["h1"]
+    assert both.evidence["confirm_run"] == "run"
+
+
 # --- no regression and benign twins ------------------------------------------------------------------
 
 
