@@ -263,5 +263,6 @@ def test_a_step_named_by_several_reasons_is_one_target_in_show_decision() -> Non
 def test_distinct_ids_and_mixed_rows_keep_the_signed_counts() -> None:
     plain = replay_rows(_signed_replay(1, 3, ["a@1", "b@2", "c@3"])["evidence"])[0]
     assert (plain.targets_hit, plain.targets_total) == (1, 3)
-    mixed = replay_rows(_signed_replay(5, 8, ["a@1", "a@1", "a@1", "b@2", "b@2", "c@3", "c@3", "c@3"])["evidence"])[0]
+    repeated = ["a@1", "a@1", "a@1", "b@2", "b@2", "c@3", "c@3", "c@3"]
+    mixed = replay_rows(_signed_replay(5, 8, repeated)["evidence"])[0]
     assert (mixed.targets_hit, mixed.targets_total) == (5, 8)

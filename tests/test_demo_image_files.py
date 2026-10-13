@@ -23,7 +23,7 @@ def test_the_store_script_has_a_health_command_that_starts_nothing() -> None:
 def test_the_reviewer_check_waits_for_the_healthcheck_before_running_the_demo() -> None:
     check = (ROOT / "docker/demo/check.sh").read_text(encoding="utf-8")
     assert "State.Health.Status" in check
-    assert check.index("step 0 \"^healthy$\" wait_healthy") < check.index("ratchet demo double-refund")
+    assert check.index('step 0 "^healthy$" wait_healthy') < check.index("ratchet demo double-refund")
 
 
 def test_ci_runs_the_demo_image_on_x86_and_arm() -> None:
