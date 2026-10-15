@@ -275,7 +275,13 @@ def _fresh_table_html(v: FreshView) -> str:
             f"<tr><td>{_e(row.case_id)}</td>{cells}"
             f'<td class="{_ROLE_CLASS[row.role]}">{_ROLE_WORDS[row.role]}</td></tr>'
         )
-    pend = "; C2 (the confirming run) has not run yet" if v.confirm_pending else ""
+    pend = (
+        "; C2 (the confirming run) was not made: the candidate was refused after C1"
+        if v.refused_after_c1
+        else "; C2 (the confirming run) has not run yet"
+        if v.confirm_pending
+        else ""
+    )
     return (
         f'<div class="scroll"><table><tr><th>held-out case</th>{head}<th>role</th></tr>'
         f"{''.join(rows)}</table></div>"

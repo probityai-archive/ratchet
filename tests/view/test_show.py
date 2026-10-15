@@ -7,12 +7,14 @@ import pytest
 from ratchet_cases.types import Event, Trace
 from rich.console import Console
 
+from ratchet.view.admission import fresh_view
 from ratchet.view.data import decision_info
 from ratchet.view.show import (
     clip,
     decision_view,
     event_summary,
     evidence_line,
+    fresh_table,
     run_view,
     trace_label,
     trace_view,
@@ -129,6 +131,17 @@ def test_evidence_lines_for_each_gate() -> None:
         {"name": "heldout", "evidence": refused}
     )
     assert evidence_line({"name": "heldout", "evidence": refused}).endswith("; C2 not run (refused after C1)")
+    view = fresh_view(refused)
+    assert view is not None and view.refused_after_c1
+    assert {r.outcomes[3] for r in view.rows} == {"not run"}
+    out = io.StringIO()
+    Console(file=out, width=100).print(fresh_table(view))
+    assert "refused after C1" in out.getvalue() and "has not run yet" not in out.getvalue()
+    waiting = fresh_view(
+        fresh_evidence({"a": ["fail", "fail", "pass"], "b": ["fail", "fail", "pass"]}, pending=True)
+    )
+    assert waiting is not None and not waiting.refused_after_c1
+    assert {r.outcomes[3] for r in waiting.rows} == {"pending"}
     assert "1 copied literal(s)" in evidence_line(
         {"name": "overfit_lint", "evidence": {"hits": [{}], "screened": {}}}
     )
@@ -162,14 +175,18 @@ def test_decision_view_renders_the_four_runs_and_the_sets_not_a_net_count() -> N
     assert "broken 0" in ok
 
 
-def test_decision_view_marks_a_pending_confirmation_and_invalid_evidence() -> None:
+def test_decision_view_marks_a_refusal_after_c1_and_invalid_evidence() -> None:
+    # Invalid evidence or a split manifest fails the gate at C1 (admit.py sets initial_ok False), so C2 is
+    # never made: the view must say the candidate was refused, not that C2 is still to come.
     ev = {**fresh_evidence({"a": ["fail", "fail", "pass"], "b": ["pass", "pass", "pass"]}, pending=True)}
     ev["invalid_evidence"] = ["b"]
     ev["same_manifest"] = False
+    ev["initial_ok"] = False
     doc = decision_doc("p", "c", False, checks=[{"name": "fresh", "passed": False, "evidence": ev}])
     out = render(decision_view(decision_info(doc)))
-    assert "pending" in out
-    assert "C2 (the confirming run) has not run yet" in out
+    assert "not run" in out
+    assert "C2 (the confirming run) was not made: the candidate was refused after C1" in out
+    assert "has not run yet" not in out
     assert "lack valid FRESH evidence" in out
     assert "did not share one case manifest" in out
     assert "NO VALID EVIDENCE" in out

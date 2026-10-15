@@ -125,7 +125,7 @@ def evidence_line(check: Mapping[str, Any]) -> str:
             f"{len(v.broken)} broken, parent discordance D={v.discordance}"
             + (
                 "; C2 not run (refused after C1)"
-                if v.confirm_pending and ev.get("initial_ok") is False
+                if v.refused_after_c1
                 else "; C2 pending"
                 if v.confirm_pending
                 else ""
@@ -187,7 +187,13 @@ def cohort_line(cohort: Mapping[str, Any]) -> str:
     return f"{status}, unchanged control moved: {'; '.join(parts)}" if parts else status
 
 
-_OUTCOME_STYLE = {"pass": "green", "fail": "red", "invalid": "bold yellow", "pending": "dim"}
+_OUTCOME_STYLE = {
+    "pass": "green",
+    "fail": "red",
+    "invalid": "bold yellow",
+    "pending": "dim",
+    "not run": "dim",
+}
 _ROLE_TEXT = {
     "broken": ("PROTECTED CASE BROKE", "bold white on red"),
     "invalid": ("NO VALID EVIDENCE", "bold black on yellow"),
@@ -223,7 +229,11 @@ def fresh_table(v: FreshView) -> RenderableType:
         ("  (reported, not a threshold)", "dim"),
     )
     notes: list[RenderableType] = []
-    if v.confirm_pending:
+    if v.refused_after_c1:
+        notes.append(
+            Text("C2 (the confirming run) was not made: the candidate was refused after C1", style="dim")
+        )
+    elif v.confirm_pending:
         notes.append(Text("C2 (the confirming run) has not run yet", style="yellow"))
     if v.invalid:
         notes.append(Text(f"{len(v.invalid)} case(s) lack valid FRESH evidence: not counted", style="yellow"))
