@@ -101,7 +101,8 @@ def procedures_not_applicable(evidence: Mapping[str, Any]) -> list[str]:
 @dataclass(frozen=True)
 class FreshRow:
     case_id: str
-    outcomes: tuple[str, str, str, str]  # "pass", "fail", "invalid" or "pending", in P1 P2 C1 C2 order
+    # "pass", "fail", "invalid", "pending" or "not run" (refused after C1), in P1 P2 C1 C2 order
+    outcomes: tuple[str, str, str, str]
     role: Role
 
 
@@ -118,6 +119,8 @@ class FreshView:
     confirm_pending: bool
     same_manifest: bool
     needed: int = STABLE_NEEDED
+    # C2 is missing because C1 already failed the gate: the decision is final and C2 is never made
+    refused_after_c1: bool = False
 
     @property
     def stable_c1(self) -> list[str]:
@@ -142,10 +145,12 @@ def fresh_view(evidence: Mapping[str, Any]) -> FreshView | None:
     if not isinstance(outcomes, Mapping):
         return None
     pending = bool(evidence.get("confirm_pending"))
+    refused = pending and evidence.get("initial_ok") is False
+    missing = "not run" if refused else "pending"
     rows: list[FreshRow] = []
     for case, vec in outcomes.items():
-        v = [str(x) for x in vec] + ["pending"] * 4
-        four = (v[0], v[1], v[2], "pending" if pending else v[3])
+        v = [str(x) for x in vec] + [missing] * 4
+        four = (v[0], v[1], v[2], missing if pending else v[3])
         rows.append(FreshRow(str(case), four, _role(str(case), evidence, four)))
     rows.sort(key=lambda r: (ROLE_ORDER.index(r.role), r.case_id))
     return FreshView(
@@ -157,6 +162,7 @@ def fresh_view(evidence: Mapping[str, Any]) -> FreshView | None:
         discordance=int(evidence.get("parent_discordance", 0)),
         confirm_pending=pending,
         same_manifest=bool(evidence.get("same_manifest", True)),
+        refused_after_c1=refused,
     )
 
 
