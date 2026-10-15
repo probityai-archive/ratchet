@@ -17,6 +17,8 @@ RUNS = ("P1", "P2", "C1", "C2")
 Role = Literal["broken", "stable", "protected", "unrecovered", "invalid"]
 ROLE_ORDER: tuple[Role, ...] = ("broken", "invalid", "stable", "protected", "unrecovered")
 STABLE_NEEDED = 2
+# The held-out gate's check name. Decisions signed before 2026-10-11 call it "fresh"; later ones "heldout".
+HELDOUT_CHECKS = frozenset({"heldout", "fresh"})
 _COVERAGE = re.compile(r"(\d+)/(\d+)")
 
 
@@ -172,14 +174,15 @@ def check_reasons(check: Mapping[str, Any]) -> list[str]:
     name, ev = str(check.get("name")), check.get("evidence") or {}
     if name == "replay":
         return _replay_reasons(ev)
-    if name == "fresh":
+    if name in HELDOUT_CHECKS:
         return _fresh_reasons(ev)
     if name == "no_regression":
         n = len(ev.get("regressed") or [])
         return [f"regresses {_plural(n, 'must-succeed case', 'must-succeed cases')}"]
     if name == "benign_twins":
+        # the gate covers every split the candidate runs covered, not only the held-out cases
         n = len(ev.get("intervened") or [])
-        return [f"intervenes on {_plural(n, 'held-out benign twin', 'held-out benign twins')}"]
+        return [f"intervenes on {_plural(n, 'benign twin', 'benign twins')}"]
     if name == "overfit_lint":
         hits = ev.get("hits") or []
         shown = ", ".join(str(h.get("literal")) for h in hits[:3])
@@ -198,11 +201,12 @@ def _replay_reasons(ev: Mapping[str, Any]) -> list[str]:
         row = _row(str(rep.get("guard_id")), rep)
         if row.verdict == "INCOMPLETE":
             out.append(f"replay INCOMPLETE ({row.coverage}, {_plural(row.errors, 'error', 'errors')})")
+        # the signed row counts fires (one per blocked step), not traces: say "times", never a trace count
         passing = row.false_fires - row.benign_fires
         if passing > 0:
-            out.append(f"blocks {_plural(passing, 'past success', 'past successes')}")
+            out.append(f"fires {_plural(passing, 'time', 'times')} on past successes")
         if row.benign_fires:
-            out.append(f"fires on {_plural(row.benign_fires, 'benign twin', 'benign twins')}")
+            out.append(f"fires {_plural(row.benign_fires, 'time', 'times')} on benign twins")
         miss = (row.targets_total or 0) - (row.targets_hit or 0)
         if miss > 0:
             out.append(f"misses {miss} of {row.targets_total} target failures")
@@ -225,7 +229,12 @@ def _fresh_reasons(ev: Mapping[str, Any]) -> list[str]:
     broken = ev.get("protected_broken") or []
     if broken:
         out.append("protected case broke: " + ", ".join(str(b) for b in broken[:3]))
-    if ev.get("confirm_pending"):
+    if ev.get("confirm_pending") and ev.get("initial_ok") is False:
+        # refused on C1, so the confirming run is never made: the decision is final, not waiting
+        if c1 < STABLE_NEEDED:
+            out.append(f"{_plural(c1, 'stable recovery', 'stable recoveries')} on C1, needs {STABLE_NEEDED}")
+        out.append("refused after C1; C2 not run")
+    elif ev.get("confirm_pending"):
         out.append(
             f"stable recoveries so far {c1}, needs {STABLE_NEEDED}; awaiting the confirming run C2"
             if c1 < STABLE_NEEDED

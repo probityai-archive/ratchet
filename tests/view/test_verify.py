@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import base64
 import io
 from pathlib import Path
@@ -12,6 +13,7 @@ from ratchet_cases.types import canonical_json
 from rich.console import Console
 
 from ratchet.improve.receipt import DECISION_TYPE, ReceiptError, Signer
+from ratchet.verify import dsse as dsse_module
 from ratchet.view.verify import (
     _independent,
     render_verify,
@@ -124,6 +126,8 @@ def test_the_independent_verifier_must_agree(monkeypatch: pytest.MonkeyPatch) ->
     env = SIGNER.sign(DECISION_TYPE, canonical_json(payload()))
     res = verify_envelope(env, keys())
     assert "independent verifier" in " ".join(res.detail)
+    assert "shares no code" not in " ".join(res.detail)
+    assert "shares only the SHA-256 helper and the Ed25519 library" in " ".join(res.detail)
 
     class Disagrees:
         keyid = None
@@ -153,3 +157,27 @@ def test_a_countersigned_decision_names_the_pinned_key_and_the_run_key() -> None
     assert res.ok and res.keyid == SIGNER.keyid
     assert f"first signed by per-run key {OTHER.keyid[:12]}" in res.detail[-1]
     assert "countersigned by the pinned key on 2026-10-11" in render(res)
+
+
+def test_the_independent_verifier_imports_only_what_the_panel_says_it_shares() -> None:
+    """The panel says ratchet.verify.dsse shares only the SHA-256 helper and the Ed25519 library with the
+    signer: its imports are the standard library, `cryptography` and `ratchet_cases.types.sha256_hex`."""
+    tree = ast.parse(Path(dsse_module.__file__).read_text(encoding="utf-8"))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imported |= {f"{node.module}.{a.name}" for a in node.names}
+        elif isinstance(node, ast.Import):
+            imported |= {a.name for a in node.names}
+    ours = {m for m in imported if m.startswith(("ratchet", "ratchet_cases"))}
+    assert ours == {"ratchet_cases.types.sha256_hex"}
+    third_party = {m.split(".")[0] for m in imported} - {
+        "__future__",
+        "base64",
+        "binascii",
+        "json",
+        "collections",
+        "dataclasses",
+        "ratchet_cases",
+    }
+    assert third_party == {"cryptography"}

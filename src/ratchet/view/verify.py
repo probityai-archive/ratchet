@@ -96,7 +96,8 @@ def verify_envelope(
         return VerifyResult(False, "INVALID", [other])
     detail = [
         "DSSE envelope signature valid under a trusted Ed25519 key",
-        "the independent verifier (ratchet.verify.dsse, shares no code with the signer) agrees",
+        "the independent verifier (ratchet.verify.dsse, written apart from the signer; shares only the "
+        "SHA-256 helper and the Ed25519 library with it) agrees",
     ]
     if stored is not None:
         diff = sorted(k for k, v in payload.items() if canonical_json(stored.get(k)) != canonical_json(v))

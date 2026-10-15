@@ -1,7 +1,10 @@
 """A DSSE v1 envelope reader and Ed25519 signature check, written independently of the signer.
 
-The signer lives in `ratchet.improve.receipt`. This module shares no code with it, so a defect in one is not
-silently a defect in the other: the tests sign with the signer and verify here, and the reverse.
+The signer lives in `ratchet.improve.receipt`. This module is written apart from it and imports nothing
+from it: it reimplements the envelope reading and the DSSE pre-authentication encoding, and shares only the
+SHA-256 helper (`ratchet_cases.types.sha256_hex`, which names keys) and the `cryptography` Ed25519
+primitives. So a defect in the signer's encoding is not silently a defect here: the tests sign with the
+signer and verify here, and the reverse.
 """
 
 from __future__ import annotations

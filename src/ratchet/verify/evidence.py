@@ -80,19 +80,32 @@ def _agree(ctx: Ctx, gate: str, result: recompute.Gate) -> None:
     ctx.item(f"gate:{gate}", "recomputed", passed=result.passed, evidence=result.evidence)
 
 
+def _eval_report_names(ctx: Ctx) -> list[str]:
+    """The evaluation reports the three gates rest on. A decision whose signed digests name the parent runs
+    and the first candidate run but no confirming run was refused after C1, and C2 never ran: its gates are
+    recomputed from the three runs it names. A named run that was not supplied is still missing."""
+    names = [ctx.eval_roles[r] for r in ("p1", "p2", "c1", "c2")]
+    named = ctx.payload["report_digests"]
+    if all(n in named for n in names[:3]) and names[3] not in named:
+        return names[:3]
+    return names
+
+
 def recompute_eval_gates(ctx: Ctx) -> None:
     gates = [g for g in ("heldout", "no_regression", "benign_twins") if g in ctx.required]
-    names = [ctx.eval_roles[r] for r in ("p1", "p2", "c1", "c2")]
+    names = _eval_report_names(ctx)
     if not all(n in ctx.reports for n in names):
         for g in gates:
             ctx.item(f"gate:{g}", "not_supplied", needs=names)
         return
     try:
-        p1, p2, c1, c2 = (_load(ctx.reports[n], f"report:{n}") for n in names)
+        p1, p2, c1, *rest = (_load(ctx.reports[n], f"report:{n}") for n in names)
+        c2 = rest[0] if rest else None
+        cands = [c1] if c2 is None else [c1, c2]
         results = {
             "heldout": lambda: recompute.heldout(p1, p2, c1, c2),
-            "no_regression": lambda: recompute.no_regression([p1, p2], [c1, c2]),
-            "benign_twins": lambda: recompute.benign_twins([c1, c2]),
+            "no_regression": lambda: recompute.no_regression([p1, p2], cands),
+            "benign_twins": lambda: recompute.benign_twins(cands),
         }
         for g in gates:
             _agree(ctx, g, results[g]())

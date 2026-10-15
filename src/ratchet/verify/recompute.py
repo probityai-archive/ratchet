@@ -40,24 +40,33 @@ def _fresh_pass(row: dict[str, Any]) -> bool:
     return row.get("passed") is True and row.get("mode") == "FRESH" and not row.get("error")
 
 
-def heldout(p1: dict[str, Any], p2: dict[str, Any], c1: dict[str, Any], c2: dict[str, Any]) -> Gate:
+def heldout(p1: dict[str, Any], p2: dict[str, Any], c1: dict[str, Any], c2: dict[str, Any] | None) -> Gate:
     """Stable recoveries are held-out cases failing in P1 and P2 and passing in C1 and C2; at least two are
-    required. Every case passing in P1 or P2 is protected and must pass in both candidate runs."""
-    held = [{k: r for k, r in _rows(rep).items() if r.get("split") == "heldout"} for rep in (p1, p2, c1, c2)]
+    required. Every case passing in P1 or P2 is protected and must pass in both candidate runs.
+
+    `c2` is None when the decision names no confirming run: the gate runs C2 only after C1 clears every
+    gate, so a candidate refused on C1 has none. The gate cannot pass without C2, and the C1 evidence
+    (recoveries and protected cases broken on C1) is still recomputed and reported."""
+    reports = (p1, p2, c1) if c2 is None else (p1, p2, c1, c2)
+    held = [{k: r for k, r in _rows(rep).items() if r.get("split") == "heldout"} for rep in reports]
     ids = set(held[0])
     same = bool(ids) and all(set(h) == ids for h in held)
     if not same:
         return Gate(False, {"same_case_set": False, "cases": [len(h) for h in held]})
-    a, b, c, d = ({k: _fresh_pass(r) for k, r in h.items()} for h in held)
-    stable = sorted(k for k in ids if not a[k] and not b[k] and c[k] and d[k])
+    a, b, c, *rest = ({k: _fresh_pass(r) for k, r in h.items()} for h in held)
+    d = rest[0] if rest else None
+    stable_c1 = sorted(k for k in ids if not a[k] and not b[k] and c[k])
+    stable = [] if d is None else [k for k in stable_c1 if d[k]]
     protected = sorted(k for k in ids if a[k] or b[k])
-    broken = sorted(k for k in protected if not (c[k] and d[k]))
+    broken = sorted(k for k in protected if not c[k] or (d is not None and not d[k]))
     discordant = sorted(k for k in ids if a[k] != b[k])
     return Gate(
-        len(stable) >= 2 and not broken,
+        d is not None and len(stable) >= 2 and not broken,
         {
             "same_case_set": True,
             "cases": len(ids),
+            "confirm_run": "not run" if d is None else "run",
+            "stable_recoveries_c1": stable_c1,
             "stable_recoveries": stable,
             "protected": len(protected),
             "protected_broken": broken,

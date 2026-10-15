@@ -32,3 +32,13 @@ def test_ci_runs_the_demo_image_on_x86_and_arm() -> None:
     assert "arch: amd64" in job and "runner: ubuntu-24.04\n" in job
     assert "arch: arm64" in job and "runner: ubuntu-24.04-arm" in job
     assert "runs-on: ${{ matrix.runner }}" in job
+
+
+def test_the_reviewer_check_requires_every_check_recomputed_on_both_receipts() -> None:
+    check = (ROOT / "docker/demo/check.sh").read_text(encoding="utf-8")
+    verifies = [
+        i for i, line in enumerate(check.splitlines()) if "ratchet verify" in line and "--pubkey-file" in line
+    ]
+    lines = check.splitlines()
+    assert len(verifies) == 2
+    assert all(lines[i + 1] == 'also "RECOMPUTED \\\\(10 of 10\\\\)"' for i in verifies)

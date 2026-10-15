@@ -239,8 +239,9 @@ def verify_decision(
     receipt (see `load_trusted_key`). Evidence is optional and each kind buys recomputation:
 
     - `reports`: stored reports by the name the receipt gives them (a mapping, hashed by its canonical JSON,
-      or the exact stored bytes). Each must match its named digest. The four evaluation reports named by
-      `options.eval_roles` also let the held-out, no-regression and benign-twin gates be recomputed.
+      or the exact stored bytes). Each must match its named digest. The evaluation reports named by
+      `options.eval_roles` also let the held-out, no-regression and benign-twin gates be recomputed: all four,
+      or P1, P2 and C1 when the receipt names no confirming run (a refusal made after C1).
     - `harnesses`: `{"parent": ..., "candidate": ...}` harness documents; lets the authority gate be
       recomputed.
     - `recomputed`: results the caller derived from the recorded inputs: `"replay:<guard id>"` replay report

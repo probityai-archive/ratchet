@@ -25,6 +25,14 @@ wait_healthy() {
     [ "$status" = healthy ]
 }
 
+# also PATTERN: require a further line matching PATTERN in the output of the step just run
+also() {
+    if ! grep -qE -- "$1" "$out"; then
+        echo "CHECK FAILED: the last step printed no line matching /$1/" >&2
+        failures=$((failures + 1))
+    fi
+}
+
 # step EXPECTED_EXIT PATTERN COMMAND...: run, echo, and require the exit code and a line matching PATTERN
 step() {
     local want=$1 pattern=$2
@@ -49,7 +57,9 @@ step 0 "REJECTED +dfdfffeeb388 -> $BAD" docker exec "$NAME" ratchet show decisio
 step 0 "ADMITTED +dfdfffeeb388 -> $GOOD" docker exec "$NAME" ratchet show decision "$GOOD"
 step 0 "VERDICT +REJECTED +ADMITTED" docker exec "$NAME" ratchet replay "$BAD" "$GOOD"
 step 0 "VERIFIED +dfdfffeeb388->$GOOD" docker exec "$NAME" ratchet verify "$GOOD" --pubkey-file "$PEM"
+also "RECOMPUTED \\(10 of 10\\)"
 step 0 "VERIFIED +dfdfffeeb388->$BAD" docker exec "$NAME" ratchet verify "$BAD" --pubkey-file "$PEM"
+also "RECOMPUTED \\(10 of 10\\)"
 step 1 "INVALID +dfdfffeeb388->$GOOD" docker exec "$NAME" ratchet verify "$GOOD"
 
 if [ "$failures" -ne 0 ]; then

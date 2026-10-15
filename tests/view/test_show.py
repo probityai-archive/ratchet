@@ -108,11 +108,27 @@ def test_evidence_lines_for_each_gate() -> None:
         {"name": "fresh", "evidence": fresh_evidence(STABLE)}
     )
     assert "C2 pending" in evidence_line(
-        {"name": "fresh", "evidence": fresh_evidence({"a": ["fail", "fail", "pass"]}, pending=True)}
+        {
+            "name": "fresh",
+            "evidence": fresh_evidence(
+                {"a": ["fail", "fail", "pass"], "b": ["fail", "fail", "pass"]}, pending=True
+            ),
+        }
     )
     assert evidence_line({"name": "fresh", "evidence": {}}) == ""
     assert "regressed 1" in evidence_line({"name": "no_regression", "evidence": {"regressed": ["a"]}})
     assert "2 intervention(s)" in evidence_line({"name": "benign_twins", "evidence": {"interventions": 2}})
+    twins = {"interventions": 5, "intervened": ["a", "b", "c", "d"], "benign_twin_runs": 4}
+    assert evidence_line({"name": "benign_twins", "evidence": twins}) == (
+        "5 intervention(s) on 4 benign twins over 4 twin runs"
+    )
+    clean = {"interventions": 0, "intervened": [], "benign_twin_runs": 6}
+    assert evidence_line({"name": "benign_twins", "evidence": clean}) == "0 intervention(s) over 6 twin runs"
+    refused = fresh_evidence({"a": ["pass", "pass", "fail"], "b": ["fail", "fail", "fail"]}, pending=True)
+    assert "0 stable recoveries (need 2), 1 protected, 1 broken" in evidence_line(
+        {"name": "heldout", "evidence": refused}
+    )
+    assert evidence_line({"name": "heldout", "evidence": refused}).endswith("; C2 not run (refused after C1)")
     assert "1 copied literal(s)" in evidence_line(
         {"name": "overfit_lint", "evidence": {"hits": [{}], "screened": {}}}
     )
@@ -120,7 +136,7 @@ def test_evidence_lines_for_each_gate() -> None:
         {"name": "structure", "evidence": {"violations": ["tools_granted"], "added_guards": 1}}
     )
     assert "additive only" in evidence_line({"name": "structure", "evidence": {}})
-    assert "model calls 3 -> 4" in evidence_line(
+    assert "agent turns 3 -> 4" in evidence_line(
         {"name": "cost", "evidence": {"parent": {"model_calls": 3}, "candidate": {"model_calls": 4}}}
     )
     assert evidence_line({"name": "other"}) == ""

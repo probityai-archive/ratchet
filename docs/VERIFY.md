@@ -18,11 +18,11 @@ verdict was reached.
 
 | Package | Pin | Where |
 |---|---|---|
-| `probity-verify` | git commit `b920366397cb131232163706864a70723b867367` (version 0.1.0, no registry release) | `pyproject.toml` `[tool.uv.sources]`, `uv.lock` |
+| `probity-verify` | `==0.1.0`, PyPI, wheel SHA-256 `18e0f99fb21701cd2d5eb312d99700d7cf800e8cdf9dc8e5d3608bc315cf1453` (its package files are byte-identical to the source at commit `b920366`, the earlier git pin) | `pyproject.toml`, `uv.lock` |
 | `agent-evidence-vectors` | `==0.17.9`, PyPI | `pyproject.toml`, `uv.lock` |
 
-`probity-verify` requires `cryptography>=50.0.2,<51`; the lock resolves 50.0.2. Only commits from `b920366` on have
-the `adapters=` argument this build uses. `tests/verify/test_pinned_dependencies.py` asserts both pins and runs the
+`probity-verify` requires `cryptography>=50.0.2,<51`; the lock resolves 50.0.2. The 0.1.0 release (source commit `b920366`)
+has the `adapters=` argument this build uses. `tests/verify/test_pinned_dependencies.py` asserts both pins and runs the
 vector harness's own self-test, so a drifted pin fails a test.
 
 Clean-environment result, 2026-10-11, Python 3.12.14, a fresh venv holding only these two packages:
@@ -65,7 +65,7 @@ RECOMPUTED, derived by this verifier from bytes:
 | `payload_predicate` | the envelope |
 | `admission_flag`: `admitted` equals the conjunction of the required gates | the envelope |
 | `report_digests`: each supplied report hashes to the digest the receipt names | stored reports |
-| `gate:heldout`, `gate:no_regression`, `gate:benign_twins` | the four evaluation reports (P1, P2, C1, C2) |
+| `gate:heldout`, `gate:no_regression`, `gate:benign_twins` | the evaluation reports the receipt names: P1, P2, C1 and C2, or P1, P2 and C1 for a refusal made after C1 (the gate runs C2 only when C1 clears every gate, so such a receipt names no C2; the held-out gate then recomputes as failed, since admission needs both candidate runs) |
 | `gate:authority` | parent and candidate harness documents; a human approval when authority grew by declared exception |
 | `gate:replay` | the replay result recomputed from the recorded inputs, per added guard (`recomputed: replay:<guard id>`) |
 | `gate:overfit_lint` | the screen result recomputed from the training literals (`recomputed: overfit_lint`) |
@@ -101,7 +101,7 @@ procedures unchanged and in order, parent prompt a prefix, unique ids, digest eq
 | `exceptions` | list of strings; `authority grew under ...` marks a human-approved exception |
 
 Evaluation reports are found by name: `parent_run_1`, `parent_run_2`, `candidate_run`,
-`candidate_confirm_run` (the consumer can map others with `Options.eval_roles`). Replay reports are named
+`candidate_confirm_run` (the consumer can map others with `Options.eval_roles`). A receipt that names the first three but no `candidate_confirm_run` records a refusal made before C2 ran; a receipt that names C2 needs C2 supplied. Replay reports are named
 `replay:<guard id>`. These are the names `admit()` writes today.
 
 Known drift: the admission lane's held-out gate still uses the margin `max(2, D + 1)`; ruling 2 requires two stable

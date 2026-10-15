@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from html import escape
 
 from ratchet.view.admission import (
+    HELDOUT_CHECKS,
     RUNS,
     FreshView,
     ReplayRow,
@@ -240,7 +241,7 @@ def admission_html(roots: Sequence[VersionNode]) -> str:
             ev = c.get("evidence") or {}
             if c["name"] == "replay" and (rows := replay_rows(ev)):
                 body += _replay_table_html(rows, procedures_not_applicable(ev))
-            if c["name"] == "fresh" and (v := fresh_view(ev)) is not None:
+            if c["name"] in HELDOUT_CHECKS and (v := fresh_view(ev)) is not None:
                 body += _fresh_table_html(v)
         out.append(body)
     return "".join(out)
