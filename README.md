@@ -1,6 +1,6 @@
 # Ratchet
 
-Ratchet turns an AI agent's mistakes into tested, signed safety rules, and refuses any change it cannot prove.
+Ratchet turns observed agent failures into tested, signed guard changes.
 
 When an agent fails, Ratchet writes a guard: a small rule that checks each tool call before it runs. It adopts the guard only after a replay (rerunning recorded past conversations through it) and fresh tests on held-out cases (test cases the improver never sees). Each decision is a receipt, a signed record anyone can verify offline.
 
