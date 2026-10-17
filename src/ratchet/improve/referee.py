@@ -20,12 +20,16 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import dataclasses
 import importlib
 import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import IO, Any, Protocol
@@ -35,13 +39,15 @@ from ratchet_cases.types import Trace, sha256_hex
 from ratchet.canonical import canonical_json
 from ratchet.improve import wire
 from ratchet.improve.activate import Activation, Activator
-from ratchet.improve.admit import Decision, ExtendedChange, admit, awaiting_confirmation
+from ratchet.improve.admit import Check, Decision, ExtendedChange, admit, admit_v3, awaiting_confirmation
 from ratchet.improve.diagnose import FailureCluster
-from ratchet.improve.evaluate import CaseLike, EvalReport, RunCase, evaluate_many
+from ratchet.improve.evaluate import CaseLike, EvalReport, RunCase, _one, evaluate_many
 from ratchet.improve.evaluator import evaluator_identity, require_same
 from ratchet.improve.overfit import Literals
+from ratchet.improve.policies import RULING_2, c1_flips, normalized, rebuild
 from ratchet.improve.receipt import Signer, receipt
 from ratchet.improve.replay import GuardRunner, ReplayReport, WalkCache, replay
+from ratchet.improve.results import Ledger
 from ratchet.improve.sim import Simulator
 from ratchet.types import Harness
 
@@ -74,6 +80,12 @@ class RefereeParts:
     repeats: int = 1
     # Candidates that add a tool or edit a procedure, and the admitted k-session bundle each is admitted on.
     session_bundles: Mapping[str, Path] = field(default_factory=dict)
+    # Where the signed results file and each decision's verification bundle are written (None: not written).
+    results_dir: Path | None = None
+    # The stored decision a policy re-judges, by (database, candidate version); None: none can be named.
+    decisions: Callable[[str, str], Mapping[str, Any] | None] | None = None
+    # The stochastic policy's per-repetition worker clients (`ratchet.improve.endpoints.PerRepetition`).
+    repetitions: Any = None
     close: Callable[[], None] = lambda: None
 
 
@@ -101,7 +113,25 @@ class Verdict:
     heldout_passed: int
     heldout_total: int
     stable_recoveries: int
+    protected_broken: int
+    c1_fail_to_pass: int
+    c1_pass_to_fail: int
     rates: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class Request:
+    """One candidate for `decide_many`: the improver's training run of it and what its guards were written
+    for. `decision_id` names the stored decision (default `<parent>-><candidate>`)."""
+
+    candidate: Harness
+    train: EvalReport
+    targets: Sequence[FailureCluster]
+    guard_clusters: Mapping[str, str]
+    literals: Literals
+    visible_case_ids: Sequence[str]
+    context: Mapping[str, Any]
+    decision_id: str | None = None
 
 
 class Referee(Protocol):
@@ -122,6 +152,8 @@ class Referee(Protocol):
         visible_case_ids: Sequence[str],
         context: Mapping[str, Any],
     ) -> Verdict: ...
+    def decide_many(self, generation: int, requests: Sequence[Request]) -> list[Verdict]: ...
+    def results(self, name: str) -> dict[str, Any]: ...
     def activate(
         self,
         *,
@@ -180,6 +212,32 @@ def totals(r: EvalReport) -> Totals:
     )
 
 
+def _spec(spec: str) -> tuple[str, str]:
+    db, sep, version = spec.partition(":")
+    if not sep or not db or not version:
+        raise RefereeError(f"a stored candidate is named db:version, got {spec!r}")
+    return db, version
+
+
+_V3_ROW = ("case_id", "parent", "parent_panels", "arm", "arm_panels", "parent_class", "arm_class", "decline")
+
+
+def _v3_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {k: row[k] for k in _V3_ROW}
+
+
+def _v3_counts(cmp: Mapping[str, Any], arm: str) -> dict[str, Any]:
+    """What the improver may know of one arm against the parent reference: counts and pooled rates."""
+    return {
+        "arm": arm,
+        "stable_recoveries": len(cmp["stable_recoveries"]),
+        "stable_regressions": len(cmp["stable_regressions"]),
+        "declines_over_limit": len(cmp["case_declines_over_limit"]),
+        "incomplete_cases": len(cmp["incomplete_cases"]),
+        "aggregate": cmp["aggregate"],
+    }
+
+
 class RefereeCore:
     """The referee's logic. One generation at a time: `parent_runs`, then `decide` for each candidate."""
 
@@ -191,6 +249,7 @@ class RefereeCore:
         self.evaluator: dict[str, Any] | None = None
         self._train_identity: dict[str, Any] | None = None
         self._generation: tuple[int, Harness, tuple[EvalReport, EvalReport]] | None = None
+        self.ledger = Ledger(parts.results_dir)
 
     def _heldout_identity(self) -> dict[str, Any]:
         return evaluator_identity(self.parts.cases, self.parts.model_config, self.parts.suite_digest)
@@ -295,61 +354,503 @@ class RefereeCore:
         literals: Literals,
         visible_case_ids: Sequence[str],
         context: Mapping[str, Any],
+        decision_id: str | None = None,
     ) -> Verdict:
         """Run the candidate on the held-out cases, replay its guards, admit or reject, and sign. A candidate
         that clears every gate on its first run gets one more fresh held-out run to confirm."""
+        request = Request(
+            candidate, train, targets, guard_clusters, literals, visible_case_ids, context, decision_id
+        )
+        return self.decide_many(generation, [request])[0]
+
+    def _ready(self, generation: int) -> tuple[Harness, tuple[EvalReport, EvalReport]]:
         if self._generation is None or self._generation[0] != generation:
             raise RefereeError(f"generation {generation} has no parent runs")
         if self.evaluator is None or self._train_identity is None:
             raise RefereeError("start the referee first")
         require_same(self.evaluator, combine_identity(self._train_identity, self._heldout_identity()))
-        _, parent, parent_runs = self._generation
-        if candidate.parent != parent.version:
-            raise RefereeError(f"candidate {candidate.version} is not a child of {parent.version}")
-        c1 = _merge(train, self._run(candidate))
-        self._persist(c1, {"generation": generation, "role": "candidate", "harness": candidate.version})
-        replays, composed = self._replays(generation, parent, candidate, targets, guard_clusters)
-        kw: dict[str, Any] = {
-            "parent_runs": parent_runs,
-            "cand_eval": c1,
-            "replays": replays,
-            "composed": composed,
-            "literals": literals,
-            "visible_case_ids": visible_case_ids,
-            "evaluator": self.evaluator,
-            "context": dict(context),
-        }
-        bundle = self.parts.session_bundles.get(candidate.version)
-        kw["extended"] = ExtendedChange(Path(bundle)) if bundle is not None else None
-        d = admit(parent, candidate, confirm_eval=None, **kw)
-        if awaiting_confirmation(d):
-            confirm = self._run(candidate)
-            self._persist(
-                confirm, {"generation": generation, "role": "confirm", "harness": candidate.version}
-            )
-            d = admit(parent, candidate, confirm_eval=confirm, **kw)
-        return self._sign(d, c1)
+        return self._generation[1], self._generation[2]
 
-    def _sign(self, d: Decision, c1: EvalReport) -> Verdict:
+    def _run_many(self, harnesses: Sequence[Harness]) -> list[EvalReport]:
+        if not harnesses:
+            return []
+        p = self.parts
+        return evaluate_many(harnesses, p.cases, p.run_case, p.model, workers=p.workers, repeats=p.repeats)
+
+    def decide_many(
+        self, generation: int, requests: Sequence[Request], policy: Mapping[str, Any] | None = None
+    ) -> list[Verdict]:
+        """`decide` for several candidates of one generation, with every first run in one bounded pool and
+        every confirming run in another. `policy` (ruling 2 on a deterministic endpoint, say) is recorded on
+        each decision."""
+        parent, parent_runs = self._ready(generation)
+        for r in requests:
+            if r.candidate.parent != parent.version:
+                raise RefereeError(f"candidate {r.candidate.version} is not a child of {parent.version}")
+        firsts = [
+            _merge(r.train, c)
+            for r, c in zip(requests, self._run_many([r.candidate for r in requests]), strict=True)
+        ]
+        kws: list[dict[str, Any]] = []
+        decisions: list[Decision] = []
+        for r, c1 in zip(requests, firsts, strict=True):
+            self._persist(c1, {"generation": generation, "role": "candidate", "harness": r.candidate.version})
+            replays, composed = self._replays(generation, parent, r.candidate, r.targets, r.guard_clusters)
+            kw: dict[str, Any] = {
+                "parent_runs": parent_runs,
+                "cand_eval": c1,
+                "replays": replays,
+                "composed": composed,
+                "literals": r.literals,
+                "visible_case_ids": r.visible_case_ids,
+                "evaluator": self.evaluator,
+                "context": dict(r.context),
+            }
+            bundle = self.parts.session_bundles.get(r.candidate.version)
+            kw["extended"] = ExtendedChange(Path(bundle)) if bundle is not None else None
+            kws.append(kw)
+            decisions.append(admit(parent, r.candidate, confirm_eval=None, **kw))
+        pending = [i for i, d in enumerate(decisions) if awaiting_confirmation(d)]
+        confirms: dict[int, EvalReport] = {}
+        for i, confirm in zip(pending, self._run_many([requests[i].candidate for i in pending]), strict=True):
+            version = requests[i].candidate.version
+            self._persist(confirm, {"generation": generation, "role": "confirm", "harness": version})
+            confirms[i] = confirm
+            decisions[i] = admit(parent, requests[i].candidate, confirm_eval=confirm, **kws[i])
+        return [
+            self._sign(d, r, parent, (firsts[i], confirms.get(i)), kws[i], policy)
+            for i, (d, r) in enumerate(zip(decisions, requests, strict=True))
+        ]
+
+    def _sign(
+        self,
+        d: Decision,
+        r: Request,
+        parent: Harness,
+        cand: tuple[EvalReport, EvalReport | None],
+        kw: Mapping[str, Any],
+        policy: Mapping[str, Any] | None,
+    ) -> Verdict:
+        if policy is not None:
+            d = dataclasses.replace(d, policy=dict(policy))
         signer = self.parts.signer
         env = receipt(d, signer)
-        decision_id = f"{d.parent}->{d.candidate}"
+        decision_id = r.decision_id or f"{d.parent}->{d.candidate}"
         self.parts.store.put_decision(
             {**d.to_payload(), "envelope": base64.b64encode(env).decode("ascii"), "keyid": signer.keyid},
             decision_id=decision_id,
         )
-        held = totals(c1)
+        held = d.check("heldout").evidence
+        up, down = c1_flips(held)
+        self._record(d, decision_id, env, r.candidate, parent, cand, kw)
+        c1 = totals(cand[0])
         return Verdict(
             decision_id,
             sha256_hex(env),
             d.candidate,
             d.admitted,
             tuple(c.name for c in d.checks if not c.passed),
-            held.heldout_passed,
-            held.heldout_total,
-            len(d.check("heldout").evidence["stable_recoveries"]),
+            c1.heldout_passed,
+            c1.heldout_total,
+            len(held["stable_recoveries"]),
+            len(held["protected_broken"]),
+            len(up),
+            len(down),
             dict(d.rates),
         )
+
+    def _record(
+        self,
+        d: Decision,
+        decision_id: str,
+        env: bytes,
+        candidate: Harness,
+        parent: Harness,
+        cand: tuple[EvalReport, EvalReport | None],
+        kw: Mapping[str, Any],
+    ) -> None:
+        """The decision's verification bundle and its row in the results file: the per-case held-out table
+        the improver never receives."""
+        assert self._generation is not None
+        p1, p2 = self._generation[2]
+        named: dict[str, EvalReport] = {"parent_run_1": p1, "parent_run_2": p2, "candidate_run": cand[0]}
+        if cand[1] is not None:
+            named["candidate_confirm_run"] = cand[1]
+        reports: dict[str, Any] = {k: e.to_payload() for k, e in named.items()}
+        reports |= {f"replay:{gid}": rep.to_payload() for gid, rep in kw["replays"].items()}
+        if kw["composed"] is not None:
+            reports["replay:composed"] = kw["composed"].to_payload()
+        traces = {k: [wire.trace_doc(t) for t in e.traces] for k, e in named.items()}
+        harnesses = {"parent": wire.harness_doc(parent), "candidate": wire.harness_doc(candidate)}
+        rel = self.ledger.bundle(decision_id, env, reports, traces, harnesses)
+        held = d.check("heldout").evidence
+        up, down = c1_flips(held)
+        self.ledger.add(
+            {
+                "decision_id": decision_id,
+                "policy": (d.policy or {}).get("name", "ruling-2"),
+                "receipt_sha256": sha256_hex(env),
+                "parent": d.parent,
+                "candidate": d.candidate,
+                "admitted": d.admitted,
+                "failed": [c.name for c in d.checks if not c.passed],
+                "bundle": rel,
+                "heldout": {
+                    "order": held["order"],
+                    "outcomes": held["outcomes"],
+                    "stable_recoveries": held["stable_recoveries"],
+                    "protected_broken": held["protected_broken"],
+                    "c1_fail_to_pass": up,
+                    "c1_pass_to_fail": down,
+                },
+            }
+        )
+
+    def results(self, name: str) -> dict[str, Any]:
+        """Sign the results file under the decision key and return what a driver may record."""
+        try:
+            return self.ledger.publish(name, self.parts.signer, self.evaluator)
+        except ValueError as exc:
+            raise RefereeError(str(exc)) from exc
+
+    def candidate(self, spec: str, parent: Harness) -> dict[str, Any]:
+        """The candidate a stored decision judged, rebuilt and checked by digest, and the part of the
+        decision's context that is the improver's own (the change, its kind, the cluster and generation it
+        came from). The decision's checks and their held-out evidence stay here."""
+        db, version = _spec(spec)
+        found = self._original(db, version)
+        harness = rebuild(parent, found)
+        ctx = found.get("context") or {}
+        keep = ("kind", "change", "cluster_id", "generation", "experiment", "arm")
+        return {
+            "harness": wire.harness_doc(harness),
+            "context": {k: ctx[k] for k in keep if k in ctx},
+            "source": f"{db}:{found.get('parent')}->{found.get('candidate')}",
+        }
+
+    def _original(self, db: str, version: str) -> Mapping[str, Any]:
+        if self.parts.decisions is None:
+            raise RefereeError("this referee has no source of stored decisions")
+        found = self.parts.decisions(db, version)
+        if found is None:
+            raise RefereeError(f"no decision for {db}:{version}")
+        return found
+
+    def _throughput(self, role: str, report: EvalReport) -> dict[str, Any]:
+        n = len(report.results)
+        return {
+            "role": role,
+            "runs": n,
+            "wall_s": round(report.wall_s, 1),
+            "runs_per_min": round(60 * n / report.wall_s, 2) if report.wall_s else None,
+            "workers": self.parts.workers,
+        }
+
+    def deterministic(
+        self,
+        parent: Harness,
+        request: Request,
+        parent_train: EvalReport,
+        repeat_heldout: int = 3,
+    ) -> dict[str, Any]:
+        """Ruling 2 on a deterministic endpoint (temperature 0, a fixed seed, endpoints in round robin).
+
+        1. Repeatability: the parent runs twice on the first `repeat_heldout` held-out cases (0: all); each
+           pair must give the same normalized trace.
+        2. P1 and P2 (the parent's held-out runs); any held-out case on which they disagree stops the track.
+        3. C1, replay, `admit()`, C2 when C1 clears every gate, and a receipt that names ruling 2, the
+           deterministic evaluator and the endpoint configuration digest.
+
+        The improver receives whether each stage held, counts and the verdict; the per-case digests and
+        outcomes go to the results file."""
+        if self.evaluator is None:
+            raise RefereeError("start the referee first")
+        digest = self.parts.model_config.get("endpoint_config_digest")
+        out: dict[str, Any] = {"endpoint_config_digest": digest, "throughput": []}
+        cases = self.parts.cases
+        probe = list(cases[:repeat_heldout] if repeat_heldout > 0 else cases)
+        first, second = (self._run_on(parent, probe, role, out) for role in ("repeat_a", "repeat_b"))
+        digests = {t.case_id: normalized(t) for t in first.traces}
+        again = {t.case_id: normalized(t) for t in second.traces}
+        repeat = {c.id: digests.get(c.id) == again.get(c.id) for c in probe}
+        self.ledger.note("repeatability", {"cases": repeat, "digests_a": digests, "digests_b": again})
+        out["repeatability"] = {
+            "probed": len(repeat),
+            "repeatable": all(repeat.values()),
+            "differing": sum(1 for v in repeat.values() if not v),
+        }
+        if not all(repeat.values()):
+            return self._stop(
+                out, "NOT REPEATABLE: two identical runs produced different traces; track stopped"
+            )
+        self.parent_runs(1, parent, parent_train)
+        assert self._generation is not None
+        p1, p2 = self._generation[2]
+        out["throughput"] += [self._throughput("parent_run_1", p1), self._throughput("parent_run_2", p2)]
+        p1h, p2h = ({r.case_id: r.passed for r in e.results if r.split == "heldout"} for e in (p1, p2))
+        differ = sorted(k for k in p1h if p1h[k] != p2h.get(k))
+        self.ledger.note("parent_discordance", differ)
+        out["parent_discordance"] = len(differ)
+        if differ:
+            return self._stop(
+                out, f"NOT REPEATABLE: P1 and P2 differ on {len(differ)} held-out case(s); track stopped"
+            )
+        policy = {**RULING_2, "endpoint_config_digest": digest}
+        context = {**request.context, "policy": RULING_2, "endpoint_config_digest": digest}
+        verdict = self.decide_many(1, [dataclasses.replace(request, context=context)], policy=policy)[0]
+        out |= {"result": "decided", "verdict": asdict(verdict)}
+        return out
+
+    def _run_on(self, h: Harness, cases: Sequence[CaseLike], role: str, out: dict[str, Any]) -> EvalReport:
+        p = self.parts
+        report = evaluate_many([h], cases, p.run_case, p.model, workers=p.workers)[0]
+        self._persist(
+            report, {"role": role, "endpoint_config_digest": p.model_config.get("endpoint_config_digest")}
+        )
+        out["throughput"].append(self._throughput(role, report))
+        return report
+
+    def _stop(self, out: dict[str, Any], result: str) -> dict[str, Any]:
+        out["result"] = result
+        self.parts.store.put_eval({"type": "endpoint_verdict", "policy": RULING_2, **out})
+        return out
+
+    def stochastic(
+        self,
+        parent: Harness,
+        candidates: Sequence[str],
+        case_ids: Sequence[str],
+        schedule_seed: int,
+        *,
+        deadline_s: float = float("inf"),
+        scope_note: str = "",
+        workers: int = 128,
+    ) -> dict[str, Any]:
+        """Stochastic policy v3, live: a parent reference arm, two identity-control arms and one arm per
+        stored candidate (`db:version`), 40 fresh executions per case per arm, interleaved by a predeclared
+        schedule; then `admit_v3` and a signed receipt per candidate.
+
+        Every execution is stored as it completes (`v3_execution`), and its trace is appended to the
+        cohort's trace file, so a stopped run keeps its evidence. The improver receives counts, pooled
+        rates and the signed decisions; per-case tables go to the results file."""
+        from ratchet.improve.stochastic import POLICY, CaseInfo, schedule, schedule_digest
+
+        p = self.parts
+        if p.repetitions is None:
+            raise RefereeError("this referee has no per-repetition worker clients")
+        by_id = {c.id: c for c in p.cases}
+        unknown = sorted(set(case_ids) - set(by_id))
+        if unknown or not case_ids:
+            raise RefereeError(f"v3 evaluates this referee's held-out cases only; not held here: {unknown}")
+        infos = [CaseInfo(c, by_id[c].kind, by_id[c].must_succeed) for c in case_ids]
+        originals: dict[str, dict[str, Any]] = {}
+        arms: dict[str, Harness] = {"parent": parent, "identity_1": parent, "identity_2": parent}
+        for spec in candidates:
+            db, version = _spec(spec)
+            d = self._original(db, version)
+            originals[version] = {**d, "source_db": db}
+            arms[f"candidate:{version}"] = rebuild(parent, d)
+        evaluator = evaluator_identity([by_id[c] for c in case_ids], p.model_config, p.suite_digest)
+        order = schedule(list(arms), list(case_ids), schedule_seed)
+        frozen = {
+            "policy": POLICY,
+            "schedule_seed": schedule_seed,
+            "schedule_digest": schedule_digest(order),
+            "cases": list(case_ids),
+            "arms": {k: h.version for k, h in arms.items()},
+            "evaluator": evaluator["version"],
+            "model_config": p.model_config,
+            "workers": workers,
+            "infra_retries": 2,
+            "scope_note": scope_note,
+        }
+        p.store.put_eval(
+            {"type": "v3_frozen", **frozen}, eval_id=f"v3-frozen-{frozen['schedule_digest'][:16]}"
+        )
+        cohort_dir = self.ledger.cohort(frozen["schedule_digest"])
+        results, wall = self._execute(arms, order, frozen, deadline_s, workers, cohort_dir)
+        return self._v3_decide(parent, arms, results, infos, originals, frozen, evaluator, wall, cohort_dir)
+
+    def _execute(
+        self,
+        arms: Mapping[str, Harness],
+        order: Sequence[tuple[str, str, int]],
+        frozen: Mapping[str, Any],
+        deadline_s: float,
+        workers: int,
+        cohort_dir: str | None,
+    ) -> tuple[dict[str, Any], float]:
+        from ratchet.improve.stochastic import Arm, Execution, execution_record, panel_of
+
+        p = self.parts
+        by_id = {c.id: c for c in p.cases}
+        seed_base = p.repetitions.seed_base
+        results: dict[str, Arm] = {k: Arm(k, h.version) for k, h in arms.items()}
+        lock = threading.Lock()
+        started = time.perf_counter()
+
+        def run_one(index: int, arm: str, case_id: str, rep: int) -> Execution:
+            if time.perf_counter() - started > deadline_s:
+                return Execution(
+                    arm, case_id, rep, panel_of(rep), seed_base + rep, None, note="not run: deadline"
+                )
+            url, client = p.repetitions.client_for(index, rep)
+            res, trace = _one(p.run_case, arms[arm], by_id[case_id], client, None)
+            valid = res.mode == "FRESH" and not res.infra_failed and not res.error
+            if trace is not None:
+                p.store.put_trace(trace)
+                self.ledger.append_trace(cohort_dir, arm, wire.trace_doc(trace))
+            return Execution(
+                arm, case_id, rep, panel_of(rep), seed_base + rep, res.passed if valid else None,
+                res.run_id, res.interventions, res.attempts, "" if valid else (res.error or "invalid"), url,
+            )  # fmt: skip
+
+        def one(index: int, arm: str, case_id: str, rep: int) -> None:
+            try:
+                ex = run_one(index, arm, case_id, rep)
+            except Exception as exc:  # recorded as an invalid execution
+                note = f"driver error: {exc}"[:300]
+                ex = Execution(arm, case_id, rep, panel_of(rep), seed_base + rep, None, note=note)
+            p.store.put_eval(
+                {"type": "v3_execution", "schedule_digest": frozen["schedule_digest"], **execution_record(ex)}
+            )
+            with lock:
+                results[arm].executions.append(ex)
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for f in [pool.submit(one, i, arm, c, r) for i, (arm, c, r) in enumerate(order)]:
+                f.result()
+        return results, time.perf_counter() - started
+
+    def _v3_decide(
+        self,
+        parent: Harness,
+        arms: Mapping[str, Harness],
+        results: Mapping[str, Any],
+        infos: Sequence[Any],
+        originals: Mapping[str, Mapping[str, Any]],
+        frozen: Mapping[str, Any],
+        evaluator: Mapping[str, Any],
+        wall: float,
+        cohort_dir: str | None,
+    ) -> dict[str, Any]:
+        from ratchet.improve.stochastic import RUNS, compare, execution_record, qualify
+
+        p = self.parts
+        kinds = {c.id: c.kind for c in p.cases}
+        cohort = qualify(results["parent"], [results["identity_1"], results["identity_2"]], infos)
+        records = {
+            k: [execution_record(e) for e in sorted(v.executions, key=lambda e: (e.case_id, e.rep))]
+            for k, v in results.items()
+        }
+        arm_digests = {k: sha256_hex(canonical_json(v)) for k, v in records.items()}
+        self.ledger.cohort_records(cohort_dir, records)
+        invalid = [e for v in results.values() for e in v.executions if e.passed is None]
+        self.ledger.note(
+            "v3_identity_controls",
+            {c["arm"]: [_v3_row(r) for r in c["cases"]] for c in cohort["controls"]},
+        )
+        summary: dict[str, Any] = {
+            "frozen": {k: frozen[k] for k in ("schedule_digest", "arms", "evaluator", "policy")}
+            | {"cases": len(frozen["cases"])},
+            "wall_s": round(wall, 1),
+            "executions": sum(len(v.executions) for v in results.values()),
+            "invalid": len(invalid),
+            "cohort": cohort["status"],
+            "controls": [_v3_counts(c, c["arm"]) | {"qualifies": c["qualifies"]} for c in cohort["controls"]],
+            "decisions": [],
+        }
+        for version, d in originals.items():
+            name = f"candidate:{version}"
+            cmp = compare(results["parent"], results[name], infos)
+            benign = sum(
+                e.interventions for e in results[name].executions if kinds[e.case_id] == "benign_twin"
+            )
+            checks = {c["name"]: c for c in d["checks"]}
+            source = f"{d['source_db']}:{d['parent']}->{d['candidate']}"
+            dec = admit_v3(
+                parent,
+                arms[name],
+                cohort=cohort,
+                comparison=cmp,
+                benign_interventions=benign,
+                replay_check=Check(
+                    "replay",
+                    checks["replay"]["passed"],
+                    {**checks["replay"]["evidence"], "from_decision": source},
+                ),
+                overfit_check=Check(
+                    "overfit_lint", checks["overfit_lint"]["passed"], checks["overfit_lint"]["evidence"]
+                ),
+                evaluator=evaluator,
+                visible_case_ids=d.get("visible_case_ids", []),
+                report_digests={f"arm:{k}": v for k, v in arm_digests.items()}
+                | {"schedule": frozen["schedule_digest"]},
+                corpus_digests=d.get("corpus_digests", {}),
+                scope={
+                    "cases": list(frozen["cases"]),
+                    "note": frozen["scope_note"],
+                    "runs_per_arm_per_case": RUNS,
+                },
+                exceptions=[f"{e.arm} {e.case_id} rep {e.rep}: {e.note}" for e in invalid],
+                context={
+                    "policy": "stochastic-v3",
+                    "original_decision": f"{d['parent']}->{d['candidate']}",
+                    "kind": d["context"]["kind"],
+                },
+            )
+            env = receipt(dec, p.signer)
+            decision_id = f"v3:{dec.parent}->{dec.candidate}:{frozen['schedule_digest'][:12]}"
+            p.store.put_decision(
+                {
+                    **dec.to_payload(),
+                    "envelope": base64.b64encode(env).decode("ascii"),
+                    "keyid": p.signer.keyid,
+                },
+                decision_id=decision_id,
+            )
+            rel = self.ledger.bundle(
+                decision_id,
+                env,
+                {},
+                {},
+                {"parent": wire.harness_doc(parent), "candidate": wire.harness_doc(arms[name])},
+                cohort=cohort_dir,
+                arms=["parent", name],
+            )
+            failed = [c.name for c in dec.checks if not c.passed]
+            self.ledger.add(
+                {
+                    "decision_id": decision_id,
+                    "policy": "stochastic-v3",
+                    "receipt_sha256": sha256_hex(env),
+                    "parent": dec.parent,
+                    "candidate": dec.candidate,
+                    "admitted": dec.admitted,
+                    "failed": failed,
+                    "bundle": rel,
+                    "arm": name,
+                    "schedule_digest": frozen["schedule_digest"],
+                    "per_case": [_v3_row(r) for r in cmp["cases"]],
+                    "stable_recoveries": cmp["stable_recoveries"],
+                    "stable_regressions": cmp["stable_regressions"],
+                    "declines_over_limit": cmp["case_declines_over_limit"],
+                    "benign_interventions": benign,
+                }
+            )
+            summary["decisions"].append(
+                _v3_counts(cmp, name)
+                | {
+                    "decision_id": decision_id,
+                    "candidate": version,
+                    "admitted": dec.admitted,
+                    "receipt_sha256": sha256_hex(env),
+                    "failed": failed,
+                    "benign_interventions": benign,
+                }
+            )
+        p.store.put_eval({"type": "v3_summary", **summary})
+        return summary
 
     def activate(
         self,
@@ -406,6 +907,36 @@ def load_factory(name: str) -> Factory:
     return fn  # type: ignore[no-any-return]
 
 
+def request_doc(r: Request) -> dict[str, Any]:
+    return {
+        "candidate": wire.harness_doc(r.candidate),
+        "train": wire.report_doc(r.train),
+        "targets": [wire.cluster_doc(c) for c in r.targets],
+        "guard_clusters": dict(r.guard_clusters),
+        "literals": wire.literals_doc(r.literals),
+        "visible_case_ids": list(r.visible_case_ids),
+        "context": dict(r.context),
+        "decision_id": r.decision_id,
+    }
+
+
+def request_of(a: Mapping[str, Any]) -> Request:
+    return Request(
+        wire.harness(a["candidate"]),
+        wire.report(a["train"]),
+        [wire.cluster(c) for c in a["targets"]],
+        {str(k): str(v) for k, v in a["guard_clusters"].items()},
+        wire.literals(a["literals"]),
+        [str(x) for x in a["visible_case_ids"]],
+        dict(a["context"]),
+        None if a.get("decision_id") is None else str(a["decision_id"]),
+    )
+
+
+def _verdict(v: Mapping[str, Any]) -> Verdict:
+    return Verdict(**{**v, "failed": tuple(v["failed"])})
+
+
 def _rates(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
@@ -422,17 +953,31 @@ def _dispatch(core: RefereeCore, request: Mapping[str, Any]) -> Any:
     if method == "evaluate":
         return asdict(core.evaluate(str(a["role"]), wire.harness(a["harness"]), wire.report(a["train"])))
     if method == "decide":
-        v = core.decide(
-            int(a["generation"]),
-            wire.harness(a["candidate"]),
-            wire.report(a["train"]),
-            [wire.cluster(c) for c in a["targets"]],
-            {str(k): str(v) for k, v in a["guard_clusters"].items()},
-            wire.literals(a["literals"]),
-            [str(x) for x in a["visible_case_ids"]],
-            dict(a["context"]),
+        return asdict(core.decide_many(int(a["generation"]), [request_of(a)])[0])
+    if method == "decide_many":
+        verdicts = core.decide_many(int(a["generation"]), [request_of(r) for r in a["requests"]])
+        return [asdict(v) for v in verdicts]
+    if method == "deterministic":
+        return core.deterministic(
+            wire.harness(a["parent"]),
+            request_of(a["request"]),
+            wire.report(a["parent_train"]),
+            int(a["repeat_heldout"]),
         )
-        return asdict(v)
+    if method == "stochastic":
+        return core.stochastic(
+            wire.harness(a["parent"]),
+            [str(x) for x in a["candidates"]],
+            [str(x) for x in a["case_ids"]],
+            int(a["schedule_seed"]),
+            deadline_s=float(a["deadline_s"]),
+            scope_note=str(a["scope_note"]),
+            workers=int(a["workers"]),
+        )
+    if method == "candidate":
+        return core.candidate(str(a["spec"]), wire.harness(a["parent"]))
+    if method == "results":
+        return core.results(str(a["name"]))
     if method == "active":
         return list(core.active())
     if method == "public_key":
@@ -569,19 +1114,59 @@ class ProcessReferee:
         literals: Literals,
         visible_case_ids: Sequence[str],
         context: Mapping[str, Any],
+        decision_id: str | None = None,
     ) -> Verdict:
-        v = self._call(
-            "decide",
-            generation=generation,
-            candidate=wire.harness_doc(candidate),
-            train=wire.report_doc(train),
-            targets=[wire.cluster_doc(c) for c in targets],
-            guard_clusters=dict(guard_clusters),
-            literals=wire.literals_doc(literals),
-            visible_case_ids=list(visible_case_ids),
-            context=dict(context),
+        r = Request(
+            candidate, train, targets, guard_clusters, literals, visible_case_ids, context, decision_id
         )
-        return Verdict(**{**v, "failed": tuple(v["failed"])})
+        return _verdict(self._call("decide", generation=generation, **request_doc(r)))
+
+    def decide_many(self, generation: int, requests: Sequence[Request]) -> list[Verdict]:
+        docs = self._call("decide_many", generation=generation, requests=[request_doc(r) for r in requests])
+        return [_verdict(v) for v in docs]
+
+    def deterministic(
+        self, parent: Harness, request: Request, parent_train: EvalReport, repeat_heldout: int = 3
+    ) -> dict[str, Any]:
+        out: dict[str, Any] = self._call(
+            "deterministic",
+            parent=wire.harness_doc(parent),
+            request=request_doc(request),
+            parent_train=wire.report_doc(parent_train),
+            repeat_heldout=repeat_heldout,
+        )
+        return out
+
+    def stochastic(
+        self,
+        parent: Harness,
+        candidates: Sequence[str],
+        case_ids: Sequence[str],
+        schedule_seed: int,
+        *,
+        deadline_s: float = float("inf"),
+        scope_note: str = "",
+        workers: int = 128,
+    ) -> dict[str, Any]:
+        out: dict[str, Any] = self._call(
+            "stochastic",
+            parent=wire.harness_doc(parent),
+            candidates=list(candidates),
+            case_ids=list(case_ids),
+            schedule_seed=schedule_seed,
+            deadline_s=deadline_s,
+            scope_note=scope_note,
+            workers=workers,
+        )
+        return out
+
+    def candidate(self, spec: str, parent: Harness) -> dict[str, Any]:
+        out: dict[str, Any] = self._call("candidate", spec=spec, parent=wire.harness_doc(parent))
+        return out
+
+    def results(self, name: str) -> dict[str, Any]:
+        out: dict[str, Any] = self._call("results", name=name)
+        return out
 
     def activate(
         self,

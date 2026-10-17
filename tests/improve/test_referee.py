@@ -84,6 +84,9 @@ def test_what_the_improver_receives_is_counts_and_names_never_case_ids() -> None
         "heldout_passed",
         "heldout_total",
         "stable_recoveries",
+        "protected_broken",
+        "c1_fail_to_pass",
+        "c1_pass_to_fail",
         "rates",
     }
 
