@@ -12,8 +12,9 @@ from ratchet.agent.guards import GuardItem, GuardRuntime
 from ratchet.export.claude_code import admitted_guard, harness_from_json, public_key, verify_hook
 from ratchet.export.hookrt import reads_history
 from ratchet.export.replay_transcripts import discover, replay_transcripts
-from ratchet.improve.receipt import key_id, verify
+from ratchet.improve.receipt import verify
 from ratchet.types import Guard
+from ratchet.verify.dsse import keyid_of
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "claude-code"
 SOURCE = (EXAMPLE / "no_force_push_main.py").read_text(encoding="utf-8")
@@ -139,13 +140,13 @@ def test_committed_artifacts_agree() -> None:
     header = verify_hook(hook)
     envelope = (EXAMPLE / "receipt.json").read_bytes()
     key = public_key((EXAMPLE / "public_key.txt").read_text(encoding="utf-8"))
-    decision = verify(envelope, {key_id(key): key})
+    decision = verify(envelope, {keyid_of(key): key})
     harness = harness_from_json(json.loads((EXAMPLE / "harness.json").read_text(encoding="utf-8")))
-    guard, provenance = admitted_guard(harness, "no-force-push-main", envelope, {key_id(key): key})
+    guard, provenance = admitted_guard(harness, "no-force-push-main", envelope, {keyid_of(key): key})
     assert guard.source == SOURCE
     assert header["decision_receipt_sha256"] == sha256_hex(envelope) == provenance.decision_receipt_sha256
     assert header["harness_version"] == harness.version == decision["candidate"]
-    assert header["decision_signers"] == key_id(key)
+    assert header["decision_signers"] == keyid_of(key)
     replay = json.loads((EXAMPLE / "replay.json").read_text(encoding="utf-8"))
     assert replay == decision["checks"][0]["evidence"]
     assert replay["passed"] is True and replay["errors"] == 0

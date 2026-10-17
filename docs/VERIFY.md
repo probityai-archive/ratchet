@@ -18,14 +18,14 @@ verdict was reached.
 
 | Package | Pin | Where |
 |---|---|---|
-| `probity-verify` | `==0.1.0`, PyPI, wheel SHA-256 `18e0f99fb21701cd2d5eb312d99700d7cf800e8cdf9dc8e5d3608bc315cf1453` (its package files are byte-identical to the source at commit `b920366`, the earlier git pin) | `pyproject.toml`, `uv.lock` |
-| `agent-evidence-vectors` | `==0.17.9`, PyPI | `pyproject.toml`, `uv.lock` |
+| `probity-verify` | `==0.1.1`, PyPI, wheel SHA-256 `e5788644f64d4faf73d999f9b8371f761141493403f642659ba0ad36a15ef6cf` | `pyproject.toml`, `uv.lock` |
+| `agent-evidence-vectors` | `==0.19.0`, PyPI | `pyproject.toml`, `uv.lock` |
 
-`probity-verify` requires `cryptography>=50.0.2,<51`; the lock resolves 50.0.2. The 0.1.0 release (source commit `b920366`)
-has the `adapters=` argument this build uses. `tests/verify/test_pinned_dependencies.py` asserts both pins and runs the
+`probity-verify` 0.1.1 has the `adapters=` argument this build uses. `tests/verify/test_pinned_dependencies.py` asserts both pins and runs the
 vector harness's own self-test, so a drifted pin fails a test.
 
-Clean-environment result, 2026-10-11, Python 3.12.14, a fresh venv holding only these two packages:
+Clean-environment result for the earlier pins (`probity-verify==0.1.0`, `agent-evidence-vectors==0.17.9`),
+2026-10-11, Python 3.12.14, a fresh venv holding only these two packages:
 
 - both install from the pins above; `probity_verify` exports `adjudicate` and `CaseError`;
 - `agent-evidence-vectors --self-test`: 20 checks, 0 failed;
@@ -48,9 +48,12 @@ Clean-environment result, 2026-10-11, Python 3.12.14, a fresh venv holding only 
 | Admission gates recomputed from stored evidence | | `recompute.py` |
 
 `probity-verify` has no DSSE or Ratchet-payload support of its own. The adapter `ratchet_decision/v1`
-(`src/ratchet/verify/adapter.py`) is the extension point its `adapters=` argument provides. The signature code in
-`dsse.py` shares nothing with the signer in `ratchet.improve.receipt`; the tests sign with one and verify with the
-other, and a third implementation (`securesystemslib`) accepts the same envelope.
+(`src/ratchet/verify/adapter.py`) is the extension point its `adapters=` argument provides. Every PAE, signature
+and signature check, for signing and for verifying, goes through `probityai.dsse`, the binding of the `dsse` crate;
+`dsse.py` adds only the structural read and the rule that a key is tried only when a signature entry names it.
+Two other implementations check it: the tests keep the earlier pure-Python reader (`tests/verify/python_dsse.py`)
+and require it to agree with the binding on honest, malformed and forged envelopes, and `securesystemslib`
+accepts the same envelopes. A countersigned decision can be held to both of its keys (`threshold=2`).
 
 ## Recomputed and authenticated only
 
@@ -86,18 +89,19 @@ procedures unchanged and in order, parent prompt a prefix, unique ids, digest eq
 
 ## What the receipt must carry
 
-`Decision.to_payload()` of the admission lane, plus one field:
+`Decision.to_payload()` of the admission lane:
 
 | Field | Rule |
 |---|---|
-| `predicateType` | exactly the pinned predicate URI (below); **not emitted yet, the admission lane must add it** |
+| `predicateType` | exactly the pinned predicate URI (below) |
 | `parent`, `candidate` | non-empty; equal the harness versions when harnesses are supplied |
 | `candidate_digest` | 64 hex; equals the candidate harness digest |
 | `admitted` | bool; equals the conjunction of the required gates |
 | `checks` | list of `{name, passed, evidence}`; every required gate present |
 | `evaluator` | `version` non-empty and `components.suite_file` 64 hex (the frozen suite digest) |
 | `corpus_digests` | guard id to 64 hex replay snapshot digest |
-| `report_digests` | non-empty; name to 64 hex, the SHA-256 of the report's canonical JSON |
+| `canonicalization` | `rfc8785`; absent only on a decision signed before RFC 8785, whose report digests are over sorted-keys JSON |
+| `report_digests` | non-empty; name to 64 hex, the SHA-256 of the report's canonical JSON under `canonicalization` |
 | `exceptions` | list of strings; `authority grew under ...` marks a human-approved exception |
 
 Evaluation reports are found by name: `parent_run_1`, `parent_run_2`, `candidate_run`,

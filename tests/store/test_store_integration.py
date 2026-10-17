@@ -14,7 +14,9 @@ import pytest
 from conftest import HashEmbedder, make_client
 from ratchet_cases.types import Cost, Event, Outcome, Trace
 
-from ratchet.store import IntegrityError, NewFailure, Store, VoyageEmbedder, VoyageReranker, atlas_setup
+from ratchet.store import IntegrityError, NewFailure, atlas_setup
+from ratchet.store.atlas import Store
+from ratchet.store.embed import VoyageEmbedder, VoyageReranker
 from ratchet.types import Guard, Harness, Procedure
 
 pytestmark = pytest.mark.integration

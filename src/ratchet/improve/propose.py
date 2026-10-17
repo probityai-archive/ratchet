@@ -17,8 +17,9 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from ratchet_cases.types import Trace, canonical_json, sha256_hex
+from ratchet_cases.types import Trace, sha256_hex
 
+from ratchet.canonical import canonical_json
 from ratchet.improve.diagnose import FailureCluster, FailurePoint, excerpt
 from ratchet.improve.llm import Chat, Meter, ask_json
 from ratchet.improve.replay import ReplayReport, WalkCache

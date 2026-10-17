@@ -17,12 +17,12 @@ from improve.test_loop import CASES, SEED, RoutingChat
 from rich.console import Console
 
 from ratchet.cli import LiveBackend, main
-from ratchet.improve.activate import MongoActivator
 from ratchet.improve.loop import EvolveResult, Lab, evolve
 from ratchet.improve.receipt import Signer
 from ratchet.improve.replay import GuardRunner
 from ratchet.improve.sim import Simulator
-from ratchet.store import Store
+from ratchet.store.activation import MongoActivator
+from ratchet.store.atlas import Store
 from ratchet.view.matrix import CaseInfo
 
 pytestmark = pytest.mark.integration
@@ -95,7 +95,7 @@ def test_verify_recomputes_from_the_store_and_keeps_recomputed_apart_from_authen
         assert item in out
     assert "AUTHENTICATED ONLY (signed, not re-derived)  fresh_model_execution" in out
     assert "6 of 6 named reports checked; every recomputable item recomputed" in out
-    assert "independent verifier" in out
+    assert "checked by the dsse crate" in out
 
 
 def test_a_rejection_receipt_verifies_too(evolved: tuple[str, str, EvolveResult, Store]) -> None:

@@ -10,18 +10,18 @@ import httpx
 import pytest
 from ratchet_cases.types import Cost, Event, Outcome, Trace
 
-from ratchet.store import (
+from ratchet.canonical import CANONICALIZATION
+from ratchet.store import IntegrityError, NewFailure, atlas, atlas_setup
+from ratchet.store.atlas import Store
+from ratchet.store.embed import (
+    EMBEDDING_DIMS,
+    CachedEmbedder,
     EmbeddingError,
-    IntegrityError,
     MissingKeyError,
-    NewFailure,
-    Store,
     VoyageEmbedder,
     VoyageReranker,
-    atlas,
-    atlas_setup,
+    cache_key,
 )
-from ratchet.store.embed import EMBEDDING_DIMS, CachedEmbedder, cache_key
 from ratchet.types import Harness
 
 
@@ -160,12 +160,29 @@ def test_trace_roundtrip_and_digest_check() -> None:
         "model": "m",
         "outcome": asdict(t.outcome),
         "digest": atlas.trace_digest(t),
+        "digest_canonicalization": CANONICALIZATION,
     }
     events = [asdict(e) for e in t.events]
     assert atlas._trace_from_parts(header, events) == t
     events[0]["payload"] = {"text": "tampered"}
     with pytest.raises(IntegrityError):
         atlas._trace_from_parts(header, events)
+
+
+def test_a_trace_stored_before_rfc8785_is_read_with_its_own_digest_form() -> None:
+    """A stored trace that names no canonicaliser was digested over sorted-keys JSON; it still loads, and
+    claiming RFC 8785 for it fails, because its float times (`1.0`) are spelled differently there."""
+    from dataclasses import asdict
+
+    t = _trace()
+    old = atlas.trace_digest(t, None)
+    assert old != atlas.trace_digest(t)
+    header = {"_id": "r1/c1", "run_id": "r1", "case_id": "c1", "harness_version": "v1", "model": "m",
+              "outcome": asdict(t.outcome), "digest": old}  # fmt: skip
+    events = [asdict(e) for e in t.events]
+    assert atlas._trace_from_parts(header, events) == t
+    with pytest.raises(IntegrityError):
+        atlas._trace_from_parts({**header, "digest_canonicalization": CANONICALIZATION}, events)
 
 
 def test_split_events_keeps_order_and_bounds_chunks(monkeypatch: pytest.MonkeyPatch) -> None:

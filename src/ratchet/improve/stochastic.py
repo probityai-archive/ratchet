@@ -16,8 +16,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from ratchet_cases.types import canonical_json, sha256_hex
+from ratchet_cases.types import sha256_hex
 
+from ratchet.canonical import canonical_json
 from ratchet.types import Harness
 
 POLICY: dict[str, Any] = {

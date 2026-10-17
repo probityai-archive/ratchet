@@ -37,8 +37,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from ratchet_cases.types import Trace, canonical_json, sha256_hex
+from ratchet_cases.types import Trace, sha256_hex
 
+from ratchet.canonical import canonical_json
 from ratchet.improve.admit import GATES, Decision, admit, awaiting_confirmation
 from ratchet.improve.diagnose import FailureCluster, FailurePoint, diagnose
 from ratchet.improve.evaluate import CaseLike, EvalReport, RunCase, evaluate_many
@@ -1109,7 +1110,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from ratchet.agent.worker import run_case
     from ratchet.improve.sandbox import SandboxRunner
     from ratchet.improve.worldsim import WorldSimulator
-    from ratchet.store import Store as AtlasStore
+    from ratchet.store.atlas import Store as AtlasStore
 
     a = _args(argv)
     key = os.environ.get("RATCHET_API_KEY", "")

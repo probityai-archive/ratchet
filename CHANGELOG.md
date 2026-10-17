@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+Hardening of what a receipt rests on: canonical bytes, signatures, the admission rule's statistics and the
+store. Every change below is in this repository; the releases it waits for are named at the end.
+
+- Every record Ratchet signs or digests is RFC 8785 canonical JSON, through `probityai.jcs` (the `jcs-admit`
+  crate). Decisions name their canonicaliser (`canonicalization: rfc8785`) and stored traces and records name
+  theirs (`digest_canonicalization`). A record that names none was written earlier: its digests are recomputed
+  over the sorted-keys JSON it was signed with, so every stored decision still verifies. On the 105 stored
+  public-benchmark decisions, RFC 8785 differs from the signed bytes only in number spelling, in 20 of them.
+- Every DSSE envelope is signed and verified by `probityai.dsse` (the `dsse` crate); the two Python
+  implementations are gone. The earlier pure-Python reader stays in the tests as an oracle that must agree with
+  the binding. `verify(..., threshold=2)` holds a countersigned decision to both of its keys.
+- The k-session rule (ledger D37) as `ratchet.improve.sessions`: the protocol, a runner for one host or one
+  Slurm allocation (`ratchet.improve.sessions_live`), a bundle, and `python -m ratchet.improve.sessions verify`,
+  which recomputes the t statistics, the harm screen and the log checks from the bundle alone. Its statistics
+  match the reference implementation on 24 fixed cohorts.
+- `pymongo` and `raindrop-ai` are the `atlas` and `telemetry` extras. Without them, records go to a signed
+  append-only file store (`RATCHET_STORE_DIR`).
+- `probity-verify==0.1.1` and `agent-evidence-vectors==0.19.0`.
+
+Waits for: `probityai` 0.1.0 on PyPI (built from its merged source until then).
+
 ## 0.1.2 (2026-10-13)
 
 Fixes in how a stored decision is checked and shown, and a demo image that proves its own health on two

@@ -26,8 +26,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from ratchet_cases.types import canonical_json, sha256_hex
+from ratchet_cases.types import sha256_hex
 
+from ratchet.canonical import CANONICALIZATION, canonical_json
 from ratchet.improve.evaluate import CaseResult, EvalReport
 from ratchet.improve.overfit import Literals, lint
 from ratchet.improve.receipt import HUMAN_APPROVAL_TYPE, ReceiptError, verify
@@ -69,6 +70,7 @@ class Decision:
         return {
             "type": "decision",
             "predicateType": PREDICATE_URI,
+            "canonicalization": CANONICALIZATION,
             "parent": self.parent,
             "candidate": self.candidate,
             "candidate_digest": self.candidate_digest,

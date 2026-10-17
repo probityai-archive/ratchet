@@ -7,8 +7,8 @@ from dataclasses import asdict
 from typing import Any
 
 import pytest
-from ratchet_cases.types import canonical_json
 
+from ratchet.canonical import canonical_json
 from ratchet.improve.receipt import HUMAN_APPROVAL_TYPE, Signer
 from ratchet.types import Guard, Harness
 from ratchet.verify import DEFAULT_GATES, Options, report_digest, verify_decision

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from ratchet_cases.types import canonical_json
 
+from ratchet.canonical import canonical_json
 from ratchet.improve.countersign import countersign_doc, countersign_jsonl, main, payload_matches, run_key
 from ratchet.improve.receipt import (
     DECISION_TYPE,

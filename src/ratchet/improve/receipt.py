@@ -1,13 +1,12 @@
-"""Signed receipts: a DSSE envelope over the canonical JSON of a decision, signed with Ed25519.
+"""Signed receipts: a DSSE envelope over the RFC 8785 canonical JSON of a decision, signed with Ed25519.
 
-The envelope follows the DSSE v1 envelope format: the signature covers
-PAE(payloadType, payload), never the raw payload, so a payload cannot be replayed under another type.
+The envelope follows the DSSE v1 envelope format: the signature covers PAE(payloadType, payload), never the
+raw payload, so a payload cannot be replayed under another type. Signing and verification go through
+`ratchet.verify.dsse`, the one DSSE implementation in this package (the `probityai.dsse` binding).
 """
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import os
 import subprocess
@@ -16,10 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from ratchet_cases.types import canonical_json, sha256_hex
+
+from ratchet.canonical import canonical_json
+from ratchet.verify import dsse
 
 DECISION_TYPE = "application/vnd.ratchet.decision+json"
 HUMAN_APPROVAL_TYPE = "application/vnd.ratchet.human-approval+json"
@@ -35,21 +34,6 @@ class ReceiptError(ValueError):
 
 class Payload(Protocol):
     def to_payload(self) -> dict[str, Any]: ...
-
-
-def pae(payload_type: str, payload: bytes) -> bytes:
-    """DSSE pre-authentication encoding: "DSSEv1" SP LEN(type) SP type SP LEN(body) SP body."""
-    t = payload_type.encode("utf-8")
-    return b"DSSEv1 %d %s %d %s" % (len(t), t, len(payload), payload)
-
-
-def public_key_bytes(key: Ed25519PublicKey) -> bytes:
-    return key.public_bytes(Encoding.Raw, PublicFormat.Raw)
-
-
-def key_id(key: Ed25519PublicKey) -> str:
-    """The SHA-256 of the raw 32-byte public key, hex. Names the key without carrying it."""
-    return sha256_hex(public_key_bytes(key))
 
 
 @dataclass(frozen=True)
@@ -102,10 +86,10 @@ class Signer:
             pinned = keys.load_trusted_key(path)
         except keys.TrustedKeyError as exc:
             raise ReceiptError(f"no pinned decision key ({exc}); set {TRUSTED_KEY_ENV} to its PEM") from exc
-        if key_id(pinned) != signer.keyid:
+        if dsse.keyid_of(pinned) != signer.keyid:
             raise ReceiptError(
                 f"signing key {signer.keyid[:12]} is not the pinned decision key "
-                f"{key_id(pinned)[:12]} ({path})"
+                f"{dsse.keyid_of(pinned)[:12]} ({path})"
             )
         return signer
 
@@ -115,16 +99,10 @@ class Signer:
 
     @property
     def keyid(self) -> str:
-        return key_id(self.public_key)
+        return dsse.keyid_of(self.public_key)
 
     def sign(self, payload_type: str, body: bytes) -> bytes:
-        sig = self.private_key.sign(pae(payload_type, body))
-        envelope = {
-            "payload": base64.b64encode(body).decode("ascii"),
-            "payloadType": payload_type,
-            "signatures": [{"keyid": self.keyid, "sig": base64.b64encode(sig).decode("ascii")}],
-        }
-        return canonical_json(envelope)
+        return dsse.sign(payload_type, body, [self.private_key])
 
 
 def _keyring_seed() -> str:
@@ -155,63 +133,41 @@ def countersign(envelope: bytes, signer: Signer) -> bytes:
     Countersigning twice with the same key returns the envelope unchanged.
     """
     try:
-        doc = json.loads(envelope)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ReceiptError("envelope is not JSON") from exc
-    if not isinstance(doc, dict) or doc.get("payloadType") != DECISION_TYPE:
+        env = dsse.parse(envelope)
+    except dsse.EnvelopeError as exc:
+        raise ReceiptError(str(exc)) from exc
+    if env.payload_type != DECISION_TYPE:
         raise ReceiptError("only a decision envelope can be countersigned")
-    signatures = doc.get("signatures")
-    if not isinstance(signatures, list):
-        raise ReceiptError("envelope carries no signature list")
-    if any(isinstance(e, dict) and e.get("keyid") == signer.keyid for e in signatures):
+    if any(s.keyid == signer.keyid for s in env.signatures):
         return envelope
-    body = _b64(doc.get("payload"), "payload")
-    sig = signer.private_key.sign(pae(DECISION_TYPE, body))
-    signatures.append({"keyid": signer.keyid, "sig": base64.b64encode(sig).decode("ascii")})
+    doc = json.loads(envelope)
+    doc["signatures"].append(dsse.signature_entry(DECISION_TYPE, env.payload, signer.private_key))
     return canonical_json(doc)
 
 
-def _b64(value: Any, label: str) -> bytes:
-    if not isinstance(value, str):
-        raise ReceiptError(f"{label} must be a base64 string")
-    try:
-        return base64.b64decode(value, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise ReceiptError(f"{label} is not valid base64") from exc
-
-
 def verify(
-    envelope: bytes, trusted: Mapping[str, Ed25519PublicKey], payload_type: str = DECISION_TYPE
+    envelope: bytes,
+    trusted: Mapping[str, Ed25519PublicKey],
+    payload_type: str = DECISION_TYPE,
+    *,
+    threshold: int = 1,
 ) -> dict[str, Any]:
-    """Return the payload when at least one signature verifies under a trusted key; raise otherwise.
+    """Return the payload when at least `threshold` trusted keys signed it; raise otherwise.
 
-    `trusted` maps keyid to public key. A signature whose keyid is unknown is ignored, never trusted.
+    `trusted` maps keyid to public key. A signature whose keyid is unknown is ignored, never trusted. With
+    `threshold=2` a countersigned decision is accepted only when both of its keys verify.
     """
     try:
-        doc = json.loads(envelope)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ReceiptError("envelope is not JSON") from exc
-    if not isinstance(doc, dict):
-        raise ReceiptError("envelope is not a JSON object")
-    if doc.get("payloadType") != payload_type:
-        raise ReceiptError(f"payloadType is {doc.get('payloadType')!r}, expected {payload_type!r}")
-    body = _b64(doc.get("payload"), "payload")
-    signatures = doc.get("signatures")
-    if not isinstance(signatures, list) or not signatures:
-        raise ReceiptError("envelope carries no signatures")
-    message = pae(payload_type, body)
-    for entry in signatures:
-        if not isinstance(entry, dict):
-            continue
-        key = trusted.get(str(entry.get("keyid")))
-        if key is None:
-            continue
-        try:
-            key.verify(_b64(entry.get("sig"), "sig"), message)
-        except InvalidSignature:
-            continue
-        payload = json.loads(body)
-        if not isinstance(payload, dict):
-            raise ReceiptError("payload is not a JSON object")
-        return payload
-    raise ReceiptError("no signature verifies under a trusted key")
+        env = dsse.parse(envelope)
+    except dsse.EnvelopeError as exc:
+        raise ReceiptError(str(exc)) from exc
+    if env.payload_type != payload_type:
+        raise ReceiptError(f"payloadType is {env.payload_type!r}, expected {payload_type!r}")
+    result = dsse.verify_signature(env, trusted, threshold)
+    if result.reason is not None:
+        need = "a trusted key" if threshold == 1 else f"{threshold} trusted keys"
+        raise ReceiptError(f"no signature verifies under {need}")
+    payload = json.loads(env.payload)
+    if not isinstance(payload, dict):
+        raise ReceiptError("payload is not a JSON object")
+    return payload

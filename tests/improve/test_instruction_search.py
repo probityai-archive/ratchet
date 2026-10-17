@@ -559,7 +559,7 @@ def test_main_runs_the_comparison_and_writes_the_summary(
     import ratchet.agent.worker as worker_mod
     import ratchet.improve.sandbox as sandbox_mod
     import ratchet.improve.worldsim as worldsim_mod
-    import ratchet.store as store_mod
+    import ratchet.store.atlas as store_mod
 
     class FakeStore(MemStore, _Ctx):
         def __init__(self, uri: str, db: str) -> None:

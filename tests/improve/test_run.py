@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from ratchet.agent.model import SeededTransport
 from ratchet.improve import run
 from ratchet.improve.loop import EvolveResult, GenerationRecord
 from ratchet.improve.propose import SEED
@@ -78,7 +79,7 @@ def test_seeded_transport_adds_the_seed_to_chat_requests_only() -> None:
 
     seen: list[dict[str, Any]] = []
 
-    class Echo(run.SeededTransport):
+    class Echo(SeededTransport):
         def __init__(self) -> None:
             super().__init__(7)
 

@@ -11,7 +11,6 @@ from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from ratchet_cases.types import canonical_json
 from rich.console import Console
 from view.fakes import (
     RULES,
@@ -27,6 +26,7 @@ from view.test_live import Scripted, change
 from view.test_telemetry import FakeSink
 
 from ratchet import cli
+from ratchet.canonical import canonical_json
 from ratchet.cli import CliError, LiveBackend, main
 from ratchet.improve.receipt import DECISION_TYPE, Signer
 from ratchet.improve.sim import RecordedViews
@@ -469,8 +469,10 @@ def test_default_console_and_backend_report_the_missing_store_uri(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv("RATCHET_MONGODB_URI", raising=False)
+    monkeypatch.delenv("RATCHET_STORE_DIR", raising=False)
     assert main(["show", "lineage"]) == 1
-    assert "RATCHET_MONGODB_URI is not set" in capsys.readouterr().err
+    err = " ".join(capsys.readouterr().err.split())
+    assert "set RATCHET_STORE_DIR for the file store, or RATCHET_MONGODB_URI for Atlas" in err
 
 
 # -- the real wiring ----------------------------------------------------------------------------------------

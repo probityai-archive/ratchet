@@ -43,8 +43,9 @@ from ratchet.improve.recall import (
     render_prior_fixes,
 )
 from ratchet.improve.replay import ReplayReport, WalkCache, replay
-from ratchet.store import Store, VoyageEmbedder, atlas_admin
-from ratchet.store.embed import EMBEDDING_DIMS, InputType
+from ratchet.store import atlas_admin
+from ratchet.store.atlas import Store
+from ratchet.store.embed import EMBEDDING_DIMS, InputType, VoyageEmbedder
 from ratchet.types import Harness
 
 from .fakes import (

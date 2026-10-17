@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from ratchet.improve.receipt import Signer
+from ratchet.improve.receipt import DECISION_TYPE, Signer
 from ratchet.verify import DEFAULT_GATES, PREDICATE_URI, Options, verify_decision
 
 from .helpers import CANDIDATE_HARNESS, HARNESSES, PARENT_HARNESS, RECOMPUTED, REPORTS, b64, payload, sign
@@ -142,7 +142,7 @@ def test_report_the_receipt_does_not_name_fails_closed(signer: Signer) -> None:
 
 
 def test_reports_may_be_exact_stored_bytes(signer: Signer) -> None:
-    from ratchet_cases.types import canonical_json
+    from ratchet.canonical import canonical_json
 
     raw = {n: canonical_json(r) for n, r in REPORTS.items()}
     assert check(sign(payload(), signer), signer, reports=raw).reports_summary.startswith("5 of 5")
@@ -309,3 +309,27 @@ def test_decision_object_from_the_admission_lane_verifies_as_signed(signer: Sign
     assert (r.ok, r.admission_verified, r.recomputation_complete) == (True, True, True)
     bare = {k: v for k, v in decision.to_payload().items() if k != "predicateType"}
     assert check(sign(bare, signer), signer).reason == "unsupported_predicate"
+
+
+def test_a_decision_signed_before_rfc8785_verifies_against_its_reports_as_mappings(signer: Signer) -> None:
+    """Such a decision names no canonicaliser, and its report digests are sorted-keys digests; an integral
+    float (`12.0`) is where the two forms differ, so a verifier that re-serialised with RFC 8785 fails."""
+    from ratchet_cases.types import sha256_hex
+
+    from ratchet.canonical import canonicalizer
+
+    old = canonicalizer(None)
+    reports = {**REPORTS, "parent_run_1": {**REPORTS["parent_run_1"], "wall_s": 12.0}}
+    body = payload(report_digests={n: sha256_hex(old(r)) for n, r in reports.items()})
+    del body["canonicalization"]
+    envelope = signer.sign(DECISION_TYPE, old(body))
+    r = check(envelope, signer, reports=reports, options=strict(require_reports=True))
+    assert (r.decision, r.reason) == ("supported", "admitted_receipt_verified"), r.reason
+    assert r.reports_summary == "5 of 5 named reports checked"
+    relabelled = sign(dict(body, canonicalization="rfc8785"), signer)
+    assert check(relabelled, signer, reports=reports).reason == "report_digest_mismatch:parent_run_1"
+
+
+def test_an_unknown_canonicaliser_is_not_established(signer: Signer) -> None:
+    r = check(sign(payload(canonicalization="json-sort-keys"), signer), signer)
+    assert (r.decision, r.reason) == ("not_established", "payload_field_invalid:canonicalization")

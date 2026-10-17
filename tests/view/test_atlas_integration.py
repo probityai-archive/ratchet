@@ -13,14 +13,15 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from ratchet_cases.types import Trace, canonical_json
+from ratchet_cases.types import Trace
 from rich.console import Console
 
+from ratchet.canonical import canonical_json
 from ratchet.cli import LiveBackend, main
 from ratchet.improve.receipt import DECISION_TYPE, Signer
 from ratchet.improve.replay import GuardRunner
 from ratchet.improve.sim import RecordedViews, Simulator
-from ratchet.store import Store
+from ratchet.store.atlas import Store
 from ratchet.types import Harness
 from ratchet.view.matrix import CaseInfo
 
@@ -109,7 +110,7 @@ def test_lineage_trace_decision_and_verify_read_the_real_store(atlas_db: tuple[s
     code, out = run(["verify", good.version, "--pubkey", pub], uri, db)
     assert code == 1  # signed correctly, but a hand-built body is not a full admission predicate
     assert "✓ DSSE envelope signature valid" in out
-    assert "independent verifier" in out
+    assert "checked by the dsse crate" in out
     assert "NOT ESTABLISHED" in out
 
 

@@ -7,6 +7,9 @@ using the `ratchet_decision/v1` adapter in `ratchet.verify.adapter`. Every failu
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import os
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -16,8 +19,9 @@ from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from probity_verify import CaseError, adjudicate  # type: ignore[import-untyped]
-from ratchet_cases.types import canonical_json, sha256_hex
+from ratchet_cases.types import sha256_hex
 
+from ratchet.canonical import CANONICALIZATION, canonicalizer
 from ratchet.verify import adapter
 from ratchet.verify.dsse import keyid_of
 from ratchet.verify.keys import raw_b64
@@ -107,13 +111,25 @@ class VerifyReport:
         }
 
 
-def report_digest(report: Mapping[str, Any]) -> str:
-    """The digest a receipt names for a stored report: SHA-256 of its canonical JSON."""
-    return sha256_hex(canonical_json(dict(report)))
+def report_digest(report: Mapping[str, Any], canonicalization: str | None = CANONICALIZATION) -> str:
+    """The digest a receipt names for a stored report: SHA-256 of its canonical JSON, under the canonicaliser
+    the receipt declares (`None` for a receipt signed before RFC 8785)."""
+    return sha256_hex(canonicalizer(canonicalization)(dict(report)))
 
 
-def _bytes(doc: Mapping[str, Any] | bytes) -> bytes:
-    return doc if isinstance(doc, bytes) else canonical_json(dict(doc))
+def _bytes(doc: Mapping[str, Any] | bytes, canonicalization: str | None) -> bytes:
+    return doc if isinstance(doc, bytes) else canonicalizer(canonicalization)(dict(doc))
+
+
+def declared_canonicalization(envelope: bytes) -> str | None:
+    """The canonicaliser the (not yet verified) payload names, so supplied mappings are serialised as the
+    signer serialised them. The adapter verifies the signature and refuses an unknown name."""
+    try:
+        payload = json.loads(base64.b64decode(json.loads(envelope)["payload"], validate=True))
+    except (TypeError, KeyError, ValueError, binascii.Error, UnicodeDecodeError):
+        return CANONICALIZATION
+    value = payload.get("canonicalization") if isinstance(payload, dict) else CANONICALIZATION
+    return value if value in (None, CANONICALIZATION) else CANONICALIZATION
 
 
 def _write(root: Path, relative: str, data: bytes) -> dict[str, Any]:
@@ -149,13 +165,18 @@ def _artifacts(
     recomputed: Mapping[str, Doc],
     approval: bytes | None,
 ) -> dict[str, Any]:
+    canonicalization = declared_canonicalization(envelope)
     out = {"envelope": _write(root, "envelope.json", envelope)}
     groups = ((adapter.REPORT_ROLE, "reports", reports), (adapter.RECOMPUTED_ROLE, "recomputed", recomputed))
     for prefix, folder, docs in groups:
         for name, doc in docs.items():
-            out[f"{prefix}{name}"] = _write(root, f"{folder}/{_slot(name)}.json", _bytes(doc))
+            out[f"{prefix}{name}"] = _write(
+                root, f"{folder}/{_slot(name)}.json", _bytes(doc, canonicalization)
+            )
     for name, doc in harnesses.items():
-        out[f"{adapter.HARNESS_ROLE}{name}"] = _write(root, f"harness/{name}.json", _bytes(doc))
+        out[f"{adapter.HARNESS_ROLE}{name}"] = _write(
+            root, f"harness/{name}.json", _bytes(doc, canonicalization)
+        )
     if approval is not None:
         out["approval"] = _write(root, "approval.json", approval)
     return out

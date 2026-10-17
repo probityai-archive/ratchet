@@ -8,7 +8,9 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Literal
 
-from ratchet_cases.types import canonical_json, sha256_hex
+from ratchet_cases.types import sha256_hex
+
+from ratchet.canonical import canonical_json
 
 Author = Literal["seed", "improver", "human"]
 

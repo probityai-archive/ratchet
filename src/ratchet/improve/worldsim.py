@@ -12,9 +12,10 @@ from collections.abc import Iterable, Mapping
 
 from ratchet_cases.cases.grading import grade_state
 from ratchet_cases.cases.model import Case
-from ratchet_cases.types import Trace, canonical_json
+from ratchet_cases.types import Trace
 from ratchet_cases.world.core import World
 
+from ratchet.canonical import canonical_json
 from ratchet.improve.sim import Step, Walk, result_ids, tool_call_of
 
 

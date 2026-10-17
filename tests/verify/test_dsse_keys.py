@@ -9,8 +9,9 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from securesystemslib.dsse import Envelope as SslibEnvelope
 from securesystemslib.signer import SSlibKey  # type: ignore[attr-defined]
 
-from ratchet.improve.receipt import Signer, key_id
+from ratchet.improve.receipt import Signer
 from ratchet.verify import DEFAULT_KEY_PATH, TrustedKeyError, dsse, load_trusted_key
+from ratchet.verify.dsse import keyid_of
 from ratchet.verify.keys import raw_b64
 
 from .helpers import payload, sign
@@ -23,7 +24,7 @@ def test_pae_matches_the_dsse_spec_vector() -> None:
 
 
 def test_keyid_agrees_with_the_signer(signer: Signer) -> None:
-    assert dsse.keyid_of(signer.public_key) == signer.keyid == key_id(signer.public_key)
+    assert dsse.keyid_of(signer.public_key) == signer.keyid == keyid_of(signer.public_key)
 
 
 def test_envelope_from_the_signer_verifies_under_securesystemslib(signer: Signer) -> None:

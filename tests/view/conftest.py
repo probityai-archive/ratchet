@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from pymongo import MongoClient
 
-from ratchet.store import Store
+from ratchet.store.atlas import Store
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL_URI = "mongodb://ratchet:ratchet-local-dev@127.0.0.1:27018/?directConnection=true"

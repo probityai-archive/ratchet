@@ -711,7 +711,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ap.error("give run directories, or --uri together with --db")
     sources: list[tuple[str, Archive]] = []
     if args.uri:
-        from ratchet.store import Store
+        from ratchet.store.atlas import Store
 
         with Store(args.uri, args.db) as store:
             sources.append((args.db, Archive.load(store, split=args.split)))

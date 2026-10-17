@@ -37,6 +37,7 @@ from probity_verify.common import (  # type: ignore[import-untyped]
     _string,
 )
 
+from ratchet.canonical import CANONICALIZATION
 from ratchet.verify import dsse, evidence
 
 CLAIM_TYPE = "ratchet_decision/v1"
@@ -237,6 +238,9 @@ def _evaluator_problem(evaluator: Any) -> str | None:
 
 def _schema_problem(payload: dict[str, Any]) -> str | None:
     """The first field the signed payload lacks or malforms, named in the shape the IMPROVE lane emits."""
+    # A decision signed before RFC 8785 names no canonicaliser; a later one names exactly this one.
+    if "canonicalization" in payload and payload["canonicalization"] != CANONICALIZATION:
+        return "payload_field_invalid:canonicalization"
     for name in ("parent", "candidate"):
         if problem := _field(payload, name, str):
             return problem

@@ -88,7 +88,10 @@ server-side role, so a bug in Ratchet's code cannot widen it.
 
 ## Receipts
 
-A decision is canonical JSON, wrapped in a DSSE envelope and signed with Ed25519. The receipt names the
+A decision is RFC 8785 canonical JSON (`ratchet.canonical.canonical_json`, through the `probityai.jcs`
+binding of the `jcs-admit` crate), wrapped in a DSSE envelope and signed with Ed25519. Decisions signed before
+the RFC 8785 change keep their payload bytes as signed; nothing re-serialises a stored payload, so their
+signatures still verify, and `tests/records` re-derives every stored record under both canonicalisers. The receipt names the
 candidate, the parent, the policy and evaluator versions, the corpus snapshot and every report digest.
 `ratchet verify` and `python -m ratchet.verify` check it against a public key that was pinned before the
 receipt existed. [VERIFY.md](VERIFY.md) lists the pins.

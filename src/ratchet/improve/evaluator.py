@@ -8,7 +8,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from ratchet_cases.types import canonical_json, sha256_hex
+from ratchet_cases.types import sha256_hex
+
+from ratchet.canonical import canonical_json
 
 
 class EvaluatorChangedError(RuntimeError):

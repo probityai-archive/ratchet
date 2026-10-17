@@ -19,21 +19,21 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-import httpx
 from pymongo import MongoClient
 from ratchet_cases.cases import all_cases
 
 from ratchet.agent.guards import GuardRuntime
-from ratchet.agent.model import ModelClient, ModelConfig, ModelError
+from ratchet.agent.model import ModelClient, ModelConfig, ModelError, SeededTransport
 from ratchet.agent.seed import seed_harness
 from ratchet.agent.worker import run_case
-from ratchet.improve.activate import MongoActivator
 from ratchet.improve.archive import ArchiveSelector
 from ratchet.improve.loop import EvolveResult, Lab, evolve
-from ratchet.improve.receipt import Signer, public_key_bytes
+from ratchet.improve.receipt import Signer
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.improve.worldsim import WorldSimulator
-from ratchet.store import Store
+from ratchet.store.activation import MongoActivator
+from ratchet.store.atlas import Store
+from ratchet.verify.dsse import raw_public
 
 
 def _args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -59,25 +59,6 @@ def _args(argv: Sequence[str] | None) -> argparse.Namespace:
     p.add_argument("--family", action="append", default=[], help="limit to these case families")
     p.add_argument("--out", type=Path, required=True)
     return p.parse_args(argv)
-
-
-class SeededTransport(httpx.HTTPTransport):
-    """Adds a fixed sampling seed to every chat-completions request body, so an endpoint that honours seeds
-    (vLLM does) answers a repeated request the same way. Nothing else in the request changes."""
-
-    def __init__(self, seed: int) -> None:
-        super().__init__()
-        self.seed = seed
-
-    def handle_request(self, request: httpx.Request) -> httpx.Response:
-        if request.method == "POST" and request.url.path.endswith("/chat/completions"):
-            body = json.loads(request.content)
-            body["seed"] = self.seed
-            content = json.dumps(body).encode("utf-8")
-            headers = [(k, v) for k, v in request.headers.raw if k.lower() != b"content-length"]
-            headers.append((b"content-length", str(len(content)).encode()))
-            request = httpx.Request(request.method, request.url, headers=headers, content=content)
-        return super().handle_request(request)
 
 
 class FallbackChat:
@@ -114,7 +95,7 @@ def summary(result: EvolveResult, signer: Signer, wall_s: float, config: dict[st
     return {
         "config": config,
         "signer_keyid": signer.keyid,
-        "signer_public_key_hex": public_key_bytes(signer.public_key).hex(),
+        "signer_public_key_hex": raw_public(signer.public_key).hex(),
         "final_harness": result.harness.version,
         "final_instructions": result.instructions.version,
         "wall_s": round(wall_s, 1),

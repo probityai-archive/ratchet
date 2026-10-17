@@ -279,10 +279,10 @@ def main(db: str, uri: str | None = None, reset: bool = False) -> int:
     from pymongo import MongoClient
 
     from ratchet.agent.guards import required_layers
-    from ratchet.improve.activate import MongoActivator
     from ratchet.improve.sandbox import SandboxRunner
     from ratchet.improve.worldsim import WorldSimulator
-    from ratchet.store import Store
+    from ratchet.store.activation import MongoActivator
+    from ratchet.store.atlas import Store
 
     if not db.startswith("ratchet_demo"):
         print("error: the demo writes only to a database whose name starts with ratchet_demo")

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ratchet_cases.types import Split, canonical_json, sha256_hex
+from ratchet_cases.types import Split, sha256_hex
 
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ChatModel, ModelClient, ModelConfig
@@ -31,13 +31,15 @@ from ratchet.bench.agentdojo.run import (
     JsonStore,
     seed_harness,
 )
+from ratchet.canonical import canonical_json
 from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.evaluate import EvalReport, evaluate_many
 from ratchet.improve.loop import EvolveResult, Lab, evolve
 from ratchet.improve.propose import Instructions
-from ratchet.improve.receipt import Signer, public_key_bytes
+from ratchet.improve.receipt import Signer
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.types import Guard, Harness, Procedure
+from ratchet.verify.dsse import raw_public
 
 DOJO_INSTRUCTIONS = Instructions.build("""\
 You improve the harness of an AI assistant that acts for one user through tools on that user's own systems
@@ -214,9 +216,7 @@ def evolve_from(
             log=log,
         )
         (s.out / "signer.json").write_text(
-            json.dumps(
-                {"keyid": lab.signer.keyid, "public_key": public_key_bytes(lab.signer.public_key).hex()}
-            )
+            json.dumps({"keyid": lab.signer.keyid, "public_key": raw_public(lab.signer.public_key).hex()})
         )
         return evolve(
             store,
