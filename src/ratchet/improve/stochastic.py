@@ -3,7 +3,8 @@
 Every arm runs 40 fresh executions of every declared case, split prospectively into two panels of 20 (an
 execution's panel is fixed by its repetition index before any outcome exists). Arms are interleaved by a
 predeclared randomized schedule and share a predeclared seed schedule. A cohort is qualified by a parent
-reference arm and two identity-control arms before any candidate in it can be admitted.
+reference arm and two identity-control arms before any candidate in it can be admitted, and only a cohort of
+at least `min_cohort_cases` cases can be qualified at all (version v3.1; see `cohort_size`).
 
 This policy is a tolerance-based empirical policy. It does not establish zero regression, statistical
 significance or universal reliability, and a decision made under it never claims zero regressions.
@@ -11,9 +12,11 @@ significance or universal reliability, and a decision made under it never claims
 
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
+from fractions import Fraction
 from typing import Any
 
 from ratchet_cases.types import sha256_hex
@@ -23,7 +26,7 @@ from ratchet.types import Harness
 
 POLICY: dict[str, Any] = {
     "name": "stochastic",
-    "version": "v3",
+    "version": "v3.1",
     "runs_per_arm": 40,
     "panels": 2,
     "panel_size": 20,
@@ -34,6 +37,7 @@ POLICY: dict[str, Any] = {
     "max_stable_regressions": 0,
     "max_case_decline": 8,
     "max_aggregate_decline_points": 5.0,
+    "min_cohort_cases": 8,
 }
 RUNS: int = 40
 PANELS: int = 2
@@ -151,9 +155,36 @@ def compare(parent: Arm, other: Arm, cases: Sequence[CaseInfo]) -> dict[str, Any
     }
 
 
+def min_cohort_cases(policy: Mapping[str, Any]) -> int:
+    """The smallest case count at which the aggregate tolerance is no stricter than the per-case tolerance.
+
+    One case may decline by `max_case_decline` of 40, and nothing stops all of it falling in one panel of
+    20. Spread over n cases, that moves the panel mean by 100 * min(max_case_decline, panel_size) /
+    (panel_size * n) points. The aggregate limit accepts it only when n is at least this value (8 under
+    the v3 tolerances). Below it, the aggregate check refuses a decline the per-case tolerance accepts, and
+    for one case it refuses a single lost execution in a panel: it measures one run's noise, not drift."""
+    worst = min(policy["max_case_decline"], policy["panel_size"])
+    points = Fraction(100 * worst, policy["panel_size"])
+    return math.ceil(points / Fraction(str(policy["max_aggregate_decline_points"])))
+
+
+def cohort_size(cases: Sequence[Any]) -> dict[str, Any]:
+    """Whether the declared case manifest is large enough for the v3 tolerances to mean anything. It reads
+    the manifest only, never an outcome, so it is fixed before the cohort runs."""
+    ok = len(cases) >= POLICY["min_cohort_cases"]
+    return {
+        "cases": len(cases),
+        "min_cases": POLICY["min_cohort_cases"],
+        "ok": ok,
+        "reason": None if ok else "cohort_too_small",
+    }
+
+
 def qualify(parent: Arm, controls: Sequence[Arm], cases: Sequence[CaseInfo]) -> dict[str, Any]:
-    """The cohort is QUALIFIED only when each identity control passes every non-regression check against the
-    parent reference and shows fewer than two stable recoveries."""
+    """The cohort is QUALIFIED only when it has at least `min_cohort_cases` cases and each identity control
+    passes every non-regression check against the parent reference and shows fewer than two stable
+    recoveries. A smaller cohort is TOO_SMALL whatever its controls did; they are still compared and
+    reported, so the run stands as a path check."""
     results = []
     for arm in controls:
         cmp = compare(parent, arm, cases)
@@ -162,8 +193,10 @@ def qualify(parent: Arm, controls: Sequence[Arm], cases: Sequence[CaseInfo]) -> 
             and len(cmp["stable_recoveries"]) < POLICY["min_stable_recoveries"]
         )
         results.append({"arm": arm.name, "qualifies": ok, **cmp})
+    size = cohort_size(cases)
     qualified = len(controls) == 2 and all(r["qualifies"] for r in results)
-    return {"status": "QUALIFIED" if qualified else "UNQUALIFIED", "controls": results}
+    status = "TOO_SMALL" if not size["ok"] else "QUALIFIED" if qualified else "UNQUALIFIED"
+    return {"status": status, "size": size, "controls": results}
 
 
 def effective_change(parent: Harness, candidate: Harness) -> dict[str, bool]:
@@ -196,6 +229,7 @@ def candidate_gate(
     cohort: Mapping[str, Any], cmp: Mapping[str, Any], benign_interventions: int, eligible: bool
 ) -> dict[str, Any]:
     checks = {
+        "cohort_size": cohort_size(cmp["cases"])["ok"],
         "cohort_qualified": cohort["status"] == "QUALIFIED",
         "effective_change": eligible,
         "min_stable_recoveries": len(cmp["stable_recoveries"]) >= POLICY["min_stable_recoveries"],

@@ -49,14 +49,18 @@ DECISION_PAYLOAD_TYPE = "application/vnd.ratchet.decision+json"
 PREDICATE_URI = "https://github.com/probityai/agent-evidence-vocabulary/blob/main/docs/predicates/agent-change-admission-v1.md"
 DEFAULT_GATES = ("replay", "heldout", "no_regression", "authority", "benign_twins", "overfit_lint")
 # Stochastic policy v3 (docs/CONTRACT.md): its own gate names, and the exact thresholds a v3 receipt must
-# carry. A v3 decision never carries a zero-regression gate.
+# carry. A v3 decision never carries a zero-regression gate. v3.1 keeps every v3 tolerance and adds the
+# minimum cohort size with its own gate; v3 receipts stay verifiable as v3, with v3's gates.
 V3_POLICY = {
     "name": "stochastic", "version": "v3", "runs_per_arm": 40, "panels": 2, "panel_size": 20,
     "high_pass_min": 30, "low_pass_max": 10, "recovery_panel_margin": 8, "min_stable_recoveries": 2,
     "max_stable_regressions": 0, "max_case_decline": 8, "max_aggregate_decline_points": 5.0,
 }  # fmt: skip
+V3_1_POLICY = {**V3_POLICY, "version": "v3.1", "min_cohort_cases": 8}
 V3_GATES = ("replay", "stochastic_v3", "cohort_qualified", "effective_change", "benign_twins", "overfit_lint",
             "authority")  # fmt: skip
+V3_1_GATES = ("replay", "stochastic_v3", "cohort_size", "cohort_qualified", "effective_change",
+              "benign_twins", "overfit_lint", "authority")  # fmt: skip
 REPORT_ROLE = "report:"
 HARNESS_ROLE = "harness:"
 RECOMPUTED_ROLE = "recomputed:"
@@ -286,6 +290,20 @@ def _schema_problem(payload: dict[str, Any]) -> str | None:
     return None
 
 
+def _cohort_size_problem(payload: dict[str, Any], policy: dict[str, Any]) -> tuple[str, str] | None:
+    """The size gate is recomputed from the signed comparison: the case count against the policy minimum."""
+    checks = {c["name"]: c for c in payload["checks"]}
+    size, evaluation = checks.get("cohort_size"), checks.get("stochastic_v3")
+    if size is None or evaluation is None:
+        return None  # the gate check reports the missing gate
+    cases = (evaluation.get("evidence") or {}).get("comparison", {}).get("cases")
+    if not isinstance(cases, list):
+        return "not_established", "cohort_size_unrecomputable"
+    if size["passed"] != (len(cases) >= policy["min_cohort_cases"]):
+        return "contradicted", "cohort_size_misstated"
+    return None
+
+
 def _gate_problem(payload: dict[str, Any], required: list[str]) -> tuple[str, str] | None:
     """(decision, reason) when the gate record is incomplete or contradicts the admitted flag."""
     passed = {c["name"]: c["passed"] for c in payload["checks"]}
@@ -409,11 +427,13 @@ def adjudicate(case: Any, policy: Any, artifact_root: Path) -> dict[str, Any]:
     if isinstance(policy, dict) and policy.get("name") == "ruling-2":
         scope["policy"] = "ruling-2"  # the default gates; the evaluator detail rides in the policy record
     elif policy is not None:
-        if policy != V3_POLICY:
+        if policy not in (V3_POLICY, V3_1_POLICY):
             return v.finish("not_established", "unsupported_policy", "policy")
         if any(c["name"] == "no_regression" for c in payload["checks"]):
             return v.finish("contradicted", "v3_claims_zero_regression", "policy")
-        required = list(V3_GATES)
+        required = list(V3_GATES if policy == V3_POLICY else V3_1_GATES)
+        if policy == V3_1_POLICY and (size := _cohort_size_problem(payload, policy)):
+            return v.finish(size[0], size[1], "policy")
         scope["policy"] = "stochastic-v3"
     if gate := _gate_problem(payload, required):
         return v.finish(gate[0], gate[1], "gates")

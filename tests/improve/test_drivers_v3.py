@@ -207,7 +207,7 @@ def test_run_v3_runs_the_schedule_in_the_referee_and_writes_counts_only(
     assert run_v3.main(argv) == 0
     doc = json.loads(out.read_text())
     _no_case_ids({k: v for k, v in doc.items()})
-    assert doc["cohort"] == "QUALIFIED" and doc["executions"] == 4 * 2 * 40
+    assert doc["cohort"] == "TOO_SMALL" and doc["executions"] == 4 * 2 * 40  # 2 cases: a path check
     (dec,) = doc["decisions"]
     assert dec["candidate"] == FIX.version and isinstance(dec["stable_recoveries"], int)
     executions = [e for e in world["ratchet_v3"]["evals"] if e.get("type") == "v3_execution"]

@@ -213,14 +213,15 @@ def test_stochastic_v3_runs_every_arm_on_one_schedule_and_returns_counts_only(tm
     core = _core(tmp_path, signer, store, repetitions=Reps(), decisions=lambda db, v: originals.get((db, v)))
     out = core.stochastic(SEED, [f"src:{FIX.version}"], HELDOUT_IDS, 20261011, workers=8)
     assert out["executions"] == 4 * len(HELDOUT_IDS) * 40 and out["invalid"] == 0
-    assert out["cohort"] == "QUALIFIED" and out["frozen"]["cases"] == len(HELDOUT_IDS)
+    # 5 held-out cases is below the minimum cohort size, so the run is a path check and nothing is admitted
+    assert out["cohort"] == "TOO_SMALL" and out["frozen"]["cases"] == len(HELDOUT_IDS)
     (dec,) = out["decisions"]
     assert (
         dec["candidate"] == FIX.version and dec["stable_recoveries"] == 2 and dec["stable_regressions"] == 0
     )
     _no_case_ids(out)
     stored = store.decisions[-1]
-    assert stored["policy"]["version"] == "v3" and stored["context"]["policy"] == "stochastic-v3"
+    assert stored["policy"]["version"] == "v3.1" and stored["context"]["policy"] == "stochastic-v3"
     assert stored["checks"][0]["evidence"]["from_decision"] == f"src:{SEED.version}->{FIX.version}"
     doc = _open(Path(core.results("v3")["path"]), signer)
     entry = doc["decisions"][0]

@@ -145,6 +145,9 @@ def evidence_line(check: Mapping[str, Any]) -> str:
         return f"{line} over {runs} twin runs" if runs is not None else line
     if name == "stochastic_v3":
         return stochastic_line(ev.get("comparison") or {})
+    if name == "cohort_size":
+        line = f"{ev.get('cases')} cases, minimum {ev.get('min_cases')}"
+        return line if ev.get("ok") else f"{line}: too small to qualify, a path check only"
     if name == "cohort_qualified":
         return cohort_line(ev.get("cohort") or {})
     if name == "overfit_lint":
@@ -181,9 +184,12 @@ def stochastic_line(comparison: Mapping[str, Any]) -> str:
 
 def cohort_line(cohort: Mapping[str, Any]) -> str:
     """Which identity control (an unchanged arm) failed, and on which case: the endpoint's noise floor."""
+    status = str(cohort.get("status", ""))
+    if status == "TOO_SMALL":
+        size = cohort.get("size") or {}
+        return f"TOO_SMALL: {size.get('cases')} cases, minimum {size.get('min_cases')}"
     failed = [c for c in cohort.get("controls") or [] if not c.get("qualifies")]
     parts = [f"{c['arm']}: {_declines(list(c.get('cases') or []))}" for c in failed]
-    status = str(cohort.get("status", ""))
     return f"{status}, unchanged control moved: {'; '.join(parts)}" if parts else status
 
 

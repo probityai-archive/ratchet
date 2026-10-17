@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pytest
+
+from ratchet.improve import stochastic
 from ratchet.improve.stochastic import (
     POLICY,
     RUNS,
@@ -8,8 +14,10 @@ from ratchet.improve.stochastic import (
     Execution,
     candidate_gate,
     classify,
+    cohort_size,
     compare,
     effective_change,
+    min_cohort_cases,
     panel_of,
     qualify,
     schedule,
@@ -38,6 +46,15 @@ def arm(name: str, passes: dict[str, tuple[int, int]], invalid: dict[str, int] |
 
 
 PARENT = arm("parent", {"a": (2, 3), "b": (4, 4), "c": (18, 19)})
+
+# Five more cases every arm passes alike, so the cohort reaches the minimum size of 8.
+STEADY = {f"s{i}": (10, 10) for i in range(5)}
+CASES8 = CASES + [CaseInfo(c, "trap", False) for c in STEADY]
+PARENT8 = arm("parent", {"a": (2, 3), "b": (4, 4), "c": (18, 19), **STEADY})
+
+
+def arm8(name: str, passes: dict[str, tuple[int, int]]) -> Arm:
+    return arm(name, {**passes, **STEADY})
 
 
 def test_classes_and_panels() -> None:
@@ -77,21 +94,24 @@ def test_invalid_executions_cannot_satisfy_the_gate() -> None:
 
 
 def test_identity_controls_qualify_or_not() -> None:
-    same = arm("id1", {"a": (2, 3), "b": (4, 4), "c": (18, 19)})
-    noisy = arm("id2", {"a": (17, 16), "b": (17, 17), "c": (18, 19)})
-    assert qualify(PARENT, [same, same], CASES)["status"] == "QUALIFIED"
-    q = qualify(PARENT, [same, noisy], CASES)
+    same = arm8("id1", {"a": (2, 3), "b": (4, 4), "c": (18, 19)})
+    noisy = arm8("id2", {"a": (17, 16), "b": (17, 17), "c": (18, 19)})
+    assert qualify(PARENT8, [same, same], CASES8)["status"] == "QUALIFIED"
+    q = qualify(PARENT8, [same, noisy], CASES8)
     assert q["status"] == "UNQUALIFIED" and q["controls"][1]["stable_recoveries"] == ["a", "b"]
-    assert qualify(PARENT, [same], CASES)["status"] == "UNQUALIFIED"
+    assert qualify(PARENT8, [same], CASES8)["status"] == "UNQUALIFIED"
 
 
 def test_candidate_gate_and_eligibility() -> None:
-    cand = arm("cand", {"a": (17, 16), "b": (17, 17), "c": (18, 19)})
-    cmp = compare(PARENT, cand, CASES)
+    cand = arm8("cand", {"a": (17, 16), "b": (17, 17), "c": (18, 19)})
+    cmp = compare(PARENT8, cand, CASES8)
     cohort = {"status": "QUALIFIED"}
     assert candidate_gate(cohort, cmp, 0, True)["passed"]
     assert not candidate_gate({"status": "UNQUALIFIED"}, cmp, 0, True)["passed"]
     assert not candidate_gate(cohort, cmp, 1, True)["checks"]["zero_benign_twin_interventions"]
+    small = candidate_gate(cohort, compare(PARENT, arm("cand", {"a": (17, 16), "b": (17, 17), "c": (18, 19)}),
+                                           CASES), 0, True)  # fmt: skip
+    assert not small["passed"] and [k for k, v in small["checks"].items() if not v] == ["cohort_size"]
     seed = Harness.build(parent=None, system_prompt="p", procedures=[], guards=[], tool_allowlist=["t"],
                          created_by="seed")  # fmt: skip
     g = Guard("g1", "d", "def check(call, view, history):\n    return None\n")
@@ -107,7 +127,7 @@ def test_schedule_interleaves_every_arm_and_is_predeclared() -> None:
     assert schedule_digest(order) == schedule_digest(schedule(["parent", "id1", "cand"], ["a", "b"], seed=7))
     first = [a for a, _, _ in order[:30]]
     assert {"parent", "id1", "cand"} <= set(first)
-    assert POLICY["version"] == "v3"
+    assert POLICY["version"] == "v3.1"
 
 
 def test_a_v3_decision_names_its_policy_and_verifies_as_v3() -> None:
@@ -119,11 +139,11 @@ def test_a_v3_decision_names_its_policy_and_verifies_as_v3() -> None:
                          created_by="seed")  # fmt: skip
     cand_h = seed.child(guards=[Guard("g1", "d", "def check(call, view, history):\n    return None\n")],
                         created_by="improver")  # fmt: skip
-    cand = arm("cand", {"a": (17, 16), "b": (17, 17), "c": (18, 19)})
-    same = arm("id1", {"a": (2, 3), "b": (4, 4), "c": (18, 19)})
-    cohort = qualify(PARENT, [same, same], CASES)
+    cand = arm8("cand", {"a": (17, 16), "b": (17, 17), "c": (18, 19)})
+    same = arm8("id1", {"a": (2, 3), "b": (4, 4), "c": (18, 19)})
+    cohort = qualify(PARENT8, [same, same], CASES8)
     d = admit_v3(
-        seed, cand_h, cohort=cohort, comparison=compare(PARENT, cand, CASES), benign_interventions=0,
+        seed, cand_h, cohort=cohort, comparison=compare(PARENT8, cand, CASES8), benign_interventions=0,
         replay_check=Check("replay", True, {}), overfit_check=Check("overfit_lint", True, {}),
         evaluator={"version": "ev3", "components": {"suite_file": "ab" * 32}}, visible_case_ids=["t1"],
         report_digests={"arms": "0" * 64}, corpus_digests={}, scope={"cases": 3},
@@ -138,7 +158,7 @@ def test_a_v3_decision_names_its_policy_and_verifies_as_v3() -> None:
     ok = verify_decision(receipt(d, signer), signer.public_key)
     assert ok.ok and ok.admitted is True, ok
     unqualified = admit_v3(
-        seed, cand_h, cohort={"status": "UNQUALIFIED"}, comparison=compare(PARENT, cand, CASES),
+        seed, cand_h, cohort={"status": "UNQUALIFIED"}, comparison=compare(PARENT8, cand, CASES8),
         benign_interventions=0, replay_check=Check("replay", True, {}),
         overfit_check=Check("overfit_lint", True, {}),
         evaluator={"version": "ev3", "components": {"suite_file": "ab" * 32}}, visible_case_ids=[],
@@ -152,3 +172,79 @@ def test_a_v3_decision_names_its_policy_and_verifies_as_v3() -> None:
     assert verify_decision(receipt(loose, signer), signer.public_key).reason == "unsupported_policy"
     claims = replace(d, checks=[*d.checks, Check("no_regression", True, {})])
     assert verify_decision(receipt(claims, signer), signer.public_key).reason == "v3_claims_zero_regression"
+    small = admit_v3(
+        seed, cand_h, cohort={"status": "TOO_SMALL"}, comparison=compare(PARENT, arm("c", {"a": (17, 16)}),
+                                                                         CASES[:1]),
+        benign_interventions=0, replay_check=Check("replay", True, {}),
+        overfit_check=Check("overfit_lint", True, {}),
+        evaluator={"version": "ev3", "components": {"suite_file": "ab" * 32}}, visible_case_ids=[],
+        report_digests={"arms": "0" * 64}, corpus_digests={}, scope={},
+    )  # fmt: skip
+    assert not small.admitted and not small.check("cohort_size").passed
+    assert verify_decision(receipt(small, signer), signer.public_key).ok
+    lying = replace(small, checks=[
+        Check("cohort_size", True, {}) if c.name == "cohort_size" else c for c in small.checks
+    ])  # fmt: skip
+    assert verify_decision(receipt(lying, signer), signer.public_key).reason == "cohort_size_misstated"
+    dropped = replace(d, checks=[c for c in d.checks if c.name != "cohort_size"])
+    assert verify_decision(receipt(dropped, signer), signer.public_key).reason == "gate_missing:cohort_size"
+
+
+# --- minimum cohort size (v3.1) ----------------------------------------------------------------------------
+
+CELL = Path(__file__).parents[2] / "docs/results/v3-cell/v3-cell-results/cohorts/cd7b60eb83174597/arms"
+
+
+def _recorded(name: str) -> Arm:
+    rows = json.loads((CELL / f"{name}.json").read_text())
+    return Arm(name, "recorded", [Execution(**r) for r in rows])
+
+
+def test_the_minimum_is_derived_from_the_v3_tolerances() -> None:
+    """8 = the smallest n at which one case's allowed decline (8 of 40), all in one panel of 20, moves the
+    panel mean by no more than the 5-point aggregate limit: 100 * 8 / (20 * n) <= 5."""
+    assert min_cohort_cases(POLICY) == POLICY["min_cohort_cases"] == 8
+    n = POLICY["min_cohort_cases"]
+    for size, coherent in ((n, True), (n - 1, False)):
+        cases = [CaseInfo(f"k{i}", "trap", False) for i in range(size)]
+        parent = arm("parent", {c.case_id: (16, 16) for c in cases})
+        # case k0 loses 8 of 40, every loss in panel 0: within the per-case tolerance
+        other = arm("ctl", {c.case_id: (8 if c.case_id == "k0" else 16, 16) for c in cases})
+        cmp = compare(parent, other, cases)
+        assert not cmp["case_declines_over_limit"]
+        assert cmp["non_regression_checks_pass"] is coherent
+        assert cohort_size(cases)["ok"] is coherent
+
+
+def test_a_one_case_cohort_is_too_small_not_unqualified_on_the_recorded_cell() -> None:
+    """The live cell (docs/results/v3-live.md), re-decided offline from its execution records."""
+    parent, id1, id2 = (_recorded(n) for n in ("parent", "identity_1", "identity_2"))
+    cand = _recorded("candidate_b972467a3b9a")
+    cases = [CaseInfo("policy_changed.v6", "trap", False)]
+    assert (parent.score(cases[0].case_id), cand.score(cases[0].case_id)) == (12, 35)
+    cohort = qualify(parent, [id1, id2], cases)
+    assert cohort["status"] == "TOO_SMALL"
+    assert cohort["size"] == {"cases": 1, "min_cases": 8, "ok": False, "reason": "cohort_too_small"}
+    # the controls are still compared and kept: each lost 2 of 20 in panel 0, 10 points
+    assert [c["aggregate"]["panel_0"]["decline_points"] for c in cohort["controls"]] == [10.0, 10.0]
+    gate = candidate_gate(cohort, compare(parent, cand, cases), 0, True)
+    assert not gate["passed"] and not gate["checks"]["cohort_size"]
+
+
+def test_a_many_case_cohort_qualifies_through_control_noise_of_one_run() -> None:
+    """With 19 cases (the full v3 cohort's size), each control losing one run in one panel on one case
+    moves the panel mean by 0.26 points, and the cohort qualifies."""
+    cases = [CaseInfo(f"k{i}", "trap", False) for i in range(19)]
+    parent = arm("parent", {c.case_id: (6, 6) for c in cases})
+    ctl = arm("ctl", {c.case_id: (5 if c.case_id == "k3" else 6, 6) for c in cases})
+    cohort = qualify(parent, [ctl, ctl], cases)
+    assert cohort["status"] == "QUALIFIED" and cohort["size"]["ok"]
+
+
+def test_mutation_the_old_rule_reports_the_cell_unqualified(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restoring v3's rule (no minimum) turns the one-case cell back into UNQUALIFIED on control noise, so
+    the two tests above go red if the minimum is removed or set to 1."""
+    monkeypatch.setitem(stochastic.POLICY, "min_cohort_cases", 1)
+    parent, id1, id2 = (_recorded(n) for n in ("parent", "identity_1", "identity_2"))
+    cases = [CaseInfo("policy_changed.v6", "trap", False)]
+    assert qualify(parent, [id1, id2], cases)["status"] == "UNQUALIFIED"
