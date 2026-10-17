@@ -7,6 +7,19 @@ covers 2026-10-11, 16:13 to 17:46 PT. It records the repeatability evidence for 
 mode and the two signed ruling-2 decisions made on it, for the candidates the live v3 cohort had refused
 ([v3-live.md](v3-live.md)).
 
+> **Note, 2026-10-17.** These runs predate the referee path. On 2026-10-11 `ratchet.improve.run_det` read
+> the held-out cases, ran them and signed in its own process; every number below comes from that run and
+> stands as recorded. The driver now runs the training cases only and hands the held-out side to the
+> referee (`ratchet.improve.referee`, factory `ratchet.improve.referee_live:policy_parts`), which takes the
+> endpoint configuration by file and digest. In a run on the referee path, the per-case tables on this page
+> (the repeatability digests per case, the P1/P2 discordance, and each decision's held-out outcomes,
+> recoveries and broken protected cases) come from the referee-signed results file
+> `<out>-results/<name>.dsse`, and the driver's output holds only counts and the signed verdict. Check such
+> a file with `python -m ratchet.verify.results <out>-results/<name>.dsse --case-suite`, which verifies each
+> receipt from its bundle, grades every held-out run again from the published cases and recomputes each
+> table. The 2026-10-11 runs wrote no results file, so their tables are checked only through the receipts.
+> The endpoints and databases they used cannot be re-run here.
+
 ## Endpoint
 
 Two servers ran gpt-oss-120b (MXFP4, snapshot `b5c939de`) on vLLM 0.26.0 with `VLLM_BATCH_INVARIANT=1`,
@@ -27,7 +40,7 @@ prefix cache stayed on (hit rate 97%) and requests were batched freely: up to 37
 | P1 against P2 held-out outcomes, each server | 0 discordant cases |
 
 The normalized trace is every event's kind and content (model text, reasoning, tool calls and results)
-plus the outcome, without timestamps, run ids or tool-call ids (`ratchet.improve.run_det.normalized`).
+plus the outcome, without timestamps, run ids or tool-call ids (`ratchet.improve.policies.normalized`).
 The parent passed 5 of 19 held-out cases and 5 of 18 training cases on every run.
 
 Throughput: one request generates about 7.5 tokens per second whatever the batch size, so throughput

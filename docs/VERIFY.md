@@ -105,6 +105,31 @@ in C1 and C2); every case passing in P1 or P2 passes in C1 and C2; only FRESH pa
 regressions; zero benign-twin interventions; the candidate appends only (tools a subset, parent guards and
 procedures unchanged and in order, parent prompt a prefix, unique ids, digest equals its content address).
 
+## Referee results files
+
+A driver that runs a policy through the referee (`run_det`, `run_v3`, `instruction_search`) gets counts and
+signed verdicts back. The per-case held-out tables go to `<name>.dsse` in the referee's results directory: a
+DSSE envelope (payload type `application/vnd.ratchet.referee-results+json`) signed with the decision key,
+listing each decision with its receipt digest and table, and the run-level tables (the repeatability probe,
+the parent discordance, the v3 identity controls). Beside it, `bundles/<id>/` holds each decision's receipt,
+evaluation reports, traces and harnesses; a v3 cohort's execution records and traces are under `cohorts/`.
+
+```sh
+python -m ratchet.verify.results results/run.dsse --case-suite     # or --case ID=FILE ...; --json
+```
+
+| Recomputed | From |
+|---|---|
+| each listed receipt is the bundled one (SHA-256) and verifies, `heldout_grades` included; its admission flag is the listed one | the bundle and the disclosed cases |
+| ruling 2: every held-out cell (P1, P2, C1, C2), the stable recoveries, the protected cases broken and the C1 flips | the bundled evaluation reports |
+| v3: every per-case and per-panel pass count, equal to the listed table and to the receipt's signed comparison; every execution graded again from its trace | execution records whose digest is the receipt's `arm:<name>` digest, their traces, the cases |
+| the repeatability probe's per-case digests and verdicts | the probe's traces (`runs/repeat_a.jsonl`, `runs/repeat_b.jsonl`) |
+| the parent discordance | the bundled parent runs |
+
+The v3 identity controls' per-case table is authenticated only: the controls' execution records are kept in
+the cohort directory but no receipt names their digests. Exit status 0 verified, 1 contradicted or not
+established, 2 malformed input.
+
 ## What the receipt must carry
 
 `Decision.to_payload()` of the admission lane:

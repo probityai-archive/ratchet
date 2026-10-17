@@ -24,6 +24,12 @@ store. Every change below is in this repository; the releases it waits for are n
   (`ratchet.improve.referee`). The improver gets counts and harness names only, and its database role cannot
   read the referee's Atlas database. `ratchet evolve` and every bench driver start one; the views read both
   stores.
+- `run_det` (ruling 2 on a deterministic endpoint), `run_v3` (stochastic policy v3) and the
+  improver-instruction comparison run their held-out side in the referee too, as policy methods
+  (`deterministic`, `stochastic`, `decide_many`). The worker's endpoint configuration is passed by file and
+  digest (`ratchet.improve.endpoints`) and the referee builds the seeded clients. The drivers get counts and
+  signed verdicts; the per-case tables go to a results file signed with the decision key, with a
+  verification bundle per decision, and `python -m ratchet.verify.results` recomputes them.
 - A candidate that grants a tool or edits a procedure is admitted on an admitted k-session bundle for exactly
   its parent and itself, when its runs called the tool and used the procedure. `ratchet-verify --sessions DIR`
   recomputes the bundle. Additive changes stay the default.

@@ -103,6 +103,16 @@ trace. With Atlas the referee writes to `<db>_heldout`, which the improver's rol
 (`tests/store/test_store_roles.py`); with the file store it writes beside it (`RATCHET_REFEREE_STORE_DIR`,
 signed with the decision key). `ratchet show`, `verify` and `report` read both stores, as an auditor does.
 
+The other admission policies run in the same referee. `run_det` (ruling 2 on a deterministic endpoint: the
+repeatability probe, the parent-discordance stop, a receipt naming the endpoint configuration digest),
+`run_v3` (stochastic policy v3: the interleaved schedule, the identity controls, `admit_v3`) and the
+improver-instruction comparison (`instruction_search`, several candidates through `decide_many`) name the
+factory `ratchet.improve.referee_live:policy_parts` and pass the worker's endpoint configuration by file and
+digest (`ratchet.improve.endpoints`); the referee builds the seeded clients. Each driver receives counts and
+signed verdicts. The per-case held-out tables go to a results file the referee signs with the decision key,
+with each decision's verification bundle beside it (`ratchet.improve.results`); `python -m
+ratchet.verify.results` checks it ([VERIFY.md](VERIFY.md#referee-results-files)).
+
 ## Receipts
 
 A decision is RFC 8785 canonical JSON (`ratchet.canonical.canonical_json`, through the `probityai.jcs`
