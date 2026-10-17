@@ -6,10 +6,11 @@ from __future__ import annotations
 import base64
 import io
 import threading
-from collections.abc import Iterator
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Iterator, Mapping
+from contextlib import AbstractContextManager, closing, contextmanager
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -170,11 +171,20 @@ class EndToEnd(LiveBackend):
     def model(self) -> object:
         return JsonModel()
 
+    def referee(self, config: Mapping[str, Any]) -> AbstractContextManager[Any]:
+        """The case-suite referee on this test's scripted model, in this process (the process boundary is
+        tested in tests/improve/test_referee.py)."""
+        from ratchet.improve.referee import RefereeCore
+        from ratchet.improve.referee_live import case_suite_parts_with
+
+        return closing(RefereeCore(case_suite_parts_with(config, JsonModel())))
+
 
 def test_evolve_runs_the_real_loop_against_atlas_and_the_views_read_it_back(
-    atlas_db: tuple[str, str, Store], decision_key: Signer
+    atlas_db: tuple[str, str, Store], decision_key: Signer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     uri, db, store = atlas_db
+    monkeypatch.setenv("RATCHET_REFEREE_MONGODB_URI", uri)  # the referee reads its store from its environment
     buf = io.StringIO()
     env = {"RATCHET_MONGODB_URI": uri, "RATCHET_DB": db}
     code = main(

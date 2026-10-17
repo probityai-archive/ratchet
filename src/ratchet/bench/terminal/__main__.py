@@ -22,6 +22,7 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,7 @@ from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.evaluate import evaluate_many
 from ratchet.improve.loop import Lab, evolve
 from ratchet.improve.receipt import Signer
+from ratchet.improve.referee import ProcessReferee, RefereeParts
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.improve.sim import RecordedViews
 from ratchet.types import Guard, Harness, Procedure
@@ -282,6 +284,37 @@ def cmd_oracle(args: argparse.Namespace) -> int:
     return 0
 
 
+def _evolve_cases(args: argparse.Namespace) -> list[TerminalCase]:
+    return phase_cases(load_suite(Path(args.suite)), args.phase, args.seed, _heldout(args))
+
+
+def _model_config(config: dict[str, Any]) -> dict[str, Any]:
+    return {k: config[k] for k in ("agent_model", "temperature", "suite_commit", "package")}
+
+
+def referee_parts(config: dict[str, Any]) -> RefereeParts:
+    """The held-out side of `evolve`, rebuilt in the referee's process from the same command line."""
+    args = parser().parse_args(config["argv"])
+    cases = _evolve_cases(args)
+    store = TerminalStore(Path(config["root"]))
+    stack = ExitStack()
+    runtime = stack.enter_context(GuardRuntime())
+    return RefereeParts(
+        cases=[c for c in cases if c.split == "heldout"],
+        run_case=RecordingRunner(TerminalRunner(runtime=runtime), store),
+        model=_client(args.agent_model, args.temperature),
+        simulator=RecordedViews(),
+        runner=SandboxRunner(runtime),
+        signer=Signer.for_decisions(),
+        store=store,
+        activator=MemoryActivator(store.decision),
+        model_config=_model_config(_config(args, cases)),
+        suite_digest=split_record(args.seed, _heldout(args))["digest"],
+        workers=args.workers,
+        close=stack.close,
+    )
+
+
 def cmd_evolve(args: argparse.Namespace) -> int:
     root = Path(args.out) / "evolve" / f"phase-{args.phase}" / args.name
     if (root / "traces.jsonl").exists():
@@ -289,7 +322,7 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     parent = load_harness(args.parent, Path(args.out))
     if args.phase == 2 and parent.created_by == "seed":
         raise SystemExit("phase 2 starts from the harness phase 1 admitted, not from the seed")
-    cases = phase_cases(load_suite(Path(args.suite)), args.phase, args.seed, _heldout(args))
+    cases = _evolve_cases(args)
     store = TerminalStore(root)
     config = _config(
         args,
@@ -306,7 +339,6 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     (root / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     model = _client(args.agent_model, args.temperature)
     improver = _client(args.improver_model)
-    signer = Signer.for_decisions()
     log_path = root / "log.txt"
 
     def log(msg: str) -> None:
@@ -315,33 +347,37 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
-    activator = MemoryActivator(store.decision)
     started = time.perf_counter()
-    with GuardRuntime() as runtime:
+    # Held-out runs, admission, decisions and activation: the referee, in its own process and directory.
+    referee_config = {"argv": args.argv, "root": str(root / "referee")}
+    with (
+        ProcessReferee("ratchet.bench.terminal.__main__:referee_parts", referee_config) as referee,
+        GuardRuntime() as runtime,
+    ):
         lab = Lab(
-            cases=cases,
+            cases=[c for c in cases if c.split != "heldout"],
             run_case=RecordingRunner(TerminalRunner(runtime=runtime), store),
             simulator=RecordedViews(),
             runner=SandboxRunner(runtime),
-            signer=signer,
-            activator=activator,
+            referee=referee,
             improver=improver,
             workers=args.workers,
             max_clusters=args.max_clusters,
             candidates_per_cluster=args.candidates_per_cluster,
             max_evals=args.max_evals,
             suite_digest=config["split_record"]["digest"],
-            model_config={k: config[k] for k in ("agent_model", "temperature", "suite_commit", "package")},
+            model_config=_model_config(config),
             log=log,
         )
         result = evolve(store, model, args.generations, lab=lab, seed=parent)
+        public_key, active = referee.public_key(), referee.active()
     out = {
         "config": config,
         "final_harness": result.harness.version,
         "instructions": result.instructions.version,
         "generations": [r.to_payload() for r in result.generations],
-        "keyid": signer.keyid,
-        "active": list(activator.active()),
+        "decision_public_key": public_key,
+        "active": list(active),
         "wall_s": round(time.perf_counter() - started, 1),
     }
     (root / "result.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
@@ -444,6 +480,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    args.argv = list(sys.argv[1:] if argv is None else argv)
     code: int = args.func(args)
     return code
 

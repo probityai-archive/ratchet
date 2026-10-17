@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 from collections.abc import Sequence
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.evaluate import evaluate_many
 from ratchet.improve.loop import Lab, evolve
 from ratchet.improve.receipt import Signer
+from ratchet.improve.referee import ProcessReferee, RefereeParts
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.improve.sim import RecordedViews
 from ratchet.types import Harness
@@ -155,6 +157,36 @@ def cmd_trial(args: argparse.Namespace) -> int:
     return 0
 
 
+def _model_config(config: dict[str, Any]) -> dict[str, Any]:
+    return {k: config[k] for k in ("agent_model", "user_model", "temperature", "tau_bench_commit")}
+
+
+def referee_parts(config: dict[str, Any]) -> RefereeParts:
+    """The held-out side of `evolve`, rebuilt in the referee's process from the same command line."""
+    args = parser().parse_args(config["argv"])
+    base_url, api_key = _endpoint(args)
+    everything = _all_cases(args)
+    cases = [c for c in everything if c.split == "heldout"]
+    store = JsonlStore(Path(config["root"]))
+    stack = ExitStack()
+    runtime = stack.enter_context(GuardRuntime())
+    return RefereeParts(
+        cases=cases,
+        run_case=RecordingRunner(TauRunner(user_model=args.user_model), store, len(cases)),
+        model=_agent(args, base_url, api_key),
+        simulator=RecordedViews(),
+        runner=SandboxRunner(runtime),
+        signer=Signer.for_decisions(),
+        store=store,
+        # The same rules as the Atlas activator over this run's own decision log.
+        activator=MemoryActivator(store.decision),
+        model_config=_model_config(_config(args, everything)),
+        suite_digest=split_record(everything, args.seed)["digest"],
+        workers=args.workers,
+        close=stack.close,
+    )
+
+
 def cmd_evolve(args: argparse.Namespace) -> int:
     base_url, api_key = _endpoint(args)
     root = Path(args.out) / "evolve" / args.domain / args.name
@@ -175,9 +207,9 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     (root / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     model = _agent(args, base_url, api_key)
     improver = _client(base_url, api_key, args.improver_model)
+    training = [c for c in cases if c.split != "heldout"]
     # One `trial` of evolve's evaluations is about len(cases) runs; the counter just shows progress.
-    runner = RecordingRunner(TauRunner(user_model=args.user_model), store, len(cases))
-    signer = Signer.for_decisions()
+    runner = RecordingRunner(TauRunner(user_model=args.user_model), store, len(training))
     log_path = root / "log.txt"
 
     def log(msg: str) -> None:
@@ -186,37 +218,37 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
-    # Activation follows the same rules as the Atlas activator (stored, admitting, signed decision; compare
-    # and swap on the active pointer) over this run's own decision log.
-    activator = MemoryActivator(store.decision)
     started = time.perf_counter()
-    with GuardRuntime() as runtime:
+    # Held-out runs, admission, decisions and activation: the referee, in its own process and directory.
+    referee_config = {"argv": args.argv, "root": str(root / "referee")}
+    with (
+        ProcessReferee("ratchet.bench.tau.__main__:referee_parts", referee_config) as referee,
+        GuardRuntime() as runtime,
+    ):
         lab = Lab(
-            cases=cases,
+            cases=training,
             run_case=runner,
             simulator=RecordedViews(),
             runner=SandboxRunner(runtime),
-            signer=signer,
-            activator=activator,
+            referee=referee,
             improver=improver,
             workers=args.workers,
             max_clusters=args.max_clusters,
             candidates_per_cluster=args.candidates_per_cluster,
             max_evals=args.max_evals,
             suite_digest=record["digest"],
-            model_config={
-                k: config[k] for k in ("agent_model", "user_model", "temperature", "tau_bench_commit")
-            },
+            model_config=_model_config(config),
             log=log,
         )
         result = evolve(store, model, args.generations, lab=lab, seed=seed_harness(args.domain))
+        public_key, active = referee.public_key(), referee.active()
     out = {
         "config": config,
         "final_harness": result.harness.version,
         "instructions": result.instructions.version,
         "generations": [r.to_payload() for r in result.generations],
-        "keyid": signer.keyid,
-        "active": list(activator.active()),
+        "decision_public_key": public_key,
+        "active": list(active),
         "wall_s": round(time.perf_counter() - started, 1),
     }
     (root / "result.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
@@ -282,6 +314,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    args.argv = list(sys.argv[1:] if argv is None else argv)
     code: int = args.func(args)
     return code
 

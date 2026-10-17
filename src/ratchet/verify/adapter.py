@@ -148,9 +148,14 @@ def _assessment(case_id: str, policy: Any) -> dict[str, Any]:
 _PREFIX_NAME = {REPORT_ROLE, RECOMPUTED_ROLE}
 
 
+SESSIONS_ROLE = "sessions:"
+
+
 def _valid_role(role: str) -> bool:
     if role in {"envelope", "approval", "harness:parent", "harness:candidate"}:
         return True
+    if role.startswith(SESSIONS_ROLE):
+        return role[len(SESSIONS_ROLE) :] in ("manifest.json", "executions.jsonl", "verdict.json")
     prefix = next((p for p in _PREFIX_NAME if role.startswith(p)), None)
     return prefix is not None and bool(REPORT_NAME.fullmatch(role[len(prefix) :]))
 
@@ -408,5 +413,6 @@ def adjudicate(case: Any, policy: Any, artifact_root: Path) -> dict[str, Any]:
         eval_roles=eval_roles,
         human_keys=human_keys,
         require_reports=a["require_reports"],
+        sessions=_supplied(data, SESSIONS_ROLE),
     )
     return _run_evidence(v, ctx, a["require_complete"])

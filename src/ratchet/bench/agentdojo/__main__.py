@@ -20,6 +20,7 @@ from ratchet.bench.agentdojo.experiment import (
     Settings,
     admitted_changes,
     baseline,
+    baseline_with_referee,
     decisions,
     evaluation_rows,
     evolve_from,
@@ -28,11 +29,14 @@ from ratchet.bench.agentdojo.experiment import (
     provenance,
     read_jsonl,
     recorded_lineage,
+    referee_config,
+    run_records,
     suite_digest,
 )
 from ratchet.bench.agentdojo.report import document, render
 from ratchet.bench.agentdojo.run import DojoRunner, JsonStore
 from ratchet.improve.evaluate import evaluate_many
+from ratchet.improve.referee import ProcessReferee
 
 COMPLETE = "COMPLETE"  # written by `run` when the run's last generation has finished
 STOPPED = "STOPPED.txt"  # written by the operator of a run that was stopped on purpose, with the reason
@@ -95,12 +99,20 @@ def run(command: str, s: Settings, log: Any = print) -> dict[str, Any]:
     runner, store = DojoRunner(dojo), JsonStore(s.out)
     model, improver = s.agent_client(), s.improver_client()
     started = time.perf_counter()
-    v0, v0_eval = baseline(dojo, runner, model, store, s.workers)
-    elapsed = time.perf_counter() - started
-    log(f"baseline {v0.version}: held-out {v0_eval.to_payload()['heldout']} in {elapsed:.0f}s")
     result = None
     if command == "evolve":
-        result = evolve_from(dojo, runner, model, improver, store, v0, s, log)
+        # Held-out runs (the baseline's too), decisions and activation: the referee, in its own process.
+        with ProcessReferee("ratchet.bench.agentdojo.experiment:referee_parts", referee_config(s)) as referee:
+            v0, held = baseline_with_referee(dojo, runner, model, store, s.workers, referee)
+            log(
+                f"baseline {v0.version}: held-out {held.heldout_passed}/{held.heldout_total} "
+                f"in {time.perf_counter() - started:.0f}s"
+            )
+            result = evolve_from(dojo, runner, model, improver, store, v0, s, referee, log)
+    else:
+        v0, v0_eval = baseline(dojo, runner, model, store, s.workers)
+        elapsed = time.perf_counter() - started
+        log(f"baseline {v0.version}: held-out {v0_eval.to_payload()['heldout']} in {elapsed:.0f}s")
     versions = lineage(v0, result)
     results = write_results(s.out, dojo, prov, versions, command, "complete")
     (s.out / COMPLETE).write_text(time.strftime("%Y-%m-%dT%H:%M:%SZ\n", time.gmtime()))
@@ -118,7 +130,7 @@ NOTES = [
 def write_results(
     out: Path, dojo: DojoSuite, prov: dict[str, Any], versions: list[str], command: str, status: str
 ) -> dict[str, Any]:
-    records = [e for e in read_jsonl(out / "evals.jsonl") if e.get("type") == "generation"]
+    records = [e for e in run_records(out, "evals.jsonl") if e.get("type") == "generation"]
     results = {
         "run_id": out.name,
         "command": command,

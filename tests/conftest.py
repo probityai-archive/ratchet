@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -24,3 +26,17 @@ def decision_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Signer:
     monkeypatch.setenv(SIGNING_KEY_ENV, signer.private_key.private_bytes_raw().hex())
     monkeypatch.setenv(TRUSTED_KEY_ENV, str(pem))
     return signer
+
+
+def _inprocess_referee(factory: str, config: Mapping[str, Any], **_options: Any) -> Any:
+    from ratchet.improve.referee import RefereeCore, load_factory
+
+    return RefereeCore(load_factory(factory)(config))
+
+
+@pytest.fixture
+def inprocess_referee() -> Callable[..., Any]:
+    """Stands in for `ProcessReferee` in a driver's CLI test: the factory the driver names, run in this
+    process through the same `RefereeCore`, so the driver's in-process patches (scripted endpoints, fake
+    runners) reach the referee too. The process boundary itself is tested in tests/improve/test_referee.py."""
+    return _inprocess_referee

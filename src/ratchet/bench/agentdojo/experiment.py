@@ -13,15 +13,17 @@ import importlib.metadata
 import json
 import subprocess
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from ratchet_cases.types import Split, sha256_hex
 
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ChatModel, ModelClient, ModelConfig
-from ratchet.bench.agentdojo.cases import DEFAULT_ATTACK, DEFAULT_VERSION, DojoSuite
+from ratchet.bench.agentdojo.cases import DEFAULT_ATTACK, DEFAULT_VERSION, DojoSuite, build_suite
 from ratchet.bench.agentdojo.metrics import DojoMetrics, metrics_from_rows
 from ratchet.bench.agentdojo.run import (
     DOJO_LIMITS,
@@ -37,9 +39,10 @@ from ratchet.improve.evaluate import EvalReport, evaluate_many
 from ratchet.improve.loop import EvolveResult, Lab, evolve
 from ratchet.improve.propose import Instructions
 from ratchet.improve.receipt import Signer
+from ratchet.improve.referee import Referee, RefereeParts, Totals
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.types import Guard, Harness, Procedure
-from ratchet.verify.dsse import raw_public
+from ratchet.verify.dsse import keyid_of
 
 DOJO_INSTRUCTIONS = Instructions.build("""\
 You improve the harness of an AI assistant that acts for one user through tools on that user's own systems
@@ -178,9 +181,53 @@ def _signer() -> Signer:
     return Signer.for_decisions()
 
 
+def referee_parts_for(
+    dojo: DojoSuite, runner: DojoRunner, model: ChatModel, root: Path, s: Settings
+) -> RefereeParts:
+    """The referee of an AgentDojo run: the held-out cases, its own store under `root`, the decision key."""
+    store = JsonStore(root)
+    stack = ExitStack()
+    runtime = stack.enter_context(GuardRuntime())
+    return RefereeParts(
+        cases=dojo.by_split("heldout"),
+        run_case=runner.run_case,
+        model=model,
+        simulator=DojoSimulator(runner),
+        runner=SandboxRunner(runtime),
+        signer=_signer(),
+        store=store,
+        activator=MemoryActivator(store.decision),
+        model_config=model_config(s),
+        suite_digest=suite_digest(dojo),
+        workers=s.workers,
+        close=stack.close,
+    )
+
+
+def referee_parts(config: dict[str, Any]) -> RefereeParts:
+    """The referee, rebuilt in its own process: the run's settings (the API key from the environment)."""
+    import os
+
+    s = Settings(
+        **{**config["settings"], "out": Path(config["settings"]["out"])},
+        api_key=os.environ.get("RATCHET_API_KEY", ""),
+    )
+    dojo = build_suite(
+        s.suite, benchmark_version=s.benchmark_version, attack=s.attack, seed=s.seed, max_users=s.max_users
+    )
+    return referee_parts_for(dojo, DojoRunner(dojo), s.agent_client(), Path(config["root"]), s)
+
+
+def referee_config(s: Settings) -> dict[str, Any]:
+    """What `referee_parts` needs: every setting but the API key, which the referee reads itself."""
+    fields_ = {k: v for k, v in s.__dict__.items() if k != "api_key"}
+    return {"settings": {**fields_, "out": str(s.out)}, "root": str(s.out / "referee")}
+
+
 def baseline(
     dojo: DojoSuite, runner: DojoRunner, model: ChatModel, store: JsonStore, workers: int
 ) -> tuple[Harness, EvalReport]:
+    """v0 on every case, for a run with no improver (`baseline`)."""
     v0 = seed_harness(dojo)
     store.put_harness(v0)
     report = evaluate_many([v0], dojo.cases, runner.run_case, model, workers=workers)[0]
@@ -188,6 +235,20 @@ def baseline(
         store.put_trace(t)
     store.put_eval({**report.to_payload(), "role": "baseline"})
     return v0, report
+
+
+def baseline_with_referee(
+    dojo: DojoSuite, runner: DojoRunner, model: ChatModel, store: JsonStore, workers: int, referee: Referee
+) -> tuple[Harness, Totals]:
+    """v0 before an `evolve`: the training cases here, the held-out cases at the referee."""
+    v0 = seed_harness(dojo)
+    store.put_harness(v0)
+    training = [c for c in dojo.cases if c.split != "heldout"]
+    report = evaluate_many([v0], training, runner.run_case, model, workers=workers)[0]
+    for t in report.traces:
+        store.put_trace(t)
+    store.put_eval({**report.to_payload(), "role": "baseline"})
+    return v0, referee.evaluate("baseline", v0, report)
 
 
 def evolve_from(
@@ -198,25 +259,26 @@ def evolve_from(
     store: JsonStore,
     v0: Harness,
     s: Settings,
+    referee: Referee,
     log: Any = print,
 ) -> EvolveResult:
-    """The ratchet loop from v0. The loop runs the parent itself, twice, every generation."""
+    """The ratchet loop from v0 over the training cases; the referee runs the parent twice on the held-out
+    cases every generation and holds every decision."""
+    (s.out / "signer.json").write_text(
+        json.dumps({"keyid": keyid_of(_public(referee)), "public_key": referee.public_key()})
+    )
     with GuardRuntime() as runtime:
         lab = Lab(
-            cases=dojo.cases,
+            cases=[c for c in dojo.cases if c.split != "heldout"],
             run_case=runner.run_case,
             simulator=DojoSimulator(runner),
             runner=SandboxRunner(runtime),
-            signer=_signer(),
-            activator=MemoryActivator(store.decision),
+            referee=referee,
             improver=improver,
             workers=s.workers,
             suite_digest=suite_digest(dojo),
             model_config=model_config(s),
             log=log,
-        )
-        (s.out / "signer.json").write_text(
-            json.dumps({"keyid": lab.signer.keyid, "public_key": raw_public(lab.signer.public_key).hex()})
         )
         return evolve(
             store,
@@ -228,10 +290,20 @@ def evolve_from(
         )
 
 
+def _public(referee: Referee) -> Ed25519PublicKey:
+    return Ed25519PublicKey.from_public_bytes(bytes.fromhex(referee.public_key()))
+
+
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def run_records(out: Path, name: str) -> list[dict[str, Any]]:
+    """A run's records of one kind: the improver's, then the referee's (`referee/`: held-out runs and
+    decisions), read as an auditor reads them."""
+    return read_jsonl(out / name) + read_jsonl(out / "referee" / name)
 
 
 def evaluation_rows(dojo: DojoSuite, out: Path) -> list[dict[str, Any]]:
@@ -241,7 +313,7 @@ def evaluation_rows(dojo: DojoSuite, out: Path) -> list[dict[str, Any]]:
     candidate, composite and confirmation run, admitted or not, so no favourable run can be picked and
     an unfavourable one dropped.
     """
-    evals = [e for e in read_jsonl(out / "evals.jsonl") if e.get("type") == "eval"]
+    evals = [e for e in run_records(out, "evals.jsonl") if e.get("type") == "eval"]
     rows: list[dict[str, Any]] = []
     for e in evals:
         splits: list[Split] = [sp for sp in ("train", "heldout") if e[sp]["total"]]
@@ -261,7 +333,7 @@ def evaluation_rows(dojo: DojoSuite, out: Path) -> list[dict[str, Any]]:
 def decisions(out: Path) -> list[dict[str, Any]]:
     """Every signed admission decision of a run: the candidate, its kind, the verdict and failed checks."""
     kinds: dict[str, str] = {}
-    for rec in read_jsonl(out / "evals.jsonl"):
+    for rec in run_records(out, "evals.jsonl"):
         for c in rec.get("candidates") or [] if rec.get("type") == "generation" else []:
             kinds[str(c.get("harness_version"))] = str(c.get("kind"))
     return [
@@ -272,7 +344,7 @@ def decisions(out: Path) -> list[dict[str, Any]]:
             "admitted": bool(d.get("admitted")),
             "failed": [c["name"] for c in d.get("checks", []) if not c.get("passed")],
         }
-        for d in read_jsonl(out / "decisions.jsonl")
+        for d in run_records(out, "decisions.jsonl")
     ]
 
 
@@ -312,7 +384,7 @@ def recorded_lineage(out: Path) -> list[str]:
     """v0 and every version the loop promoted, in order, read from a run's files."""
     harnesses = read_jsonl(out / "harnesses.jsonl")
     versions = [str(harnesses[0]["version"])] if harnesses else []
-    for rec in read_jsonl(out / "evals.jsonl"):
+    for rec in run_records(out, "evals.jsonl"):
         promoted = (rec.get("level1") or {}).get("promoted") if rec.get("type") == "generation" else None
         if promoted and promoted not in versions:
             versions.append(str(promoted))

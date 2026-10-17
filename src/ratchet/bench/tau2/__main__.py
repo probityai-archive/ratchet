@@ -74,6 +74,7 @@ from ratchet.bench.tau2.tasks import (
     trial_seeds,
 )
 from ratchet.improve.evaluate import INFRA_RETRIES, is_infra_failure
+from ratchet.improve.referee import ProcessReferee
 from ratchet.types import Guard, Harness, Procedure
 
 Log = Callable[[str], None]
@@ -435,9 +436,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_evolve(args: argparse.Namespace) -> int:
-    from ratchet.bench.tau2.evolve import run_evolve, signer_from_env
-
+def _evolve_setup(args: argparse.Namespace) -> tuple[list[Tau2Case], Any, ModelClient, dict[str, Any], str]:
+    """The cases, runner, agent model and run config of `evolve`, the same in the improver's process and in
+    the referee's. Returns the API key too, for the improver's client."""
     quiet_tau2_logs()
     base_url = args.base_url or os.environ.get("RATCHET_BASE_URL", "")
     api_key = os.environ.get("RATCHET_API_KEY", "")
@@ -447,10 +448,6 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     path = data_dir()
     if not is_complete(path):
         fetch_data(path)
-    root = Path(args.out, "evolve", args.domain, args.name)
-    if (root / "traces.jsonl").exists():
-        raise SystemExit(f"{root} already has a run; pick another --name")
-    root.mkdir(parents=True, exist_ok=True)
     cases = _select(args)
     judge = args.judge_model or args.user_model
     config = {
@@ -476,7 +473,6 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         "ratchet_commit": _git_commit(),
         "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
-    (root / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     configure_user_endpoint(user_url.split(",")[0].strip(), api_key)
     set_judge(judge)
     tconfig = run_config(args.domain, agent_model=args.agent_model, user_model=args.user_model,
@@ -489,12 +485,30 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         args.temperature,
         own_user_endpoint=bool(args.user_base_url),
     )
-    model = models[0]
+    return cases, runner, models[0], config, api_key
+
+
+def referee_parts(config: dict[str, Any]) -> Any:
+    """The held-out side of `evolve`, rebuilt in the referee's process from the same command line."""
+    from ratchet.bench.tau2.evolve import referee_parts_for
+
+    args = parser().parse_args(config["argv"])
+    cases, runner, model, run_config_, _ = _evolve_setup(args)
+    return referee_parts_for(Path(config["root"]), cases, runner, model, run_config_, args.workers)
+
+
+def cmd_evolve(args: argparse.Namespace) -> int:
+    from ratchet.bench.tau2.evolve import run_evolve
+
+    root = Path(args.out, "evolve", args.domain, args.name)
+    if (root / "traces.jsonl").exists():
+        raise SystemExit(f"{root} already has a run; pick another --name")
+    root.mkdir(parents=True, exist_ok=True)
+    cases, runner, model, config, api_key = _evolve_setup(args)
+    (root / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     improver_key = os.environ.get("RATCHET_IMPROVER_API_KEY", api_key)
     improver = ModelClient(
-        ModelConfig(
-            base_url=args.improver_base_url or base_url, model=args.improver_model, api_key=improver_key
-        )
+        ModelConfig(base_url=config["improver_base_url"], model=args.improver_model, api_key=improver_key)
     )
     log_path = root / "log.txt"
 
@@ -504,22 +518,24 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
-    out = run_evolve(
-        root,
-        cases=cases,
-        runner=runner,
-        model=model,
-        improver=improver,
-        seed=seed_harness(args.domain),
-        config=config,
-        generations=args.generations,
-        workers=args.workers,
-        max_clusters=args.max_clusters,
-        candidates_per_cluster=args.candidates_per_cluster,
-        max_evals=args.max_evals,
-        signer=signer_from_env(),
-        log=log,
-    )
+    referee_config = {"argv": args.argv, "root": str(root / "referee")}
+    with ProcessReferee("ratchet.bench.tau2.__main__:referee_parts", referee_config) as referee:
+        out = run_evolve(
+            root,
+            cases=[c for c in cases if c.split != "heldout"],
+            runner=runner,
+            model=model,
+            improver=improver,
+            seed=seed_harness(args.domain),
+            config=config,
+            generations=args.generations,
+            workers=args.workers,
+            max_clusters=args.max_clusters,
+            candidates_per_cluster=args.candidates_per_cluster,
+            max_evals=args.max_evals,
+            referee=referee,
+            log=log,
+        )
     log(f"active harness {out['active']}, frozen at {root / 'frozen.json'}")
     return 0
 
@@ -623,6 +639,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    args.argv = list(sys.argv[1:] if argv is None else argv)
     code: int = args.func(args)
     return code
 

@@ -10,6 +10,7 @@ from ratchet_cases.types import Trace
 from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.loop import Lab, compose, evolve
 from ratchet.improve.receipt import Signer, verify
+from ratchet.improve.referee import RefereeCore, RefereeParts
 from ratchet.types import Harness
 
 from .fakes import (
@@ -102,15 +103,32 @@ class MemStore:
         return decision_id or str(len(self.decisions))
 
 
+def _referee(store: MemStore, signer: Signer) -> RefereeCore:
+    """The referee's logic, in this process, over the held-out cases and the shared test store."""
+    return RefereeCore(
+        RefereeParts(
+            cases=[c for c in CASES if c.split == "heldout"],
+            run_case=FakeRunCase(),
+            model=None,
+            simulator=FakeSimulator(),
+            runner=LocalRunner(),
+            signer=signer,
+            store=store,
+            activator=MemoryActivator(store.decision),
+            suite_digest="suite",
+            workers=4,
+        )
+    )
+
+
 def _lab(store: MemStore, chat: RoutingChat, signer: Signer, **kw: Any) -> Lab:
     kw = {"max_clusters": 1, **kw}
     return Lab(
-        cases=CASES,
+        cases=[c for c in CASES if c.split != "heldout"],
         run_case=FakeRunCase(),
         simulator=FakeSimulator(),
         runner=LocalRunner(),
-        signer=signer,
-        activator=MemoryActivator(store.decision),
+        referee=_referee(store, signer),
         improver=chat,
         workers=4,
         max_evals=4,
@@ -250,7 +268,7 @@ def test_audit_cases_are_never_run() -> None:
     run = Recording()
     store = MemStore()
     lab = _lab(store, RoutingChat(), Signer.generate())
-    lab.cases = [*CASES, FakeCase("timeout-99", "audit")]
+    lab.cases = [*(c for c in CASES if c.split != "heldout"), FakeCase("timeout-99", "audit")]
     lab.run_case = run
     evolve(store, None, 1, lab=lab, seed=SEED)
     assert run.seen and "timeout-99" not in run.seen

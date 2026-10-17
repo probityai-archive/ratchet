@@ -164,6 +164,7 @@ def _artifacts(
     harnesses: Mapping[str, Doc],
     recomputed: Mapping[str, Doc],
     approval: bytes | None,
+    sessions: Path | None = None,
 ) -> dict[str, Any]:
     canonicalization = declared_canonicalization(envelope)
     out = {"envelope": _write(root, "envelope.json", envelope)}
@@ -179,6 +180,11 @@ def _artifacts(
         )
     if approval is not None:
         out["approval"] = _write(root, "approval.json", approval)
+    if sessions is not None:
+        for name in ("manifest.json", "executions.jsonl", "verdict.json"):
+            out[f"{adapter.SESSIONS_ROLE}{name}"] = _write(
+                root, f"sessions/{name}", (sessions / name).read_bytes()
+            )
     return out
 
 
@@ -189,6 +195,7 @@ def _build(
     evidence: Mapping[str, Mapping[str, Doc]],
     approval: bytes | None,
     options: Options,
+    sessions: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     artifacts = _artifacts(
         root,
@@ -197,6 +204,7 @@ def _build(
         evidence.get("harnesses", {}),
         evidence.get("recomputed", {}),
         approval,
+        sessions,
     )
     case_id = f"ratchet-decision-{artifacts['envelope']['sha256'][:16]}"
     case = {"schema_version": adapter.CASE_SCHEMA, "case_id": case_id, "artifacts": artifacts}
@@ -253,6 +261,7 @@ def verify_decision(
     recomputed: Mapping[str, Doc] | None = None,
     approval: bytes | None = None,
     options: Options = Options(),  # noqa: B008 - frozen dataclass, safe as a default
+    sessions: Path | None = None,
 ) -> VerifyReport:
     """Verify a signed admission receipt. Never raises on bad evidence: it returns a failing report.
 
@@ -268,6 +277,7 @@ def verify_decision(
     - `recomputed`: results the caller derived from the recorded inputs: `"replay:<guard id>"` replay report
       payloads and `"overfit_lint"` as `{"hits": [...]}`; compared with the receipt's claims.
     - `approval`: the human approval envelope, needed only when authority grew by declared exception.
+    - `sessions`: the k-session bundle directory a tool addition or procedure edit was admitted on.
 
     Anything not supplied is reported as not supplied, never as recomputed.
     """
@@ -288,7 +298,7 @@ def verify_decision(
         return VerifyReport(NO_VERDICT, "invalid_harness_role")
     with tempfile.TemporaryDirectory(prefix="ratchet-verify-") as tmp:
         root = Path(os.path.realpath(tmp))
-        case, policy = _build(root, envelope_bytes, keys, evidence, approval, options)
+        case, policy = _build(root, envelope_bytes, keys, evidence, approval, options, sessions)
         try:
             packet = adjudicate(case, policy, root, adapters={adapter.CLAIM_TYPE: adapter.adjudicate})
         except CaseError as exc:

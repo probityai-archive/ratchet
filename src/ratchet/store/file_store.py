@@ -333,6 +333,11 @@ class FileStore:
             seen += len(fresh)
             time.sleep(poll_ms / 1000)
 
+    def active_record(self) -> Doc | None:
+        """The latest activation record (version, revision, decision id, receipt digest), or None."""
+        acts = self._all("activations")
+        return dict(acts[-1]) if acts else None
+
     def close(self) -> None:
         """Nothing is held open between calls."""
 

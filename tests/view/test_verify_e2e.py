@@ -19,6 +19,7 @@ from rich.console import Console
 from ratchet.cli import LiveBackend, main
 from ratchet.improve.loop import EvolveResult, Lab, evolve
 from ratchet.improve.receipt import Signer
+from ratchet.improve.referee import RefereeCore, RefereeParts
 from ratchet.improve.replay import GuardRunner
 from ratchet.improve.sim import Simulator
 from ratchet.store.activation import MongoActivator
@@ -50,15 +51,31 @@ def _local() -> Iterator[GuardRunner]:
 
 
 @pytest.fixture
-def evolved(atlas_db: tuple[str, str, Store]) -> tuple[str, str, EvolveResult, Store]:
+def evolved(atlas_db: tuple[str, str, Store]) -> Iterator[tuple[str, str, EvolveResult, Store]]:
+    """The loop on the main database; the referee on `<db>_heldout`, where its decisions are. The CLI reads
+    both, as an auditor does."""
     uri, db, store = atlas_db
+    held = Store(uri, f"{db}_heldout")
+    referee = RefereeCore(
+        RefereeParts(
+            cases=[c for c in CASES if c.split == "heldout"],
+            run_case=FakeRunCase(),
+            model=None,
+            simulator=FakeSimulator(),
+            runner=LocalRunner(),
+            signer=SIGNER,
+            store=held,
+            activator=MongoActivator(held._client, f"{db}_heldout"),
+            suite_digest="ab" * 32,
+            workers=4,
+        )
+    )
     lab = Lab(
-        cases=CASES,
+        cases=[c for c in CASES if c.split != "heldout"],
         run_case=FakeRunCase(),
         simulator=FakeSimulator(),
         runner=LocalRunner(),
-        signer=SIGNER,
-        activator=MongoActivator(store._client, db),
+        referee=referee,
         improver=RoutingChat(),
         workers=4,
         max_evals=4,
@@ -66,7 +83,9 @@ def evolved(atlas_db: tuple[str, str, Store]) -> tuple[str, str, EvolveResult, S
         suite_digest="ab" * 32,
     )
     result = evolve(store, model=None, generations=1, lab=lab, seed=SEED)
-    return uri, db, result, store
+    yield uri, db, result, held
+    held._client.drop_database(f"{db}_heldout")
+    held.close()
 
 
 def run(argv: list[str], uri: str, db: str) -> tuple[int, str]:

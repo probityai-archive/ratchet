@@ -69,6 +69,7 @@ cluster's connection string in `RATCHET_MONGODB_URI`.
 |---|---|
 | `RATCHET_STORE_DIR`, `RATCHET_STORE_KEY` | the signed file store and its 32-byte Ed25519 seed as hex; used when set |
 | `RATCHET_MONGODB_URI`, `RATCHET_DB` | the Atlas store, with the `atlas` extra (database defaults to `ratchet`) |
+| `RATCHET_REFEREE_STORE_DIR`, `RATCHET_REFEREE_MONGODB_URI` | the referee's store: beside the file store (default `<RATCHET_STORE_DIR>-referee`), or the Atlas database `<db>_heldout` (default: the same connection string) |
 | `RATCHET_BASE_URL`, `RATCHET_API_KEY`, `RATCHET_MODEL` | the agent model, through any OpenAI-compatible endpoint |
 | `RATCHET_IMPROVER_MODEL` | the model that proposes guards (with `RATCHET_IMPROVER_BASE_URL` and `RATCHET_IMPROVER_API_KEY` for a different endpoint) |
 | `RATCHET_SIGNING_KEY` | 32-byte Ed25519 seed as hex; signs decisions. Never stored in the repository |

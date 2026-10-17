@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,8 @@ def _cases(*_a: Any, **_k: Any) -> list[TauCase]:
 
 
 @pytest.fixture
-def patched(monkeypatch: pytest.MonkeyPatch) -> None:
+def patched(monkeypatch: pytest.MonkeyPatch, inprocess_referee: Callable[..., Any]) -> None:
+    monkeypatch.setattr(cli, "ProcessReferee", inprocess_referee)
     monkeypatch.setenv("RATCHET_BASE_URL", "http://127.0.0.1:9/v1")
     monkeypatch.setenv("RATCHET_API_KEY", "k")
     monkeypatch.setattr(cli, "TauRunner", _FakeRunner)

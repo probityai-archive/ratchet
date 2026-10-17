@@ -36,10 +36,8 @@ class ViewStore(Protocol):
     def watch(
         self, collection: str, *, timeout_s: float | None = None, resume_after: Doc | None = None
     ) -> Iterator[Any]: ...
+    def active_record(self) -> Doc | None: ...
     def close(self) -> None: ...
-
-    @property
-    def db(self) -> Any: ...
 
 
 class StoreFactory(Protocol):
@@ -252,7 +250,7 @@ class ActiveInfo:
 
 def read_active(store: ViewStore) -> ActiveInfo | None:
     """The harness the workers currently run (the `active` pointer), or None before the first bootstrap."""
-    doc = store.db["active"].find_one({})
+    doc = store.active_record()
     if doc is None:
         return None
     return ActiveInfo(

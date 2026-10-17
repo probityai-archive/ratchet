@@ -92,6 +92,16 @@ mechanism are not candidate-editable.
 Human-authorized exceptions are separately signed, name the exact
 candidate and policy exception, and are not ordinary automatic admissions.
 
+Two changes beyond the additive class are admitted automatically on
+stronger evidence: granting a tool, and editing an existing procedure.
+Either needs an admitted k-session bundle whose arms are exactly the
+parent (three times) and the candidate, recomputed from its directory at
+admission, and fresh candidate runs that called every granted tool and
+used every edited procedure. The authority evidence records the change
+class `exercised_under_k_sessions`, the bundle's protocol digest and
+verdict; a refusal records why. Guard edits, prompt rewrites and
+duplicate ids are never in this class.
+
 ### Replay gate
 
 The replay manifest fixes all eligible recorded inputs and explicitly
