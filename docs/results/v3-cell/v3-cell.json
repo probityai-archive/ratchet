@@ -1,0 +1,135 @@
+{
+  "frozen": {
+    "schedule_digest": "cd7b60eb831745975bb26070b34c4eb406934e9c78e91d1c3770ef425c44a68c",
+    "arms": {
+      "parent": "dfdfffeeb388",
+      "identity_1": "dfdfffeeb388",
+      "identity_2": "dfdfffeeb388",
+      "candidate:b972467a3b9a": "b972467a3b9a"
+    },
+    "evaluator": "5fc15c8ceda6",
+    "policy": {
+      "name": "stochastic",
+      "version": "v3",
+      "runs_per_arm": 40,
+      "panels": 2,
+      "panel_size": 20,
+      "high_pass_min": 30,
+      "low_pass_max": 10,
+      "recovery_panel_margin": 8,
+      "min_stable_recoveries": 2,
+      "max_stable_regressions": 0,
+      "max_case_decline": 8,
+      "max_aggregate_decline_points": 5.0
+    },
+    "cases": 1
+  },
+  "wall_s": 641.7,
+  "executions": 160,
+  "invalid": 0,
+  "cohort": "UNQUALIFIED",
+  "controls": [
+    {
+      "arm": "identity_1",
+      "stable_recoveries": 0,
+      "stable_regressions": 0,
+      "declines_over_limit": 0,
+      "incomplete_cases": 0,
+      "aggregate": {
+        "pooled": {
+          "parent": 30.0,
+          "arm": 25.0,
+          "decline_points": 5.0,
+          "ok": true
+        },
+        "panel_0": {
+          "parent": 35.0,
+          "arm": 25.0,
+          "decline_points": 10.0,
+          "ok": false
+        },
+        "panel_1": {
+          "parent": 25.0,
+          "arm": 25.0,
+          "decline_points": 0.0,
+          "ok": true
+        }
+      },
+      "qualifies": false
+    },
+    {
+      "arm": "identity_2",
+      "stable_recoveries": 0,
+      "stable_regressions": 0,
+      "declines_over_limit": 0,
+      "incomplete_cases": 0,
+      "aggregate": {
+        "pooled": {
+          "parent": 30.0,
+          "arm": 27.5,
+          "decline_points": 2.5,
+          "ok": true
+        },
+        "panel_0": {
+          "parent": 35.0,
+          "arm": 25.0,
+          "decline_points": 10.0,
+          "ok": false
+        },
+        "panel_1": {
+          "parent": 25.0,
+          "arm": 30.0,
+          "decline_points": -5.0,
+          "ok": true
+        }
+      },
+      "qualifies": false
+    }
+  ],
+  "decisions": [
+    {
+      "arm": "candidate:b972467a3b9a",
+      "stable_recoveries": 0,
+      "stable_regressions": 0,
+      "declines_over_limit": 0,
+      "incomplete_cases": 0,
+      "aggregate": {
+        "pooled": {
+          "parent": 30.0,
+          "arm": 87.5,
+          "decline_points": -57.5,
+          "ok": true
+        },
+        "panel_0": {
+          "parent": 35.0,
+          "arm": 85.0,
+          "decline_points": -50.0,
+          "ok": true
+        },
+        "panel_1": {
+          "parent": 25.0,
+          "arm": 90.0,
+          "decline_points": -65.0,
+          "ok": true
+        }
+      },
+      "decision_id": "v3:dfdfffeeb388->b972467a3b9a:cd7b60eb8317",
+      "candidate": "b972467a3b9a",
+      "admitted": false,
+      "receipt_sha256": "758abd6202c27adb98cb19b8bfce6acfa1035f81a24e854066e3735e72cd1a44",
+      "failed": [
+        "stochastic_v3",
+        "cohort_qualified"
+      ],
+      "benign_interventions": 0
+    }
+  ],
+  "endpoint_config_digest": "36b3e902d07799f62cdb6377fde656f76fac0d0dbae9d3d5086d5b5397d8a7e4",
+  "results": {
+    "path": "docs/results/v3-cell/v3-cell-results/v3-cell.dsse",
+    "sha256": "49f5e8ecc0bb1e25e294090f6baf561aaa7337c5c9801b17c03076142541d187",
+    "decisions": 1,
+    "admitted": 0,
+    "signer_keyid": "b61d7e39c11179fdd28e07f95f7ac220484eda20709e56a4e0d76e4cc23d6d0c"
+  }
+}
