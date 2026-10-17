@@ -13,9 +13,11 @@ the steps in `ratchet.verify.evidence`: report digests, and the admission gates 
 evidence whenever that evidence is supplied.
 
 The verdict reports two lists and never merges them. RECOMPUTED: derived here from bytes (signature, digests,
-the admission predicate, replay when its recorded inputs are supplied). AUTHENTICATED ONLY: stated by the
-evaluator and covered by its signature, never re-derived (fresh model execution, capture fidelity, sandbox
-enforcement, hidden grades). An item whose inputs were not supplied is printed as not supplied.
+the admission predicate, replay when its recorded inputs are supplied, and the run records checked in
+`ratchet.verify.runs` from the reports, traces and case documents a third party holds).
+AUTHENTICATED ONLY: stated by the evaluator and covered by its signature, never re-derived; each such item
+carries the reason no record can re-derive it (`AUTHENTICATED_ONLY_LIMITS`). An item whose inputs were not
+supplied is printed as not supplied.
 """
 
 from __future__ import annotations
@@ -58,25 +60,36 @@ V3_GATES = ("replay", "stochastic_v3", "cohort_qualified", "effective_change", "
 REPORT_ROLE = "report:"
 HARNESS_ROLE = "harness:"
 RECOMPUTED_ROLE = "recomputed:"
+TRACES_ROLE = "traces:"
+CASE_ROLE = "case:"
 DEFAULT_EVAL_ROLES = {
     "p1": "parent_run_1",
     "p2": "parent_run_2",
     "c1": "candidate_run",
     "c2": "candidate_confirm_run",
 }
-AUTHENTICATED_ONLY = (
-    "fresh_model_execution",
-    "capture_fidelity",
-    "sandbox_enforcement",
-    "hidden_grades",
-)
+# What the receipt asserts that no record a third party holds can re-derive, each with the reason. These rest
+# on the decision key, which the referee holds and the improver never does (ratchet.improve.referee).
+AUTHENTICATED_ONLY_LIMITS = {
+    "model_turns_as_recorded": (
+        "that each recorded model turn is the endpoint's unaltered answer and that none was left out: a "
+        "chat-completions response carries no signature of its provider, so only the referee's key says a "
+        "model, not the referee, wrote the turns its traces record"
+    ),
+    "container_isolation": (
+        "that a world running outside the referee's process, the terminal benchmark's container, kept the "
+        "agent's commands inside it: no launcher records an isolation report for these runs, so the record "
+        "shows which commands the policy let through, not what the container let them reach"
+    ),
+}
+AUTHENTICATED_ONLY = tuple(AUTHENTICATED_ONLY_LIMITS)
 REPORT_NAME = re.compile(r"^[^\x00-\x1f\x7f]{1,200}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 LIMIT = (
-    "RECOMPUTED covers only the items listed as recomputed. AUTHENTICATED ONLY items rest on the evaluator's "
-    "signature: this verifier did not re-derive them and does not establish that the evaluations ran, that "
-    "the reports are true, or that the key holder is honest."
+    "RECOMPUTED covers only the items listed as recomputed. AUTHENTICATED ONLY items rest on the decision "
+    "key, which the referee process holds and the improver never does: this verifier did not re-derive them, "
+    "and it does not establish that the key holder is honest. Each one names its limit."
 )
 
 
@@ -145,7 +158,7 @@ def _assessment(case_id: str, policy: Any) -> dict[str, Any]:
     return a
 
 
-_PREFIX_NAME = {REPORT_ROLE, RECOMPUTED_ROLE}
+_PREFIX_NAME = {REPORT_ROLE, RECOMPUTED_ROLE, TRACES_ROLE, CASE_ROLE}
 
 
 SESSIONS_ROLE = "sessions:"
@@ -196,6 +209,7 @@ class _Verdict:
             )
         pending = [i["id"] for i in self.items if i["status"] != "recomputed"]
         self.scope["authenticated_only"] = list(AUTHENTICATED_ONLY)
+        self.scope["authenticated_only_limits"] = dict(AUTHENTICATED_ONLY_LIMITS)
         self.scope["recomputation_complete"] = decision == "supported" and not pending
         self.scope["not_recomputed"] = pending
         return {
@@ -298,6 +312,10 @@ def _pipeline(ctx: evidence.Ctx) -> None:
     evidence.recompute_authority(ctx)
     evidence.recompute_replay(ctx)
     evidence.recompute_overfit(ctx)
+    evidence.recompute_model_calls(ctx)
+    evidence.recompute_record_chain(ctx)
+    evidence.recompute_tool_policy(ctx)
+    evidence.recompute_heldout_grades(ctx)
 
 
 def _run_evidence(v: _Verdict, ctx: evidence.Ctx, require_complete: bool) -> dict[str, Any]:
@@ -414,5 +432,7 @@ def adjudicate(case: Any, policy: Any, artifact_root: Path) -> dict[str, Any]:
         human_keys=human_keys,
         require_reports=a["require_reports"],
         sessions=_supplied(data, SESSIONS_ROLE),
+        traces=_supplied(data, TRACES_ROLE),
+        cases=_supplied(data, CASE_ROLE),
     )
     return _run_evidence(v, ctx, a["require_complete"])

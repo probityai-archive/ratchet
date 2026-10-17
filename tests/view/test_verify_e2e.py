@@ -109,11 +109,14 @@ def test_verify_recomputes_from_the_store_and_keeps_recomputed_apart_from_authen
     assert code == 0, out
     assert "VERIFIED" in out
     assert "reason code supported: admitted_receipt_verified" in out
-    assert "RECOMPUTED (10 of 10)" in out
-    for item in ("report_digests", "gate:heldout", "gate:replay", "gate:overfit_lint", "gate:authority"):
+    assert "NOT SUPPLIED" not in out
+    items = ("report_digests", "gate:heldout", "gate:replay", "gate:overfit_lint", "gate:authority")
+    for item in (*items, "model_call_records", "record_chain", "tool_policy"):
         assert item in out
-    assert "AUTHENTICATED ONLY (signed, not re-derived)  fresh_model_execution" in out
-    assert "6 of 6 named reports checked; every recomputable item recomputed" in out
+    # The fake world's cases are not in the published case suite, so no third party can grade them again.
+    assert "PARTIAL  heldout_grades" in out or "PARTIAL: heldout_grades" in out, out
+    assert "AUTHENTICATED ONLY (signed, not re-derived)  model_turns_as_recorded" in out
+    assert "6 of 6 named reports checked; recomputation INCOMPLETE" in out
     assert "checked by the dsse crate" in out
 
 
@@ -134,7 +137,7 @@ def test_a_stored_report_edited_after_signing_is_contradicted(
     store.db["evals"].update_one({"_id": run_one["_id"]}, {"$set": {"wall_s": 999.0}})
     _, out = run(["verify", decision["candidate"], "--pubkey", PUB], uri, db)
     assert "recomputation INCOMPLETE" in out or "NOT SUPPLIED" in out or "PARTIAL" in out
-    assert "RECOMPUTED (10 of 10)" not in out
+    assert "every recomputable item recomputed" not in out
 
 
 def test_a_tampered_stored_decision_is_caught_before_any_recomputation(

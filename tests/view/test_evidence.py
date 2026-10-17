@@ -92,3 +92,41 @@ def test_collect_supplies_harnesses_and_reports_but_not_replay_without_a_recorde
 
     ev = collect(s, doc, lambda: nullcontext(FakeRunner(RULES)), RecordedViews())
     assert any("not in the store" in n for n in ev.notes)
+
+
+def test_the_store_supplies_the_traces_a_report_commits_and_the_suite_cases_it_names() -> None:
+    from dataclasses import asdict
+
+    from ratchet_cases.cases import get
+
+    from ratchet.verify.runs import case_document, run_record
+    from ratchet.view.evidence import report_traces, suite_cases
+
+    from .fakes import make_trace
+
+    store = FakeStore()
+    kept, lost = make_trace("r1", "refund.t1", True, []), make_trace("r2", "refund.t2", False, [])
+    store.trace_list = [kept]
+    report = {
+        "runs": [run_record(asdict(kept)), run_record(asdict(lost))],
+        "results": [
+            {"case_id": "refund_lost_reply.v3", "split": "heldout"},
+            {"case_id": "not-in-the-suite", "split": "heldout"},
+            {"case_id": "refund_lost_reply.v1", "split": "train"},
+        ],
+    }
+    assert report_traces(store, {"p1": report, "legacy": {"results": []}}) == {"p1": [asdict(kept)]}
+    assert suite_cases({"p1": report}) == {"refund_lost_reply.v3": case_document(get("refund_lost_reply.v3"))}
+
+
+def test_suite_cases_are_supplied_only_for_the_suite_the_decision_names() -> None:
+    from ratchet_cases.cases import suite_digest
+
+    from ratchet.view.evidence import Evidence, _matching_suite_cases
+
+    out = Evidence(reports={"p1": {"results": [{"case_id": "refund_lost_reply.v3", "split": "heldout"}]}})
+    named = {"evaluator": {"components": {"suite_file": suite_digest()}}}
+    assert list(_matching_suite_cases(named, out)) == ["refund_lost_reply.v3"]
+    assert _matching_suite_cases({}, out) == {} and out.notes == []
+    assert _matching_suite_cases({"evaluator": {"components": {"suite_file": "0" * 64}}}, out) == {}
+    assert out.notes == ["the installed case suite is not the decision's; held-out runs are not regraded"]

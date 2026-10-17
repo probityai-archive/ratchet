@@ -132,6 +132,17 @@ def declared_canonicalization(envelope: bytes) -> str | None:
     return value if value in (None, CANONICALIZATION) else CANONICALIZATION
 
 
+def named_suite_digest(envelope: bytes) -> str | None:
+    """The case suite digest the (not yet verified) payload names (`evaluator.components.suite_file`), so a
+    caller disclosing an installed suite can check it is the suite the receipt was made on."""
+    try:
+        payload = json.loads(base64.b64decode(json.loads(envelope)["payload"], validate=True))
+        value = payload["evaluator"]["components"]["suite_file"]
+    except (TypeError, KeyError, ValueError, binascii.Error, UnicodeDecodeError):
+        return None
+    return value if isinstance(value, str) else None
+
+
 def _write(root: Path, relative: str, data: bytes) -> dict[str, Any]:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -140,6 +151,13 @@ def _write(root: Path, relative: str, data: bytes) -> dict[str, Any]:
 
 
 Doc = Mapping[str, Any] | bytes
+Traces = Sequence[Mapping[str, Any]] | bytes  # trace documents, or their JSON lines as stored
+
+
+def _jsonl(lines: Traces) -> bytes:
+    if isinstance(lines, bytes):
+        return lines
+    return b"".join(json.dumps(dict(t), ensure_ascii=False).encode("utf-8") + b"\n" for t in lines)
 
 
 @dataclass(frozen=True)
@@ -165,7 +183,10 @@ def _artifacts(
     recomputed: Mapping[str, Doc],
     approval: bytes | None,
     sessions: Path | None = None,
+    traces: Mapping[str, Traces] | None = None,
+    cases: Mapping[str, Doc] | None = None,
 ) -> dict[str, Any]:
+    traces = traces or {}
     canonicalization = declared_canonicalization(envelope)
     out = {"envelope": _write(root, "envelope.json", envelope)}
     groups = ((adapter.REPORT_ROLE, "reports", reports), (adapter.RECOMPUTED_ROLE, "recomputed", recomputed))
@@ -177,6 +198,12 @@ def _artifacts(
     for name, doc in harnesses.items():
         out[f"{adapter.HARNESS_ROLE}{name}"] = _write(
             root, f"harness/{name}.json", _bytes(doc, canonicalization)
+        )
+    for name, lines in traces.items():
+        out[f"{adapter.TRACES_ROLE}{name}"] = _write(root, f"traces/{_slot(name)}.jsonl", _jsonl(lines))
+    for case_id, doc in (cases or {}).items():
+        out[f"{adapter.CASE_ROLE}{case_id}"] = _write(
+            root, f"cases/{_slot(case_id)}.json", _bytes(doc, canonicalization)
         )
     if approval is not None:
         out["approval"] = _write(root, "approval.json", approval)
@@ -192,7 +219,7 @@ def _build(
     root: Path,
     envelope: bytes,
     keys: Sequence[Ed25519PublicKey],
-    evidence: Mapping[str, Mapping[str, Doc]],
+    evidence: Mapping[str, Mapping[str, Any]],
     approval: bytes | None,
     options: Options,
     sessions: Path | None = None,
@@ -205,6 +232,8 @@ def _build(
         evidence.get("recomputed", {}),
         approval,
         sessions,
+        evidence.get("traces", {}),
+        evidence.get("cases", {}),
     )
     case_id = f"ratchet-decision-{artifacts['envelope']['sha256'][:16]}"
     case = {"schema_version": adapter.CASE_SCHEMA, "case_id": case_id, "artifacts": artifacts}
@@ -247,7 +276,7 @@ def _from_packet(packet: dict[str, Any]) -> VerifyReport:
     )
 
 
-def _bad_names(*groups: Mapping[str, Doc]) -> str | None:
+def _bad_names(*groups: Mapping[str, Any]) -> str | None:
     names = [n for g in groups for n in g]
     return next((n for n in names if not adapter.REPORT_NAME.fullmatch(n)), None)
 
@@ -262,6 +291,8 @@ def verify_decision(
     approval: bytes | None = None,
     options: Options = Options(),  # noqa: B008 - frozen dataclass, safe as a default
     sessions: Path | None = None,
+    traces: Mapping[str, Traces] | None = None,
+    cases: Mapping[str, Doc] | None = None,
 ) -> VerifyReport:
     """Verify a signed admission receipt. Never raises on bad evidence: it returns a failing report.
 
@@ -278,6 +309,11 @@ def verify_decision(
       payloads and `"overfit_lint"` as `{"hits": [...]}`; compared with the receipt's claims.
     - `approval`: the human approval envelope, needed only when authority grew by declared exception.
     - `sessions`: the k-session bundle directory a tool addition or procedure edit was admitted on.
+    - `traces`: by evaluation report name, the trace documents of its runs (or their JSON lines); checked
+      against the run records the report commits (`ratchet.verify.runs`).
+    - `cases`: by case id, disclosed held-out case documents (`ratchet.verify.runs.case_document`; for the
+      case suite, what the published `probity-ratchet-cases` package holds); with the traces, each held-out
+      run is graded again.
 
     Anything not supplied is reported as not supplied, never as recomputed.
     """
@@ -286,12 +322,14 @@ def verify_decision(
     )
     if not keys:
         return VerifyReport(NO_VERDICT, "no_trusted_key")
-    evidence = {
+    evidence: dict[str, dict[str, Any]] = {
         "reports": dict(reports or {}),
         "harnesses": dict(harnesses or {}),
         "recomputed": dict(recomputed or {}),
+        "traces": dict(traces or {}),
+        "cases": dict(cases or {}),
     }
-    bad = _bad_names(evidence["reports"], evidence["recomputed"])
+    bad = _bad_names(evidence["reports"], evidence["recomputed"], evidence["traces"], evidence["cases"])
     if bad is not None:
         return VerifyReport(NO_VERDICT, f"invalid_report_name:{bad}")
     if set(evidence["harnesses"]) - {"parent", "candidate"}:

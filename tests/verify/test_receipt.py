@@ -9,7 +9,17 @@ import pytest
 from ratchet.improve.receipt import DECISION_TYPE, Signer
 from ratchet.verify import DEFAULT_GATES, PREDICATE_URI, Options, verify_decision
 
-from .helpers import CANDIDATE_HARNESS, HARNESSES, PARENT_HARNESS, RECOMPUTED, REPORTS, b64, payload, sign
+from .helpers import (
+    CANDIDATE_HARNESS,
+    HARNESSES,
+    PARENT_HARNESS,
+    RECOMPUTED,
+    REPORTS,
+    RUN_RECORD_ITEMS,
+    b64,
+    payload,
+    sign,
+)
 
 
 def check(envelope: bytes, signer: Signer, **kwargs: Any) -> Any:
@@ -306,7 +316,9 @@ def test_decision_object_from_the_admission_lane_verifies_as_signed(signer: Sign
     assert decision.to_payload()["predicateType"] == PREDICATE_URI
     signed = sign(decision.to_payload(), signer)
     r = check(signed, signer, reports=REPORTS, harnesses=HARNESSES, recomputed=RECOMPUTED)
-    assert (r.ok, r.admission_verified, r.recomputation_complete) == (True, True, True)
+    # The hand-written reports carry no run records, so only those items are left not supplied.
+    assert (r.ok, r.admission_verified) == (True, True)
+    assert {i["id"] for i in r.recomputed if i["status"] != "recomputed"} == set(RUN_RECORD_ITEMS)
     bare = {k: v for k, v in decision.to_payload().items() if k != "predicateType"}
     assert check(sign(bare, signer), signer).reason == "unsupported_predicate"
 

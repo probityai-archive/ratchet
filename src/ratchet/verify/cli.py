@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from ratchet.verify.keys import DEFAULT_KEY_PATH, TrustedKeyError, load_trusted_key
-from ratchet.verify.receipt import NO_VERDICT, Options, verify_decision
+from ratchet.verify.receipt import NO_VERDICT, Options, named_suite_digest, verify_decision
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -31,6 +31,19 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME=FILE",
         help="replay:<guard> or overfit_lint",
+    )
+    add(
+        "--traces",
+        action="append",
+        default=[],
+        metavar="NAME=FILE",
+        help="JSON lines of the trace documents of the evaluation report NAME",
+    )
+    add("--case", action="append", default=[], metavar="ID=FILE", help="a disclosed held-out case document")
+    add(
+        "--case-suite",
+        action="store_true",
+        help="disclose every case of the installed probity-ratchet-cases package to regrade held-out runs",
     )
     add("--approval", type=Path, help="human approval envelope for an authority exception")
     add(
@@ -56,6 +69,33 @@ def _load(specs: list[str], flag: str) -> dict[str, Any]:
     return docs
 
 
+def _files(specs: list[str], flag: str) -> dict[str, bytes]:
+    out: dict[str, bytes] = {}
+    for spec in specs:
+        name, sep, file = spec.partition("=")
+        if not sep or not name or not file:
+            raise ValueError(f"{flag} expects NAME=FILE, got {spec!r}")
+        out[name] = Path(file).read_bytes()
+    return out
+
+
+def _suite_cases(envelope: bytes) -> dict[str, Any]:
+    """Every case document of the installed case suite, the package a third party installs from PyPI. The
+    installed suite must be the one the receipt names, or its documents would contradict an honest receipt
+    made on another release."""
+    from ratchet_cases.cases import all_cases, suite_digest
+
+    from ratchet.verify.runs import case_document
+
+    installed, named = suite_digest(), named_suite_digest(envelope)
+    if installed != named:
+        raise ValueError(
+            f"--case-suite: the installed case suite is {installed}, the receipt names {named}; "
+            "install the probity-ratchet-cases release whose suite digest the receipt names"
+        )
+    return {c.id: case_document(c) for c in all_cases()}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -64,8 +104,10 @@ def main(argv: list[str] | None = None) -> int:
         reports = _load(args.report, "--report")
         harnesses = _load(args.harness, "--harness")
         recomputed = _load(args.recomputed, "--recomputed")
+        traces = _files(args.traces, "--traces")
         approval = args.approval.read_bytes() if args.approval else None
         envelope = args.receipt.read_bytes()
+        cases = {**(_suite_cases(envelope) if args.case_suite else {}), **_load(args.case, "--case")}
     except (TrustedKeyError, OSError, ValueError) as exc:
         print(f"ratchet-verify: {exc}", file=sys.stderr)
         return 2
@@ -83,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
         approval=approval,
         options=options,
         sessions=args.sessions,
+        traces=traces,
+        cases=cases,
     )
     if args.json:
         print(json.dumps(result.to_dict(), sort_keys=True, indent=2))

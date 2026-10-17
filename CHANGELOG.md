@@ -27,6 +27,14 @@ store. Every change below is in this repository; the releases it waits for are n
 - A candidate that grants a tool or edits a procedure is admitted on an admitted k-session bundle for exactly
   its parent and itself, when its runs called the tool and used the procedure. `ratchet-verify --sessions DIR`
   recomputes the bundle. Additive changes stay the default.
+- Four claims that receipts used to carry on the evaluator's signature alone are recomputed from records a
+  third party holds. Each evaluation report commits its runs (trace and model-call digests) and each row the
+  digest of the case it graded. The verifier checks `model_call_records`, `record_chain`, `tool_policy` and
+  `heldout_grades` from the reports, the traces (`--traces`) and the published case documents (`--case`,
+  `--case-suite`), grading every held-out run again by replaying its executed calls in a rebuilt world. What
+  no record shows stays authenticated only under names that say so, each with its reason:
+  `model_turns_as_recorded` and `container_isolation`. Reports written before run records leave the four
+  items not supplied, so an older receipt never reads as complete.
 
 Waits for: `probityai` 0.1.0 on PyPI (built from its merged source until then).
 

@@ -16,12 +16,13 @@ import time
 import uuid
 from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Literal, Protocol
 
 from ratchet_cases.types import Cost, Split, Trace
 
 from ratchet.types import Harness
+from ratchet.verify.runs import case_digest, run_record
 
 Mode = Literal["FRESH", "RECORDED", "CACHED"]
 CaseKind = str  # "trap", "benign_twin" or "must_succeed", as the case suite labels them
@@ -64,6 +65,7 @@ class CaseResult:
     recorded_at: str | None = None
     attempts: int = 1
     infra_failed: bool = False
+    case_digest: str | None = None  # SHA-256 of the case document the run graded (ratchet.verify.runs)
 
 
 INFRA_REASON = "incomplete: model error"
@@ -128,6 +130,10 @@ class EvalReport:
             wall_s=round(sum(c.wall_s for c in rs), 3),
         )
 
+    def run_records(self) -> list[dict[str, Any]]:
+        """What the report commits about every run it holds a trace for (`ratchet.verify.runs`)."""
+        return sorted((run_record(asdict(t)) for t in self.traces), key=lambda r: str(r["run_id"]))
+
     def to_payload(self) -> dict[str, Any]:
         c = self.cost()
         return {
@@ -166,9 +172,11 @@ class EvalReport:
                     "infra_failed": r.infra_failed,
                     "recorded_at": r.recorded_at,
                     "error": r.error,
+                    "case_digest": r.case_digest,
                 }
                 for r in self.results
             ],
+            "runs": self.run_records(),
         }
 
 
@@ -181,6 +189,7 @@ def _one(
     msg = ""
     trace: Trace | None = None
     attempts = 0
+    graded = case_digest(case)
     while attempts <= INFRA_RETRIES:
         attempts += 1
         run_id = f"run-{harness.version}-{uuid.uuid4().hex[:12]}"
@@ -195,7 +204,7 @@ def _one(
     if trace is None:
         failed = CaseResult(
             case.id, case.split, case.must_succeed, case.kind, False, [f"run error: {msg}"], None, Cost(),
-            error=msg, attempts=attempts, infra_failed=True,
+            error=msg, attempts=attempts, infra_failed=True, case_digest=graded,
         )  # fmt: skip
         return failed, None
     o = trace.outcome
@@ -203,7 +212,7 @@ def _one(
     result = CaseResult(
         case.id, case.split, case.must_succeed, case.kind, o.passed, list(o.reasons), trace.run_id, o.cost,
         interventions(trace), fresh, cached, mode="CACHED" if cached else "FRESH", attempts=attempts,
-        infra_failed=is_infra_failure(trace),
+        infra_failed=is_infra_failure(trace), case_digest=graded,
     )  # fmt: skip
     return result, trace
 

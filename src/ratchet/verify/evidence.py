@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ratchet.verify import dsse, recompute
+from ratchet.verify import dsse, recompute, runs
 
 HUMAN_APPROVAL_TYPE = "application/vnd.ratchet.human-approval+json"
 EXCEPTION_PREFIX = "authority grew under"
@@ -43,6 +43,8 @@ class Ctx:
     human_keys: dict[str, Any]
     require_reports: bool
     sessions: dict[str, bytes] = field(default_factory=dict)  # a k-session bundle's files, by file name
+    traces: dict[str, bytes] = field(default_factory=dict)  # JSON lines of trace documents, by report name
+    cases: dict[str, bytes] = field(default_factory=dict)  # disclosed case documents, by case id
     items: list[dict[str, Any]] = field(default_factory=list)
     scope: dict[str, Any] = field(default_factory=dict)
 
@@ -255,3 +257,131 @@ def recompute_overfit(ctx: Ctx) -> None:
     if not isinstance(hits, list):
         raise Refuse("contradicted", "evidence_not_json:recomputed:overfit_lint", "gate:overfit_lint")
     _agree(ctx, "overfit_lint", recompute.Gate(not hits, {"hits": len(hits)}))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Run records: the claims that used to rest on the evaluator's signature alone
+# ---------------------------------------------------------------------------------------------------------
+
+
+def _traces(ctx: Ctx, name: str) -> dict[str, dict[str, Any]] | None:
+    """The trace documents supplied for one report, by run id; None when none were supplied."""
+    raw = ctx.traces.get(name)
+    if raw is None:
+        return None
+    label = f"traces:{name}"
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise Refuse("contradicted", f"evidence_not_json:{label}", label) from exc
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            doc = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise Refuse("contradicted", f"evidence_not_json:{label}", label) from exc
+        if not isinstance(doc, dict) or not isinstance(doc.get("run_id"), str) or doc["run_id"] in out:
+            raise Refuse("contradicted", f"evidence_not_json:{label}", label)
+        out[doc["run_id"]] = doc
+    return out
+
+
+def _run_reports(ctx: Ctx, item: str) -> list[runs.Report] | None:
+    """The evaluation reports with their traces, or None after recording `item` as not supplied: a report
+    is missing, or it was written before reports carried run records."""
+    names = _eval_report_names(ctx)
+    missing = [n for n in names if n not in ctx.reports]
+    if missing:
+        ctx.item(item, "not_supplied", needs=[f"report:{n}" for n in missing])
+        return None
+    reports = [runs.Report(n, _load(ctx.reports[n], f"report:{n}"), _traces(ctx, n)) for n in names]
+    legacy = [r.name for r in reports if not runs.has_runs(r)]
+    if legacy:
+        ctx.item(item, "not_supplied", needs=[f"run records in report:{n}" for n in legacy])
+        return None
+    return reports
+
+
+def _records(item: str, check: Any, *args: Any) -> Any:
+    """Run one `ratchet.verify.runs` check; its disagreement ends the verdict under `item`."""
+    try:
+        return check(*args)
+    except runs.RecordError as exc:
+        raise Refuse(exc.decision, exc.reason, item) from exc
+
+
+MODEL_CALLS = "model_call_records"
+
+
+def recompute_model_calls(ctx: Ctx) -> None:
+    """Fresh model execution, as far as records show it: every counted call committed once, in its own run,
+    uncached, and equal to the supplied trace. `partial` while a run's trace is not supplied."""
+    reports = _run_reports(ctx, MODEL_CALLS)
+    if reports is None:
+        return
+    counts = _records(MODEL_CALLS, runs.check_model_calls, reports)
+    status = "recomputed" if counts["traces_checked"] == counts["runs"] else "partial"
+    ctx.item(MODEL_CALLS, status, **counts)
+
+
+RECORD_CHAIN = "record_chain"
+
+
+def recompute_record_chain(ctx: Ctx) -> None:
+    """Capture fidelity, as far as records show it: the supplied traces are the committed ones, each a
+    well-formed run, and each report row is what its trace yields. `partial` while a committed run's trace
+    is not supplied; not supplied when no trace is."""
+    reports = _run_reports(ctx, RECORD_CHAIN)
+    if reports is None:
+        return
+    if all(r.traces is None for r in reports):
+        ctx.item(RECORD_CHAIN, "not_supplied", needs=[f"traces:{r.name}" for r in reports])
+        return
+    counts = _records(RECORD_CHAIN, runs.check_record_chain, reports)
+    status = "recomputed" if counts["traces_checked"] == counts["runs"] else "partial"
+    ctx.item(RECORD_CHAIN, status, **counts)
+
+
+TOOL_POLICY = "tool_policy"
+
+
+def recompute_tool_policy(ctx: Ctx) -> None:
+    """Sandbox enforcement, as far as records show it: every recorded tool call was answered once, ran only
+    when the harness's allowlist and every one of its guards let it, and was blocked only for a stated
+    cause. Needs the parent and candidate harness documents and the traces."""
+    reports = _run_reports(ctx, TOOL_POLICY)
+    if reports is None:
+        return
+    if len(ctx.harnesses) < 2:
+        ctx.item(TOOL_POLICY, "not_supplied", needs=["harness:parent", "harness:candidate"])
+        return
+    if all(r.traces is None for r in reports):
+        ctx.item(TOOL_POLICY, "not_supplied", needs=[f"traces:{r.name}" for r in reports])
+        return
+    parent, candidate = _harness_pair(ctx)
+    by_version = {str(h.get("version")): h for h in (parent, candidate)}
+    counts = _records(TOOL_POLICY, runs.check_tool_policy, reports, by_version)
+    status = "recomputed" if counts["traces_checked"] == counts["runs"] else "partial"
+    ctx.item(TOOL_POLICY, status, **counts)
+
+
+HELDOUT_GRADES = "heldout_grades"
+
+
+def recompute_heldout_grades(ctx: Ctx) -> None:
+    """Hidden grades, recomputed: the held-out cases are bound by digest across every run, each disclosed
+    case document is the committed one, and every held-out run whose case and trace are supplied is graded
+    again from them. `partial` while a held-out run is not regraded (its case or trace withheld, or a world
+    this verifier cannot rebuild); not supplied for reports written before case digests."""
+    reports = _run_reports(ctx, HELDOUT_GRADES)
+    if reports is None:
+        return
+    if not _records(HELDOUT_GRADES, runs.commits_cases, reports):
+        ctx.item(HELDOUT_GRADES, "not_supplied", needs=[f"case digests in report:{r.name}" for r in reports])
+        return
+    cases = {k: _load(raw, f"case:{k}") for k, raw in ctx.cases.items()}
+    counts = _records(HELDOUT_GRADES, runs.check_heldout_grades, reports, cases)
+    status = "recomputed" if counts["regraded"] == counts["heldout_rows"] else "partial"
+    ctx.item(HELDOUT_GRADES, status, **counts)
