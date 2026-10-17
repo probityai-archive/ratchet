@@ -19,7 +19,9 @@ from typing import Any, Protocol
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from ratchet_cases.types import canonical_json, sha256_hex
+from ratchet_cases.types import sha256_hex
+
+from ratchet.canonical import canonical_json
 
 DECISION_TYPE = "application/vnd.ratchet.decision+json"
 HUMAN_APPROVAL_TYPE = "application/vnd.ratchet.human-approval+json"

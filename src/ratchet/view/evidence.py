@@ -18,8 +18,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from ratchet_cases.types import Trace, canonical_json, sha256_hex
+from ratchet_cases.types import Trace, sha256_hex
 
+from ratchet.canonical import CANONICALIZATION, canonicalizer
 from ratchet.improve.diagnose import FailurePoint
 from ratchet.improve.evaluate import EvalReport
 from ratchet.improve.overfit import lint, training_literals
@@ -29,7 +30,7 @@ from ratchet.types import Guard, Harness, Procedure
 from ratchet.view.data import Doc, ViewStore
 from ratchet.view.matrix import CaseInfo
 
-BOOKKEEPING = {"_id", "digest", "created_at"}
+BOOKKEEPING = {"_id", "digest", "digest_canonicalization", "created_at"}
 REPLAY_EXTRA = {"type", "role", "generation", "parent"}
 
 
@@ -41,16 +42,17 @@ class Evidence:
     notes: list[str] = field(default_factory=list)
 
 
-def _digest(doc: Mapping[str, Any]) -> str:
-    return sha256_hex(canonical_json(dict(doc)))
+def _digest(doc: Mapping[str, Any], canonicalization: str | None = CANONICALIZATION) -> str:
+    return sha256_hex(canonicalizer(canonicalization)(dict(doc)))
 
 
 def _eval_fields() -> set[str]:
     return set(EvalReport("x", [], 0.0).to_payload())
 
 
-def stored_reports(store: ViewStore) -> dict[str, Doc]:
-    """Every stored evaluation and replay report, by the digest of the report itself."""
+def stored_reports(store: ViewStore, canonicalization: str | None = CANONICALIZATION) -> dict[str, Doc]:
+    """Every stored evaluation and replay report, by its digest under the named canonicaliser (a decision's
+    own: a decision signed before RFC 8785 names its reports by their sorted-keys digests)."""
     fields = _eval_fields()
     found: dict[str, Doc] = {}
     for doc in store.evals():
@@ -61,7 +63,7 @@ def stored_reports(store: ViewStore) -> dict[str, Doc]:
             report = {k: v for k, v in doc.items() if k not in BOOKKEEPING | REPLAY_EXTRA}
         else:
             continue
-        found[_digest(report)] = report
+        found[_digest(report, canonicalization)] = report
     return found
 
 
@@ -175,7 +177,7 @@ def collect(
     """Everything the store can supply for one decision document. `runner` is a context-manager factory for
     the guard runtime; without it (and a simulator) replay is not recomputed."""
     out = Evidence()
-    by_digest = stored_reports(store)
+    by_digest = stored_reports(store, doc.get("canonicalization"))
     for name, digest in (doc.get("report_digests") or {}).items():
         if digest in by_digest:
             out.reports[name] = by_digest[digest]

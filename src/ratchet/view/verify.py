@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from ratchet_cases.types import canonical_json
 from rich.console import RenderableType
 from rich.panel import Panel
 from rich.text import Text
 
+from ratchet.canonical import canonical_json
 from ratchet.demo.signing import is_demo_signed
 from ratchet.improve.receipt import SIGNING_KEY_ENV, ReceiptError, Signer, key_id, verify
 from ratchet.verify import dsse

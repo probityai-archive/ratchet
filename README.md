@@ -63,7 +63,7 @@ The repository's first commit is from 2026-10-11, and everything under `src/ratc
 
 | Reused | Pin |
 |---|---|
-| Runtime | `pymongo>=4.10`, `httpx>=0.27`, `cryptography>=44`, `rich>=15`, `raindrop-ai==0.0.75` |
+| Runtime | `probityai==0.1.0`, `pymongo>=4.10`, `httpx>=0.27`, `cryptography>=44`, `rich>=15`, `raindrop-ai==0.0.75` |
 | Earlier work of the same authors | `probity-verify==0.1.0`, `agent-evidence-vectors==0.17.9` |
 | Benchmark extra | `agentdojo==0.1.35` (tool outputs carry hidden prompt-injection attacks), `litellm==1.102.1`, `terminal-bench==0.2.18`, `tau-bench` at `59a200c` (simulated customer-service tasks graded on the final database state), `tau2` at `4ce7c03`, `tool-sandbox` at `c8571d7` |
 | Instruction search extra | `gepa==0.1.4` |

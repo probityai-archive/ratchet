@@ -11,7 +11,6 @@ from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from ratchet_cases.types import canonical_json
 from rich.console import Console
 from view.fakes import (
     RULES,
@@ -27,6 +26,7 @@ from view.test_live import Scripted, change
 from view.test_telemetry import FakeSink
 
 from ratchet import cli
+from ratchet.canonical import canonical_json
 from ratchet.cli import CliError, LiveBackend, main
 from ratchet.improve.receipt import DECISION_TYPE, Signer
 from ratchet.improve.sim import RecordedViews

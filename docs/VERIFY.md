@@ -86,18 +86,19 @@ procedures unchanged and in order, parent prompt a prefix, unique ids, digest eq
 
 ## What the receipt must carry
 
-`Decision.to_payload()` of the admission lane, plus one field:
+`Decision.to_payload()` of the admission lane:
 
 | Field | Rule |
 |---|---|
-| `predicateType` | exactly the pinned predicate URI (below); **not emitted yet, the admission lane must add it** |
+| `predicateType` | exactly the pinned predicate URI (below) |
 | `parent`, `candidate` | non-empty; equal the harness versions when harnesses are supplied |
 | `candidate_digest` | 64 hex; equals the candidate harness digest |
 | `admitted` | bool; equals the conjunction of the required gates |
 | `checks` | list of `{name, passed, evidence}`; every required gate present |
 | `evaluator` | `version` non-empty and `components.suite_file` 64 hex (the frozen suite digest) |
 | `corpus_digests` | guard id to 64 hex replay snapshot digest |
-| `report_digests` | non-empty; name to 64 hex, the SHA-256 of the report's canonical JSON |
+| `canonicalization` | `rfc8785`; absent only on a decision signed before RFC 8785, whose report digests are over sorted-keys JSON |
+| `report_digests` | non-empty; name to 64 hex, the SHA-256 of the report's canonical JSON under `canonicalization` |
 | `exceptions` | list of strings; `authority grew under ...` marks a human-approved exception |
 
 Evaluation reports are found by name: `parent_run_1`, `parent_run_2`, `candidate_run`,

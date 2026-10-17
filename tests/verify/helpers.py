@@ -12,8 +12,7 @@ import base64
 from dataclasses import asdict
 from typing import Any
 
-from ratchet_cases.types import canonical_json
-
+from ratchet.canonical import CANONICALIZATION, canonical_json
 from ratchet.improve.receipt import DECISION_TYPE, Signer
 from ratchet.types import Guard, Harness
 from ratchet.verify import DEFAULT_GATES, PREDICATE_URI, report_digest
@@ -119,6 +118,7 @@ def payload(**overrides: Any) -> dict[str, Any]:
     }
     body: dict[str, Any] = {
         "predicateType": PREDICATE_URI,
+        "canonicalization": CANONICALIZATION,
         "type": "decision",
         "parent": PARENT_HARNESS.version,
         "candidate": CANDIDATE_HARNESS.version,

@@ -175,7 +175,7 @@ jobs:
       - name: pytest
         run: >-
           uv run --with pytest-timeout python -m pytest -q -W error --timeout=120 -rfEs --tb=short
-          -m "not sandbox and not live"
+          -m "not sandbox and not live and not records"
           --cov=src/ratchet --cov-report=term-missing:skip-covered
 
   demo-image:

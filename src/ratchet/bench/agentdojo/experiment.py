@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ratchet_cases.types import Split, canonical_json, sha256_hex
+from ratchet_cases.types import Split, sha256_hex
 
 from ratchet.agent.guards import GuardRuntime
 from ratchet.agent.model import ChatModel, ModelClient, ModelConfig
@@ -31,6 +31,7 @@ from ratchet.bench.agentdojo.run import (
     JsonStore,
     seed_harness,
 )
+from ratchet.canonical import canonical_json
 from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.evaluate import EvalReport, evaluate_many
 from ratchet.improve.loop import EvolveResult, Lab, evolve

@@ -13,9 +13,10 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from ratchet_cases.types import Trace, canonical_json
+from ratchet_cases.types import Trace
 from rich.console import Console
 
+from ratchet.canonical import canonical_json
 from ratchet.cli import LiveBackend, main
 from ratchet.improve.receipt import DECISION_TYPE, Signer
 from ratchet.improve.replay import GuardRunner

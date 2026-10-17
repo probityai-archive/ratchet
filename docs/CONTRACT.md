@@ -36,7 +36,7 @@ tests/        one test module per source module, plus tests/integration/
   (see Safety).
 - `Procedure(id, name, when: str, steps: list[str], origin_failure_ids: list[str])`
 - `Harness(version: str, parent: str | None, system_prompt: str, procedures: list[Procedure], guards: list[Guard], tool_allowlist: list[str], created_by: Literal["seed","improver","human"], digest: str)`.
-  `digest` is the SHA-256 of the canonical JSON of every field EXCEPT `digest` and `version` (exactly
+  `digest` is the SHA-256 of the RFC 8785 canonical JSON of every field EXCEPT `digest` and `version` (exactly
   `Harness.content_of`); `version` is the first 12 hex chars of `digest`. Every read and every verification
   recomputes both and rejects a mismatch.
 

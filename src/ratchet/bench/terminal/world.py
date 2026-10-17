@@ -32,9 +32,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from ratchet_cases.types import ToolCall, ToolResult, canonical_json
+from ratchet_cases.types import ToolCall, ToolResult
 
 from ratchet.bench.terminal.container import Container
+from ratchet.canonical import canonical_json
 
 RUN_COMMAND = "run_command"
 WRITE_FILE = "write_file"

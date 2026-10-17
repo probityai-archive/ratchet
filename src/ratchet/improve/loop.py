@@ -28,8 +28,9 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ratchet_cases import released_digest
-from ratchet_cases.types import Trace, canonical_json, sha256_hex
+from ratchet_cases.types import Trace, sha256_hex
 
+from ratchet.canonical import canonical_json
 from ratchet.improve.activate import ActivationError, Activator
 from ratchet.improve.admit import Decision, admit, awaiting_confirmation
 from ratchet.improve.diagnose import FailureCluster, diagnose

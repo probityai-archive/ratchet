@@ -31,8 +31,8 @@ from pathlib import Path
 from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from ratchet_cases.types import canonical_json
 
+from ratchet.canonical import canonical_json
 from ratchet.improve.receipt import ReceiptError, Signer, countersign, key_id, verify
 
 NOTE = "countersigned by the pinned decision key; the run signed with a per-run key that was not published"

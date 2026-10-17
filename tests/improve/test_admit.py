@@ -4,8 +4,8 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
-from ratchet_cases.types import canonical_json
 
+from ratchet.canonical import canonical_json
 from ratchet.improve.admit import admit, awaiting_confirmation, check_fresh, check_structure
 from ratchet.improve.diagnose import diagnose
 from ratchet.improve.evaluate import EvalReport, evaluate

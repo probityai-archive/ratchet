@@ -21,11 +21,12 @@ from pathlib import Path
 from typing import Any
 
 from ratchet_cases.cases import all_cases
-from ratchet_cases.types import canonical_json, sha256_hex
+from ratchet_cases.types import sha256_hex
 
 from ratchet.agent.model import ModelClient, ModelConfig
 from ratchet.agent.seed import seed_harness
 from ratchet.agent.worker import run_case
+from ratchet.canonical import canonical_json
 from ratchet.improve.admit import Check, admit_v3
 from ratchet.improve.evaluate import _one
 from ratchet.improve.evaluator import evaluator_identity

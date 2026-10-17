@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from ratchet_cases.types import canonical_json
 
+from ratchet.canonical import canonical_json
 from ratchet.improve.receipt import Signer
 from ratchet.verify import DEFAULT_GATES
 from ratchet.verify.cli import main

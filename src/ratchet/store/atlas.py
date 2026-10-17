@@ -22,8 +22,9 @@ from typing import Any
 from pymongo import MongoClient, UpdateOne
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
-from ratchet_cases.types import Cost, Event, Outcome, Trace, canonical_json, sha256_hex, to_jsonable
+from ratchet_cases.types import Cost, Event, Outcome, Trace, sha256_hex, to_jsonable
 
+from ratchet.canonical import CANONICALIZATION, canonical_json, canonicalizer
 from ratchet.store import atlas_setup
 from ratchet.store.embed import CachedEmbedder, Embedder, Reranker, VoyageEmbedder, VoyageReranker
 from ratchet.types import Guard, Harness, Procedure
@@ -127,8 +128,9 @@ def trace_id(run_id: str, case_id: str) -> str:
     return f"{run_id}/{case_id}"
 
 
-def trace_digest(trace: Trace) -> str:
-    return sha256_hex(canonical_json(asdict(trace)))
+def trace_digest(trace: Trace, canonicalization: str | None = CANONICALIZATION) -> str:
+    """The trace's digest under the canonicaliser its stored document names (none: before RFC 8785)."""
+    return sha256_hex(canonicalizer(canonicalization)(asdict(trace)))
 
 
 def _trace_from_parts(header: Doc, events: list[Doc]) -> Trace:
@@ -146,7 +148,7 @@ def _trace_from_parts(header: Doc, events: list[Doc]) -> Trace:
             cost=Cost(**out["cost"]),
         ),
     )
-    if trace_digest(trace) != header["digest"]:
+    if trace_digest(trace, header.get("digest_canonicalization")) != header["digest"]:
         raise IntegrityError(f"trace {header['_id']} does not match its stored digest")
     return trace
 
@@ -376,9 +378,9 @@ class Store:
         tid = trace_id(trace.run_id, trace.case_id)
         digest = trace_digest(trace)
         coll = self._c("traces")
-        existing = coll.find_one({"_id": tid}, {"digest": 1})
+        existing = coll.find_one({"_id": tid}, {"digest": 1, "digest_canonicalization": 1})
         if existing is not None:
-            if existing["digest"] != digest:
+            if existing["digest"] != trace_digest(trace, existing.get("digest_canonicalization")):
                 raise IntegrityError(f"trace {tid} already holds different content")
             return False
         events = [asdict(e) for e in trace.events]
@@ -391,6 +393,7 @@ class Store:
             "outcome": asdict(trace.outcome),
             "n_events": len(events),
             "digest": digest,
+            "digest_canonicalization": CANONICALIZATION,
             "created_at": _now(),
         }
         if sum(len(canonical_json(e)) for e in events) > self._max_inline:
@@ -409,8 +412,10 @@ class Store:
             coll.insert_one({"_id": tid, **header})
         except DuplicateKeyError:
             # a concurrent writer committed first; fine when it wrote the same content
-            stored = coll.find_one({"_id": tid}, {"digest": 1})
-            if stored is None or stored["digest"] != digest:
+            stored = coll.find_one({"_id": tid}, {"digest": 1, "digest_canonicalization": 1})
+            if stored is None or stored["digest"] != trace_digest(
+                trace, stored.get("digest_canonicalization")
+            ):
                 raise IntegrityError(f"trace {tid} already holds different content") from None
             return False
         return True
@@ -481,12 +486,13 @@ class Store:
         digest = sha256_hex(canonical_json(body))
         rid = record_id or digest
         coll = self._c(collection) if isinstance(collection, str) else collection
-        res = coll.update_one(
-            {"_id": rid}, {"$setOnInsert": {**body, "digest": digest, "created_at": _now()}}, upsert=True
-        )
+        fields = {**body, "digest": digest, "digest_canonicalization": CANONICALIZATION, "created_at": _now()}
+        res = coll.update_one({"_id": rid}, {"$setOnInsert": fields}, upsert=True)
         if res.upserted_id is None:
-            stored = coll.find_one({"_id": rid}, {"digest": 1})
-            if stored is None or stored["digest"] != digest:
+            stored = coll.find_one({"_id": rid}, {"digest": 1, "digest_canonicalization": 1})
+            if stored is None or stored["digest"] != sha256_hex(
+                canonicalizer(stored.get("digest_canonicalization"))(body)
+            ):
                 raise IntegrityError(f"{coll.name} record {rid} already holds different content")
         return rid
 
