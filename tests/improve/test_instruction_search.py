@@ -11,6 +11,7 @@ from ratchet_cases.types import Cost, Trace
 
 from ratchet.agent.guards import GuardRuntime
 from ratchet.improve import instruction_search as search
+from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.diagnose import FailureCluster, FailurePoint, diagnose
 from ratchet.improve.instruction_search import (
     Bench,
@@ -32,9 +33,11 @@ from ratchet.improve.llm import Chat, Meter
 from ratchet.improve.overfit import training_literals
 from ratchet.improve.propose import SEED, Instructions, Proposal, make_candidate, propose
 from ratchet.improve.receipt import Signer
+from ratchet.improve.referee import RefereeCore, RefereeParts, Verdict
 from ratchet.improve.replay import GuardRunner, ReplayReport, WalkCache
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.types import Guard, Harness
+from ratchet.verify import dsse
 
 from .fakes import (
     BLOCK_ALL_REFUNDS,
@@ -447,6 +450,8 @@ def test_integration_real_sandbox_on_two_recorded_traces() -> None:
 
 
 def test_c1_flips_count_both_directions_against_either_parent_run() -> None:
+    from ratchet.improve.policies import c1_flips
+
     ev = {
         "outcomes": {
             "a": ["fail", "fail", "pass", "invalid"],
@@ -455,10 +460,21 @@ def test_c1_flips_count_both_directions_against_either_parent_run() -> None:
             "d": ["fail", "fail", "fail", "fail"],
         }
     }
-    assert search.c1_flips(ev) == (["a"], ["b"])
-    rep = search.flips_report([ev, {}])
-    assert rep["candidates"] == 2 and rep["c1_fail_to_pass_total"] == 1 and rep["c1_pass_to_fail_total"] == 1
-    assert rep["candidates_with_2plus_recoveries_and_no_c1_break"] == 0
+    assert c1_flips(ev) == (["a"], ["b"])
+
+
+def test_the_flips_report_sums_the_verdict_counts_with_the_denominator() -> None:
+    def v(up: int, down: int) -> Verdict:
+        return Verdict("d", "r", "c", False, (), 0, 0, 0, 0, up, down, {})
+
+    rep = search.flips_report([v(2, 0), v(3, 1), v(0, 0)])
+    assert rep == {
+        "candidates": 3,
+        "c1_fail_to_pass_total": 5,
+        "c1_pass_to_fail_total": 1,
+        "c1_fail_to_pass_max": 3,
+        "candidates_with_2plus_recoveries_and_no_c1_break": 1,
+    }
 
 
 def test_split_clusters_keeps_mixed_clusters_out_of_both_sides() -> None:
@@ -472,37 +488,65 @@ def test_split_clusters_keeps_mixed_clusters_out_of_both_sides() -> None:
     assert [c.id for c in a] == ["x"] and [c.id for c in b] == ["y"] and mixed == ["z"]
 
 
-def _bench(store: MemStore, chat: Chat, **kw: Any) -> Bench:
+def _referee(store: MemStore, tmp_path: Path, signer: Signer) -> RefereeCore:
+    return RefereeCore(
+        RefereeParts(
+            cases=[c for c in CASES if c.split == "heldout"],
+            run_case=FakeRunCase(),
+            model=None,
+            simulator=FakeSimulator(),
+            runner=LocalRunner(),
+            signer=signer,
+            store=store,
+            activator=MemoryActivator(lambda _i: None),
+            suite_digest="suite",
+            workers=4,
+            results_dir=tmp_path / "results",
+        )
+    )
+
+
+def _bench(store: MemStore, chat: Chat, referee: RefereeCore, **kw: Any) -> Bench:
     args: dict[str, Any] = {"families_a": frozenset({"dup"}), "n": 2, "workers": 4, "search_calls": 6} | kw
     return Bench(
-        cases=CASES,
+        cases=[c for c in CASES if c.split == "train"],
         run_case=FakeRunCase(),
         simulator=FakeSimulator(),
         runner=LocalRunner(),
-        signer=Signer.generate(),
+        referee=referee,
         model=None,
         improver=chat,
         store=store,
         seed=PARENT,
+        suite_digest="suite",
         **args,
     )
 
 
-def test_three_arm_comparison_under_the_real_admission_rule() -> None:
-    store = MemStore()
+def test_the_comparison_holds_training_cases_only(tmp_path: Path) -> None:
+    referee = _referee(MemStore(), tmp_path, Signer.generate())
+    with pytest.raises(HeldOutRefusedError, match="training cases only"):
+        Bench(cases=CASES, run_case=FakeRunCase(), simulator=FakeSimulator(), runner=LocalRunner(),
+              referee=referee, model=None, improver=Router(), store=MemStore(), seed=PARENT,
+              families_a=frozenset())  # fmt: skip
+
+
+def test_three_arm_comparison_under_the_real_admission_rule(tmp_path: Path) -> None:
+    store, held, signer = MemStore(), MemStore(), Signer.generate()
     chat = Router()
     logs: list[str] = []
-    out = compare_level2(_bench(store, chat, log=logs.append), "exp")
+    referee = _referee(held, tmp_path, signer)
+    out = compare_level2(_bench(store, chat, referee, log=logs.append), "exp")
     assert out["claim"] is True
     assert out["budget"]["slots_per_arm"] == 2 and out["budget"]["clusters"] == 1
     frozen = out["frozen_batch"]["cluster_ids"]
     assert len(frozen) == 1 and out["train_clusters"] and not set(frozen) & set(out["train_clusters"])
     arms = out["arms"]
     assert arms["search"]["admitted"] == 1 and arms["search"]["admission_yield"] == "1/2"
-    assert arms["search"]["heldout_flips_fail_to_pass"] == ["omit-10", "omit-9"]
-    assert arms["search"]["heldout_flips_pass_to_fail"] == []
+    assert arms["search"]["admitted_stable_recoveries"] == 2
+    assert arms["search"]["admitted_protected_broken"] == 0
     flips = arms["search"]["c1_flips_all_evaluated"]
-    assert flips["candidates"] == 1 and flips["c1_fail_to_pass_cases"] == ["omit-10", "omit-9"]
+    assert flips["candidates"] == 1 and flips["c1_fail_to_pass_total"] == 2
     assert flips["candidates_with_2plus_recoveries_and_no_c1_break"] == 1
     assert arms["seed"]["admitted"] == 0 and sum(arms["seed"]["rejections_by_gate"].values()) >= 1
     assert arms["challenger"]["instructions_version"] != SEED.version
@@ -520,11 +564,23 @@ def test_three_arm_comparison_under_the_real_admission_rule() -> None:
         "improver_instructions",
         "level2_comparison",
     } <= kinds
-    assert any(k.startswith("exp:search:") for k in store.decisions)
-    assert all("envelope" in d for d in store.decisions.values())
-    assert any(k.startswith("exp:derive-challenger:") for k in store.decisions)
-    admitted = [d for d in store.decisions.values() if d["admitted"]]
+    # The comparison's own records hold no held-out case, outcome or decision; the referee's hold them.
+    heldout = {c.id for c in CASES if c.split == "heldout"}
+    assert not store.decisions and all(t.case_id not in heldout for t in store.traces.values())
+    for case_id in heldout:
+        assert case_id not in json.dumps(out, default=str)
+    assert any(k.startswith("exp:search:") for k in held.decisions)
+    assert all("envelope" in d for d in held.decisions.values())
+    assert any(k.startswith("exp:derive-challenger:") for k in held.decisions)
+    admitted = [d for d in held.decisions.values() if d["admitted"]]
     assert len(admitted) == 1 and admitted[0]["context"]["arm"] == "search"
+    # The per-case tables are in the referee's signed results file.
+    published = referee.results("exp")
+    doc = json.loads(dsse.parse(Path(published["path"]).read_bytes()).payload)
+    rows = {e["decision_id"]: e for e in doc["decisions"]}
+    (search_row,) = [e for k, e in rows.items() if k.startswith("exp:search:") and e["admitted"]]
+    assert search_row["heldout"]["c1_fail_to_pass"] == ["omit-10", "omit-9"]
+    assert search_row["heldout"]["protected_broken"] == []
     # no searched or drafted text ever saw the frozen batch: every proposal prompt for it came after both
     search_prompts = [
         r for r in chat.requests if "Provide the new instructions within" in str(r[-1]["content"])
@@ -533,9 +589,10 @@ def test_three_arm_comparison_under_the_real_admission_rule() -> None:
     assert logs and "frozen test (B)" in logs[0]
 
 
-def test_comparison_without_clusters_on_both_sides_makes_no_claim() -> None:
+def test_comparison_without_clusters_on_both_sides_makes_no_claim(tmp_path: Path) -> None:
     store = MemStore()
-    out = compare_level2(_bench(store, Router(), families_a=frozenset({"dup", "omit"})), "exp2")
+    referee = _referee(MemStore(), tmp_path, Signer.generate())
+    out = compare_level2(_bench(store, Router(), referee, families_a=frozenset({"dup", "omit"})), "exp2")
     assert out["claim"] is False and "B=0" in out["reason"]
     assert store.evals[-1]["type"] == "level2_comparison"
 
@@ -549,7 +606,7 @@ class _Ctx:
 
 
 def test_main_runs_the_comparison_and_writes_the_summary(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, decision_key: Signer
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, decision_key: Signer, inprocess_referee: Any
 ) -> None:
     import ratchet_cases.cases as cases_mod
 
@@ -557,27 +614,40 @@ def test_main_runs_the_comparison_and_writes_the_summary(
     import ratchet.agent.model as model_mod
     import ratchet.agent.seed as seed_mod
     import ratchet.agent.worker as worker_mod
+    import ratchet.improve.referee as referee_mod
     import ratchet.improve.sandbox as sandbox_mod
     import ratchet.improve.worldsim as worldsim_mod
+    import ratchet.store.activation as activation_mod
     import ratchet.store.atlas as store_mod
+    from ratchet.improve.activate import MemoryActivator
+    from ratchet.verify.results import verify_results
+
+    held = MemStore()
 
     class FakeStore(MemStore, _Ctx):
         def __init__(self, uri: str, db: str) -> None:
             super().__init__()
+            if db.endswith("_heldout"):
+                self.__dict__ = held.__dict__
+            self.db = type("Db", (), {"client": None, "name": db})()
 
         def setup(self, *, wait_search: bool = True) -> None:
             return None
 
     class FakeClient(Router, _Ctx):
-        def __init__(self, cfg: Any) -> None:
+        def __init__(self, cfg: Any, **_kw: Any) -> None:
             super().__init__()
 
         def cost(self) -> Cost:
             return Cost(model_calls=len(self.requests))
 
+        def close(self) -> None:
+            return None
+
     class FakeRuntime(_Ctx):
         pass
 
+    monkeypatch.setattr(referee_mod, "ProcessReferee", inprocess_referee)
     monkeypatch.setattr(store_mod, "Store", FakeStore)
     monkeypatch.setattr(model_mod, "ModelClient", FakeClient)
     monkeypatch.setattr(guards_mod, "GuardRuntime", FakeRuntime)
@@ -586,9 +656,17 @@ def test_main_runs_the_comparison_and_writes_the_summary(
     monkeypatch.setattr(cases_mod, "all_cases", lambda: CASES)
     monkeypatch.setattr(worldsim_mod, "WorldSimulator", lambda cases: FakeSimulator())
     monkeypatch.setattr(seed_mod, "seed_harness", lambda: PARENT)
+    monkeypatch.setattr(
+        activation_mod, "MongoActivator", lambda client, name: MemoryActivator(lambda _i: None)
+    )
     monkeypatch.setenv("RATCHET_API_KEY", "k")
+    monkeypatch.setenv("RATCHET_MONGODB_URI", "mongodb://x")
+    endpoints = tmp_path / "worker.json"
+    endpoints.write_text(json.dumps({"endpoints": ["http://127.0.0.1:9/v1"], "model": "m"}))
     target = tmp_path / "l2.json"
     argv = [
+        "--endpoints-file",
+        str(endpoints),
         "--uri",
         "mongodb://x",
         "--families-a",
@@ -606,9 +684,13 @@ def test_main_runs_the_comparison_and_writes_the_summary(
     written = json.loads(target.read_text())
     assert written["claim"] is True and written["config"]["db"] == "ratchet_l2"
     assert written["arms"]["search"]["admitted"] == 1
+    assert held.decisions and written["results"]["decisions"] == len(held.decisions)
+    results = Path(written["results"]["path"])
+    assert results.parent == tmp_path / "l2-results"
+    assert verify_results(results.read_bytes(), decision_key.public_key, results.parent).ok
 
 
 def test_main_refuses_without_store_or_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("RATCHET_MONGODB_URI", raising=False)
     monkeypatch.delenv("RATCHET_API_KEY", raising=False)
-    assert search.main(["--out", str(tmp_path / "x.json")]) == 2
+    assert search.main(["--endpoints-file", str(tmp_path / "w.json"), "--out", str(tmp_path / "x.json")]) == 2

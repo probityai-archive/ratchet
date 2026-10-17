@@ -13,19 +13,23 @@ benign-twin traces with the call that was wrongly blocked, runtime errors and co
 
 The search writes only the improver's instructions. The worker harness changes only through `admit()`, and
 `compare_level2` judges every searched instruction text by what its candidates achieve under the real
-admission rule, on clusters the search never saw.
+admission rule, on clusters the search never saw. That judgement is the held-out referee's
+(`ratchet.improve.referee`, in its own process): this process runs the training cases only and hands the
+referee each candidate's training run; the referee runs the parent's and each candidate's held-out runs,
+admits or rejects and signs under the decision key, and returns counts. The per-case held-out tables go
+to the referee's signed results file (`python -m ratchet.verify.results`).
 
 The firewall: the search receives training failure clusters only. A cluster built from a held-out or audit
 case, a cluster of the frozen level-2 test batch, or a clearance trace from outside the training split is
 refused before any proposal is made.
 
-    uv run --extra gepa python -m ratchet.improve.instruction_search --out private/improve/l2.json
+    uv run --extra gepa python -m ratchet.improve.instruction_search --endpoints-file worker.json \\
+        --out private/improve/l2.json
 """
 
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
 import sys
@@ -40,7 +44,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from ratchet_cases.types import Trace, sha256_hex
 
 from ratchet.canonical import canonical_json
-from ratchet.improve.admit import GATES, Decision, admit, awaiting_confirmation
+from ratchet.improve.admit import GATES
 from ratchet.improve.diagnose import FailureCluster, FailurePoint, diagnose
 from ratchet.improve.evaluate import CaseLike, EvalReport, RunCase, evaluate_many
 from ratchet.improve.evaluator import evaluator_identity
@@ -48,7 +52,7 @@ from ratchet.improve.llm import Chat, Meter
 from ratchet.improve.loop import ArmScore, propose_instructions
 from ratchet.improve.overfit import Literals, lint, training_literals
 from ratchet.improve.propose import SEED, Candidate, Instructions, Proposal, propose
-from ratchet.improve.receipt import Signer, receipt
+from ratchet.improve.referee import Referee, Request, Totals, Verdict
 from ratchet.improve.replay import GuardRunner, ReplayReport, WalkCache, replay
 from ratchet.improve.sim import Simulator
 from ratchet.types import Guard, Harness
@@ -663,13 +667,15 @@ class Store(EvalStore, Protocol):
 
 @dataclass
 class Bench:
-    """Everything the comparison needs. `improver` proposes, reflects and drafts; `model` is the worker."""
+    """Everything the comparison needs. `improver` proposes, reflects and drafts; `model` is the worker on the
+    training cases. `cases` are training cases only: the held-out side, the admission rule and the decision
+    key are the referee's (`ratchet.improve.referee`)."""
 
     cases: Sequence[Any]
     run_case: RunCase
     simulator: Simulator
     runner: GuardRunner
-    signer: Signer
+    referee: Referee
     model: Any
     improver: Chat
     store: Store
@@ -679,8 +685,14 @@ class Bench:
     workers: int = 16
     search_calls: int = 60
     model_config: dict[str, Any] = field(default_factory=dict)
+    suite_digest: str | None = None
     propose_fn: ProposeFn = propose
     log: Callable[[str], None] = lambda _m: None
+
+    def __post_init__(self) -> None:
+        outside = sorted(c.id for c in self.cases if c.split != "train")
+        if outside:
+            raise HeldOutRefusedError(f"the comparison holds training cases only, not {outside}")
 
 
 @dataclass
@@ -690,20 +702,23 @@ class Arm:
     meter: Meter = field(default_factory=Meter)
     outcomes: list[ClusterOutcome] = field(default_factory=list)
     candidates: dict[str, Candidate] = field(default_factory=dict)
-    decisions: dict[str, Decision] = field(default_factory=dict)
+    decisions: dict[str, Verdict] = field(default_factory=dict)
+
+
+# Every candidate of one comparison is judged against the same two parent runs: one referee generation.
+GENERATION = 1
 
 
 @dataclass
-class Referee:
-    """The frozen evaluation context shared by every candidate: parent runs, referee traces, evaluator."""
+class Baseline:
+    """What the comparison shares across candidates: the parent's totals (never which cases), the evaluator
+    the referee froze, and the training-side material the proposer and the screen read."""
 
-    parent_runs: tuple[EvalReport, EvalReport]
+    totals: tuple[Totals, Totals]
     evaluator: dict[str, Any]
     walks: WalkCache
     literals: Literals
     visible: list[str]
-    passing_all: list[Trace]
-    benign_all: list[Trace]
 
 
 def split_clusters(
@@ -757,15 +772,6 @@ def shortlist(arm: Arm) -> list[Candidate]:
     return [c for cid, c in arm.candidates.items() if cid in keep]
 
 
-def _referee_replays(
-    cand: Candidate, cluster: FailureCluster, ref: Referee, runner: GuardRunner, parent: Harness
-) -> tuple[dict[str, ReplayReport], ReplayReport | None]:
-    new = cand.new_guards(parent)
-    args = (cluster.members, cluster.traces, ref.passing_all, ref.walks, runner, ref.benign_all)
-    reps = {g.id: replay(g, *args) for g in new}
-    return reps, (replay(cand.harness.guards, *args) if new else None)
-
-
 def _persist(store: Store, report: EvalReport, context: dict[str, Any]) -> None:
     for t in report.traces:
         store.put_trace(t)
@@ -773,91 +779,58 @@ def _persist(store: Store, report: EvalReport, context: dict[str, Any]) -> None:
 
 
 def admit_all(
-    arms: Sequence[Arm], clusters: Mapping[str, FailureCluster], ref: Referee, bench: Bench, experiment: str
+    arms: Sequence[Arm], clusters: Mapping[str, FailureCluster], base: Baseline, bench: Bench, experiment: str
 ) -> None:
-    """A fresh run C1 for every shortlisted candidate, the real admit(), C2 where it is pending, and a signed
-    decision for each."""
+    """Every shortlisted candidate's training run here, then the referee: a fresh held-out run C1, its
+    replay, the real admit(), C2 where it is pending, and a decision signed under the referee's key. The
+    verdicts carry counts only."""
     work = [(arm, c) for arm in arms for c in shortlist(arm)]
     if not work:
         return
-    decision_cases = [c for c in bench.cases if c.split in ("train", "heldout")]
-    heldout = [c for c in bench.cases if c.split == "heldout"]
-    c1 = evaluate_many(
-        [c.harness for _, c in work], decision_cases, bench.run_case, bench.model, workers=bench.workers
+    train = evaluate_many(
+        [c.harness for _, c in work], bench.cases, bench.run_case, bench.model, workers=bench.workers
     )
-    pending: list[tuple[Arm, Candidate, dict[str, Any]]] = []
-    for (arm, cand), report in zip(work, c1, strict=True):
-        ctx = {"experiment": experiment, "arm": arm.name, "candidate": cand.id}
-        _persist(bench.store, report, {**ctx, "role": "candidate"})
-        reps, composed = _referee_replays(cand, clusters[cand.cluster_id], ref, bench.runner, bench.seed)
-        kw: dict[str, Any] = {
-            "parent_runs": ref.parent_runs,
-            "cand_eval": report,
-            "replays": reps,
-            "composed": composed,
-            "literals": ref.literals,
-            "visible_case_ids": ref.visible,
-            "evaluator": ref.evaluator,
-            "context": {"experiment": experiment, "arm": arm.name, **cand.to_payload()},
-        }
-        arm.decisions[cand.id] = d = admit(bench.seed, cand.harness, confirm_eval=None, **kw)
-        if awaiting_confirmation(d):
-            pending.append((arm, cand, kw))
-    if pending:
-        c2 = evaluate_many(
-            [c.harness for _, c, _ in pending], heldout, bench.run_case, bench.model, workers=bench.workers
+    requests: list[Request] = []
+    for (arm, cand), report in zip(work, train, strict=True):
+        _persist(bench.store, report, {"experiment": experiment, "arm": arm.name, "candidate": cand.id,
+                                       "role": "candidate_train"})  # fmt: skip
+        cluster = clusters[cand.cluster_id]
+        requests.append(
+            Request(
+                cand.harness,
+                report,
+                [cluster],
+                {g.id: cluster.id for g in cand.new_guards(bench.seed)},
+                base.literals,
+                base.visible,
+                {"experiment": experiment, "arm": arm.name, **cand.to_payload()},
+                f"{experiment}:{arm.name}:{bench.seed.version}->{cand.harness.version}",
+            )
         )
-        for (arm, cand, kw), confirm in zip(pending, c2, strict=True):
-            ctx = {"experiment": experiment, "arm": arm.name, "candidate": cand.id, "role": "confirm"}
-            _persist(bench.store, confirm, ctx)
-            arm.decisions[cand.id] = admit(bench.seed, cand.harness, confirm_eval=confirm, **kw)
-    for arm, cand in work:
-        d = arm.decisions[cand.id]
-        env = base64.b64encode(receipt(d, bench.signer)).decode("ascii")
-        bench.store.put_decision(
-            {**d.to_payload(), "envelope": env, "keyid": bench.signer.keyid},
-            decision_id=f"{experiment}:{arm.name}:{d.parent}->{d.candidate}",
-        )
+    for (arm, cand), verdict in zip(work, bench.referee.decide_many(GENERATION, requests), strict=True):
+        arm.decisions[cand.id] = verdict
 
 
 def _gate_failures(arm: Arm) -> dict[str, int]:
     failed: dict[str, int] = {}
-    for d in arm.decisions.values():
-        for c in d.checks:
-            if not c.passed and c.name in GATES:
-                failed[c.name] = failed.get(c.name, 0) + 1
+    for v in arm.decisions.values():
+        for name in v.failed:
+            if name in GATES:
+                failed[name] = failed.get(name, 0) + 1
     return failed
 
 
-def recovery_evidence(d: Decision) -> dict[str, Any]:
-    """The evidence of the paired held-out check, found by its content rather than its name."""
-    return next((c.evidence for c in d.checks if "stable_recoveries" in c.evidence), {})
-
-
-def c1_flips(evidence: Mapping[str, Any]) -> tuple[list[str], list[str]]:
-    """Held-out cases a candidate's first fresh run flipped: (failed in both parent runs and passed in C1,
-    passed in either parent run and failed in C1). Informative even when the candidate was not admitted."""
-    up: list[str] = []
-    down: list[str] = []
-    for case, v in (evidence.get("outcomes") or {}).items():
-        p1, p2, c1 = v[0], v[1], v[2]
-        if p1 == p2 == "fail" and c1 == "pass":
-            up.append(case)
-        elif "pass" in (p1, p2) and c1 == "fail":
-            down.append(case)
-    return sorted(up), sorted(down)
-
-
-def flips_report(evidences: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """C1 flips over every freshly evaluated candidate, with the denominator."""
-    per = [c1_flips(e) for e in evidences]
+def flips_report(verdicts: Sequence[Verdict]) -> dict[str, Any]:
+    """C1 flips over every freshly evaluated candidate, with the denominator: counts from the referee's
+    verdicts. Which cases flipped is in the referee's signed results file."""
     return {
-        "candidates": len(per),
-        "c1_fail_to_pass_total": sum(len(u) for u, _ in per),
-        "c1_pass_to_fail_total": sum(len(d) for _, d in per),
-        "c1_fail_to_pass_max": max((len(u) for u, _ in per), default=0),
-        "candidates_with_2plus_recoveries_and_no_c1_break": sum(1 for u, d in per if len(u) >= 2 and not d),
-        "c1_fail_to_pass_cases": sorted({c for u, _ in per for c in u}),
+        "candidates": len(verdicts),
+        "c1_fail_to_pass_total": sum(v.c1_fail_to_pass for v in verdicts),
+        "c1_pass_to_fail_total": sum(v.c1_pass_to_fail for v in verdicts),
+        "c1_fail_to_pass_max": max((v.c1_fail_to_pass for v in verdicts), default=0),
+        "candidates_with_2plus_recoveries_and_no_c1_break": sum(
+            1 for v in verdicts if v.c1_fail_to_pass >= 2 and not v.c1_pass_to_fail
+        ),
     }
 
 
@@ -865,12 +838,6 @@ def arm_report(arm: Arm, slots: int) -> dict[str, Any]:
     """Per-arm numbers, every rate with its denominator."""
     outs = [c for o in arm.outcomes for c in o.candidates]
     admitted = sorted(cid for cid, d in arm.decisions.items() if d.admitted)
-    recovered: set[str] = set()
-    broken: set[str] = set()
-    for cid in admitted:
-        ev = recovery_evidence(arm.decisions[cid])
-        recovered |= set(ev.get("stable_recoveries", []))
-        broken |= set(ev.get("protected_broken", []))
     count = {s: sum(1 for c in outs if c.status == s) for s in ("screened", "cleared", "replay_failed")}
     cleared = sum(o.cleared for o in arm.outcomes)
     return {
@@ -891,22 +858,22 @@ def arm_report(arm: Arm, slots: int) -> dict[str, Any]:
         "admission_yield": f"{len(admitted)}/{slots}",
         "admission_yield_value": round(len(admitted) / slots, 4) if slots else 0.0,
         "replay_score": f"{cleared}/{slots}",
-        "heldout_flips_fail_to_pass": sorted(recovered),
-        "heldout_flips_pass_to_fail": sorted(broken),
-        "c1_flips_all_evaluated": flips_report([recovery_evidence(d) for d in arm.decisions.values()]),
+        "admitted_stable_recoveries": sum(arm.decisions[c].stable_recoveries for c in admitted),
+        "admitted_protected_broken": sum(arm.decisions[c].protected_broken for c in admitted),
+        "c1_flips_all_evaluated": flips_report(list(arm.decisions.values())),
         "rejections_by_gate": _gate_failures(arm),
         "proposer_tokens": meter_payload(arm.meter),
         "per_cluster": [o.to_payload() for o in arm.outcomes],
     }
 
 
-def _status_line(c: CandidateOutcome, d: Decision | None) -> str:
+def _status_line(c: CandidateOutcome, d: Verdict | None) -> str:
     if d is None:
         status = c.status
     elif d.admitted:
         status = "admitted"
     else:
-        status = "rejected: " + ", ".join(k.name for k in d.checks if not k.passed)
+        status = "rejected: " + ", ".join(d.failed)
     if c.replay:
         rep = c.replay
         status += (
@@ -946,36 +913,32 @@ def arm_score(arm: Arm, slots: int) -> ArmScore:
     )
 
 
-def baseline(bench: Bench, experiment: str) -> tuple[Referee, list[Trace]]:
-    """The parent's two fresh runs (P1 over every decision case, P2 over the held-out cases)."""
-    decision_cases = [c for c in bench.cases if c.split in ("train", "heldout")]
-    heldout = [c for c in bench.cases if c.split == "heldout"]
-    p1 = evaluate_many([bench.seed], decision_cases, bench.run_case, bench.model, workers=bench.workers)[0]
-    _persist(bench.store, p1, {"experiment": experiment, "role": "parent_run_1"})
-    p2 = evaluate_many([bench.seed], heldout, bench.run_case, bench.model, workers=bench.workers)[0]
-    _persist(bench.store, p2, {"experiment": experiment, "role": "parent_run_2"})
-    benign_ids = {c.id for c in bench.cases if c.kind == "benign_twin"}
-    train = p1.train_traces()
-    ref = Referee(
-        (p1, p2),
-        evaluator_identity(bench.cases, bench.model_config),
+def baseline(bench: Bench, experiment: str) -> tuple[Baseline, list[Trace]]:
+    """The parent's training run here, and its two fresh held-out runs (P1 joined to this training run, and
+    P2) in the referee, which returns their totals."""
+    p1_train = evaluate_many([bench.seed], bench.cases, bench.run_case, bench.model, workers=bench.workers)[0]
+    _persist(bench.store, p1_train, {"experiment": experiment, "role": "parent_run_1_train"})
+    evaluator = bench.referee.start(evaluator_identity(bench.cases, bench.model_config, bench.suite_digest))
+    totals = bench.referee.parent_runs(GENERATION, bench.seed, p1_train)
+    train = p1_train.train_traces()
+    base = Baseline(
+        totals,
+        evaluator,
         WalkCache(bench.simulator),
         training_literals(train),
-        sorted(c.id for c in bench.cases if c.split == "train"),
-        [t for t in p1.traces if t.outcome.passed],
-        [t for t in p1.traces if t.case_id in benign_ids],
+        sorted(c.id for c in bench.cases),
     )
-    return ref, train
+    return base, train
 
 
-def _parent_score(ref: Referee) -> dict[str, int]:
-    p1, p2 = ref.parent_runs
+def _parent_score(base: Baseline) -> dict[str, int]:
+    p1, p2 = base.totals
     return {
-        "P1_heldout_passed": len(p1.passed("heldout")),
-        "P2_heldout_passed": len(p2.passed("heldout")),
-        "heldout_total": p1.count("heldout"),
-        "P1_train_passed": len(p1.passed("train")),
-        "train_total": p1.count("train"),
+        "P1_heldout_passed": p1.heldout_passed,
+        "P2_heldout_passed": p2.heldout_passed,
+        "heldout_total": p1.heldout_total,
+        "P1_train_passed": p1.train_passed,
+        "train_total": p1.train_total,
     }
 
 
@@ -983,7 +946,7 @@ def compare_level2(bench: Bench, experiment: str = "level2") -> dict[str, Any]:
     """Seed, loop challenger and searched instructions, each proposing freshly with the same budget on
     clusters none of them saw; every surviving candidate is judged by the real admit()."""
     started = time.perf_counter()
-    ref, train = baseline(bench, experiment)
+    base, train = baseline(bench, experiment)
     benign_ids = {c.id for c in bench.cases if c.kind == "benign_twin"}
     diag = Meter()
     clusters = diagnose(train, bench.simulator, bench.improver, diag)
@@ -1003,10 +966,10 @@ def compare_level2(bench: Bench, experiment: str = "level2") -> dict[str, Any]:
         "frozen_batch": frozen,
         **split,
         "clusters": [c.to_payload() for c in clusters],
-        "evaluator": ref.evaluator["version"],
+        "evaluator": base.evaluator["version"],
         "diagnosis_cost": meter_payload(diag),
         "parent": bench.seed.version,
-        "parent_score": _parent_score(ref),
+        "parent_score": _parent_score(base),
     }
     if not a or not b:
         out |= {
@@ -1019,16 +982,16 @@ def compare_level2(bench: Bench, experiment: str = "level2") -> dict[str, Any]:
         bench.seed,
         [t for t in train if t.outcome.passed],
         [t for t in train if t.case_id in benign_ids],
-        ref.walks,
+        base.walks,
         bench.runner,
-        ref.literals,
+        base.literals,
     )
     firewall = Firewall.from_cases(bench.cases, b)
 
     # The challenger arm: the loop's own draft, from the seed's batch-A admission outcomes.
     seed_on_a = Arm("seed-on-A", SEED)
     propose_arm(seed_on_a, a, screen, bench)
-    admit_all([seed_on_a], {c.id: c for c in a}, ref, bench, f"{experiment}:derive-challenger")
+    admit_all([seed_on_a], {c.id: c for c in a}, base, bench, f"{experiment}:derive-challenger")
     meta = Meter()
     slots_a = bench.n * len(a)
     drafted = propose_instructions(
@@ -1048,7 +1011,7 @@ def compare_level2(bench: Bench, experiment: str = "level2") -> dict[str, Any]:
     arms = [Arm("seed", SEED), Arm("challenger", challenger), Arm("search", run.instructions)]
     for arm in arms:
         propose_arm(arm, b, screen, bench)
-    admit_all(arms, {c.id: c for c in b}, ref, bench, experiment)
+    admit_all(arms, {c.id: c for c in b}, base, bench, experiment)
     slots = bench.n * len(b)
     out |= {
         "claim": True,
@@ -1087,18 +1050,22 @@ def _args(argv: Sequence[str] | None) -> argparse.Namespace:
     env = os.environ
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     p = argparse.ArgumentParser(prog="ratchet-level2")
-    p.add_argument("--base-url", default=env.get("RATCHET_BASE_URL", "http://localhost:8801/v1"))
-    p.add_argument("--model", default=env.get("RATCHET_MODEL", "gpt-oss-120b"))
+    p.add_argument("--endpoints-file", type=Path, required=True, help="the worker's endpoint configuration")
+    p.add_argument("--improver-base-url", default=env.get("RATCHET_BASE_URL", "http://localhost:8801/v1"))
     p.add_argument("--improver-model", default=env.get("RATCHET_IMPROVER_MODEL", "gpt-oss-120b"))
     p.add_argument("--uri", default=env.get("RATCHET_MONGODB_URI", ""))
-    p.add_argument("--db", default=env.get("RATCHET_DB", "ratchet_l2"))
+    p.add_argument("--db", default=env.get("RATCHET_DB", "ratchet_l2"), help="referee writes <db>_heldout")
     p.add_argument("--families-a", default="approval_revoked,concurrent_worker,injection,order_modification")
     p.add_argument("--candidates", type=int, default=4)
     p.add_argument("--workers", type=int, default=32)
     p.add_argument("--search-calls", type=int, default=60)
     p.add_argument("--experiment", default=f"level2-{stamp}")
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--results-dir", type=Path, help="the referee's results (default: next to --out)")
     return p.parse_args(argv)
+
+
+FACTORY = "ratchet.improve.referee_live:policy_parts"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1108,6 +1075,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     from ratchet.agent.model import ModelClient, ModelConfig
     from ratchet.agent.seed import seed_harness
     from ratchet.agent.worker import run_case
+    from ratchet.improve import endpoints as ep
+    from ratchet.improve.loop import frozen_suite_digest
+    from ratchet.improve.referee import ProcessReferee
     from ratchet.improve.sandbox import SandboxRunner
     from ratchet.improve.worldsim import WorldSimulator
     from ratchet.store.atlas import Store as AtlasStore
@@ -1117,48 +1087,76 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not a.uri or not key:
         print("error: set RATCHET_MONGODB_URI (or --uri) and RATCHET_API_KEY", file=sys.stderr)
         return 2
-    cases = all_cases()
-    signer = Signer.for_decisions()
-    model_config = {"base_url": a.base_url, "model": a.model, "improver_model": a.improver_model}
-    with (
-        AtlasStore(a.uri, a.db) as store,
-        ModelClient(ModelConfig(base_url=a.base_url, model=a.model, api_key=key)) as model,
-        ModelClient(ModelConfig(base_url=a.base_url, model=a.improver_model, api_key=key)) as improver,
-        GuardRuntime() as runtime,
-    ):
-        store.setup(wait_search=False)
-        bench = Bench(
-            cases=cases,
-            run_case=run_case,
-            simulator=WorldSimulator(cases),
-            runner=SandboxRunner(runtime),
-            signer=signer,
-            model=model,
-            improver=improver,
-            store=store,
-            seed=seed_harness(),
-            families_a=frozenset(f for f in a.families_a.split(",") if f),
-            n=a.candidates,
-            workers=a.workers,
-            search_calls=a.search_calls,
-            model_config=model_config,
-            log=lambda m: print(m, flush=True),
-        )
-        result = compare_level2(bench, a.experiment)
-        result["config"] = {
-            **model_config,
-            "db": a.db,
-            "families_a": a.families_a,
-            "candidates": a.candidates,
-            "search_calls": a.search_calls,
-            "signer_keyid": signer.keyid,
-        }
-        result["agent_model_cost"] = model.cost().__dict__
-        result["improver_model_cost"] = improver.cost().__dict__
+    endpoints = ep.load(a.endpoints_file)
+    cases = [c for c in all_cases() if c.split == "train"]
+    suite = frozen_suite_digest()
+    results_dir = a.results_dir or a.out.parent / f"{a.out.stem}-results"
+    referee_config = {
+        "cases": "heldout",
+        "store": {"kind": "atlas", "db": f"{a.db}_heldout"},
+        "endpoints": endpoints.reference(a.endpoints_file),
+        "worker": "spread",
+        "workers": a.workers,
+        "suite_digest": suite,
+        "results_dir": str(results_dir),
+    }
+    worker = ep.RoundRobin(endpoints, run_case, seeded=False)
+    improver_cfg = ModelConfig(base_url=a.improver_base_url, model=a.improver_model, api_key=key)
+    try:
+        with (
+            AtlasStore(a.uri, a.db) as store,
+            ModelClient(improver_cfg) as improver,
+            GuardRuntime() as runtime,
+            ProcessReferee(FACTORY, referee_config) as referee,
+        ):
+            store.setup(wait_search=False)
+            bench = Bench(
+                cases=cases,
+                run_case=worker,
+                simulator=WorldSimulator(all_cases()),
+                runner=SandboxRunner(runtime),
+                referee=referee,
+                model=None,
+                improver=improver,
+                store=store,
+                seed=seed_harness(),
+                families_a=frozenset(f for f in a.families_a.split(",") if f),
+                n=a.candidates,
+                workers=a.workers,
+                search_calls=a.search_calls,
+                model_config=endpoints.model_config(),
+                suite_digest=suite,
+                log=lambda m: print(m, flush=True),
+            )
+            result = compare_level2(bench, a.experiment)
+            result["results"] = referee.results(a.experiment)
+            result["config"] = {
+                "endpoint_config_digest": endpoints.digest,
+                "improver_base_url": a.improver_base_url,
+                "improver_model": a.improver_model,
+                "db": a.db,
+                "families_a": a.families_a,
+                "candidates": a.candidates,
+                "search_calls": a.search_calls,
+                "workers": a.workers,
+            }
+            result["agent_model_cost"] = _cost(worker.clients)
+            result["improver_model_cost"] = improver.cost().__dict__
+    finally:
+        worker.close()
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
     print(f"wrote {a.out}", flush=True)
     return 0
+
+
+def _cost(clients: Sequence[Any]) -> dict[str, Any]:
+    """The worker's training-run cost, summed over its endpoint clients."""
+    total: dict[str, Any] = {}
+    for c in clients:
+        for k, v in c.cost().__dict__.items():
+            total[k] = total.get(k, 0) + v
+    return total
 
 
 if __name__ == "__main__":
