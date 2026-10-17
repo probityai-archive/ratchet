@@ -5,7 +5,8 @@ description = "Agent cases graded on final state: a simulated company, determini
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-dependencies = []
+# RFC 8785 canonical JSON for every digest comes from the probityai binding of the jcs-admit crate.
+dependencies = ["probityai==0.1.0"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",

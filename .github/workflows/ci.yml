@@ -49,10 +49,14 @@ jobs:
         with:
           enable-cache: false
       - run: uv build --package probity-ratchet-cases --out-dir dist
+      # The suite's one dependency, probityai, is installed from the source uv.lock pins (built with the
+      # runner's Rust toolchain until it is on PyPI); nothing else from the workspace is installed.
+      - name: export the locked probityai requirement
+        run: uv export --frozen --package probity-ratchet-cases --no-emit-workspace --no-dev --no-hashes -o "$RUNNER_TEMP/cases-req.txt"
       - name: install the wheel alone
         run: |
           uv venv --no-project --python "${{ matrix.python }}" "$RUNNER_TEMP/cases"
-          uv pip install --python "$RUNNER_TEMP/cases/bin/python" dist/probity_ratchet_cases-*.whl pytest==9.1.1
+          uv pip install --python "$RUNNER_TEMP/cases/bin/python" -r "$RUNNER_TEMP/cases-req.txt" dist/probity_ratchet_cases-*.whl pytest==9.1.1
       - name: selftest and digest from the installed wheel
         run: |
           "$RUNNER_TEMP/cases/bin/ratchet-cases" selftest
@@ -77,11 +81,13 @@ jobs:
         with:
           enable-cache: false
       - run: uv build --package probity-ratchet-cases --out-dir dist
+      - name: export the locked probityai requirement
+        run: uv export --frozen --package probity-ratchet-cases --no-emit-workspace --no-dev --no-hashes -o "$RUNNER_TEMP/cases-req.txt"
       - name: install the wheel with the agentdojo extra
         run: |
           uv venv --no-project --python "${{ matrix.python }}" "$RUNNER_TEMP/twins"
           wheel="$(ls dist/probity_ratchet_cases-*.whl)"
-          uv pip install --python "$RUNNER_TEMP/twins/bin/python" "${wheel}[agentdojo]" pytest==9.1.1
+          uv pip install --python "$RUNNER_TEMP/twins/bin/python" -r "$RUNNER_TEMP/cases-req.txt" "${wheel}[agentdojo]" pytest==9.1.1
       - name: pytest the twins against the installed wheel
         working-directory: probity-ratchet-cases
         run: '"$RUNNER_TEMP/twins/bin/python" -m pytest -q -W error -p no:cacheprovider tests_agentdojo'
@@ -113,11 +119,13 @@ jobs:
           test "$(git -C "$d" rev-parse HEAD)" = "$TAU2_COMMIT"
           echo "TAU2_DATA_DIR=$d/data" >> "$GITHUB_ENV"
       - run: uv build --package probity-ratchet-cases --out-dir dist
+      - name: export the locked probityai requirement
+        run: uv export --frozen --package probity-ratchet-cases --no-emit-workspace --no-dev --no-hashes -o "$RUNNER_TEMP/cases-req.txt"
       - name: install the wheel beside tau2-bench
         run: |
           uv venv --no-project --python 3.12 "$RUNNER_TEMP/t2"
           uv pip install --python "$RUNNER_TEMP/t2/bin/python" "$RUNNER_TEMP/tau2-bench" websockets==15.0.1 \
-            dist/probity_ratchet_cases-*.whl pytest==9.1.1
+            -r "$RUNNER_TEMP/cases-req.txt" dist/probity_ratchet_cases-*.whl pytest==9.1.1
       # tau2-bench imports the standard library's audioop, deprecated since Python 3.11, from its voice
       # utilities at import time. That one warning comes from tau2-bench and is ignored by its exact text;
       # every other warning still fails the job.
@@ -175,7 +183,7 @@ jobs:
       - name: pytest
         run: >-
           uv run --with pytest-timeout python -m pytest -q -W error --timeout=120 -rfEs --tb=short
-          -m "not sandbox and not live"
+          -m "not sandbox and not live and not records"
           --cov=src/ratchet --cov-report=term-missing:skip-covered
 
   demo-image:

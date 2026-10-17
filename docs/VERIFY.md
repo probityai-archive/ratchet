@@ -97,7 +97,7 @@ procedures unchanged and in order, parent prompt a prefix, unique ids, digest eq
 | `checks` | list of `{name, passed, evidence}`; every required gate present |
 | `evaluator` | `version` non-empty and `components.suite_file` 64 hex (the frozen suite digest) |
 | `corpus_digests` | guard id to 64 hex replay snapshot digest |
-| `report_digests` | non-empty; name to 64 hex, the SHA-256 of the report's canonical JSON |
+| `report_digests` | non-empty; name to 64 hex, the SHA-256 of the report's RFC 8785 canonical JSON |
 | `exceptions` | list of strings; `authority grew under ...` marks a human-approved exception |
 
 Evaluation reports are found by name: `parent_run_1`, `parent_run_2`, `candidate_run`,

@@ -7,13 +7,22 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from probityai import jcs
+
 EventKind = Literal["model", "tool_call", "tool_result", "guard_block", "procedure", "checkpoint", "final"]
 Split = Literal["train", "heldout", "audit"]
 
 
 def canonical_json(obj: Any) -> bytes:
-    """Deterministic JSON bytes: sorted keys, no whitespace, UTF-8. The input to every digest."""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    """RFC 8785 canonical JSON bytes of `obj`, the input to every digest.
+
+    The JSON text Python writes is admitted and canonicalised by `probityai.jcs` (the `jcs-admit` crate):
+    members sorted by UTF-16 code units, numbers in ECMAScript form (`1.0` is `1`, `1e-07` is `1e-7`),
+    and no whitespace. NaN and infinities are refused, as RFC 8785 requires. An integer beyond 2**53 is
+    written as the nearest double, so a value that needs every digit is carried as a string.
+    """
+    text = json.dumps(obj, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return jcs.admit_with(text, max_bytes=None)
 
 
 def sha256_hex(data: bytes) -> str:
