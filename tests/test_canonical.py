@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import math
 
-import pytest
 import jcs_admit
+import pytest
 
 from ratchet.canonical import CANONICALIZATION, canonical_json, canonicalizer
 

@@ -18,9 +18,9 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+import jcs_admit
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-import jcs_admit
 from jcs_admit import dsse as native
 from ratchet_cases.types import sha256_hex
 
