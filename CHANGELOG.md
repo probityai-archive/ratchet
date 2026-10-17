@@ -20,6 +20,13 @@ store. Every change below is in this repository; the releases it waits for are n
 - `pymongo` and `raindrop-ai` are the `atlas` and `telemetry` extras. Without them, records go to a signed
   append-only file store (`RATCHET_STORE_DIR`).
 - `probity-verify==0.1.1` and `agent-evidence-vectors==0.19.0`.
+- Held-out grading runs in a referee process with its own store and the decision key
+  (`ratchet.improve.referee`). The improver gets counts and harness names only, and its database role cannot
+  read the referee's Atlas database. `ratchet evolve` and every bench driver start one; the views read both
+  stores.
+- A candidate that grants a tool or edits a procedure is admitted on an admitted k-session bundle for exactly
+  its parent and itself, when its runs called the tool and used the procedure. `ratchet-verify --sessions DIR`
+  recomputes the bundle. Additive changes stay the default.
 
 Waits for: `probityai` 0.1.0 on PyPI (built from its merged source until then).
 
