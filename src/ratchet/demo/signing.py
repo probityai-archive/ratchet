@@ -16,7 +16,8 @@ from typing import Any
 
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-from ratchet.improve.receipt import TRUSTED_KEY_ENV, ReceiptError, Signer, key_id
+from ratchet.improve.receipt import TRUSTED_KEY_ENV, ReceiptError, Signer
+from ratchet.verify.dsse import keyid_of
 
 DEMO_DIR_ENV = "RATCHET_DEMO_DIR"
 DEFAULT_DEMO_DIR = ".ratchet-demo"
@@ -47,7 +48,7 @@ def demo_signer(pubkey_file: Path) -> Signer:
     pinned: set[str] = set()
     for path in {keys.DEFAULT_KEY_PATH, Path(os.environ.get(TRUSTED_KEY_ENV) or keys.DEFAULT_KEY_PATH)}:
         try:
-            pinned.add(key_id(keys.load_trusted_key(path)))
+            pinned.add(keyid_of(keys.load_trusted_key(path)))
         except keys.TrustedKeyError:
             continue
     if signer.keyid in pinned:

@@ -27,7 +27,7 @@ def test_the_demo_key_writes_only_its_public_half(tmp_path: Path) -> None:
     signer = demo_signer(pem)
     text = pem.read_text()
     assert text.startswith("-----BEGIN PUBLIC KEY-----") and "PRIVATE" not in text
-    assert signing.key_id(load_trusted_key(pem)) == signer.keyid
+    assert signing.keyid_of(load_trusted_key(pem)) == signer.keyid
     assert [p.name for p in pem.parent.iterdir()] == [pem.name]
 
 

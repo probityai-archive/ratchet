@@ -14,10 +14,10 @@ from ratchet.improve.receipt import (
     HUMAN_APPROVAL_TYPE,
     ReceiptError,
     Signer,
-    pae,
     receipt,
     verify,
 )
+from ratchet.verify.dsse import pae
 
 
 class _Decision:
@@ -82,15 +82,25 @@ def test_untrusted_key_is_rejected() -> None:
     [
         (b"not json", "not JSON"),
         (b"[1]", "not a JSON object"),
-        (json.dumps({"payloadType": DECISION_TYPE, "payload": 5}).encode(), "base64"),
-        (json.dumps({"payloadType": DECISION_TYPE, "payload": "!!"}).encode(), "not valid base64"),
+        (
+            json.dumps(
+                {"payloadType": DECISION_TYPE, "payload": 5, "signatures": [{"keyid": "k", "sig": ""}]}
+            ).encode(),
+            "base64",
+        ),
+        (
+            json.dumps(
+                {"payloadType": DECISION_TYPE, "payload": "!!", "signatures": [{"keyid": "k", "sig": ""}]}
+            ).encode(),
+            "not valid base64",
+        ),
         (
             json.dumps({"payloadType": DECISION_TYPE, "payload": "", "signatures": []}).encode(),
             "no signatures",
         ),
         (
             json.dumps({"payloadType": DECISION_TYPE, "payload": "", "signatures": ["x"]}).encode(),
-            "no signature verifies",
+            "signature entry needs a string keyid",
         ),
     ],
 )

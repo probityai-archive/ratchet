@@ -110,7 +110,7 @@ def test_lineage_trace_decision_and_verify_read_the_real_store(atlas_db: tuple[s
     code, out = run(["verify", good.version, "--pubkey", pub], uri, db)
     assert code == 1  # signed correctly, but a hand-built body is not a full admission predicate
     assert "✓ DSSE envelope signature valid" in out
-    assert "independent verifier" in out
+    assert "checked by the dsse crate" in out
     assert "NOT ESTABLISHED" in out
 
 

@@ -17,8 +17,9 @@ from ratchet.agent.guards import GuardRuntime
 from ratchet.export import mcp_gateway
 from ratchet.export.mcp_gateway import NOT_SENT, Gateway, HttpGateway, http_server, main
 from ratchet.improve.admit import Check, Decision
-from ratchet.improve.receipt import Signer, public_key_bytes, receipt
+from ratchet.improve.receipt import Signer, receipt
 from ratchet.types import Guard, Harness
+from ratchet.verify.dsse import raw_public
 
 NO_DELETE = """
 def check(call, view, history):
@@ -179,7 +180,7 @@ def admitted(tmp_path: Path, admitted: bool = True) -> list[str]:
     )
     (tmp_path / "harness.json").write_text(json.dumps(asdict(h)), encoding="utf-8")
     (tmp_path / "receipt.json").write_bytes(receipt(decision, signer))
-    key = public_key_bytes(signer.public_key).hex()
+    key = raw_public(signer.public_key).hex()
     return [
         "--harness",
         str(tmp_path / "harness.json"),

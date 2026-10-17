@@ -33,7 +33,8 @@ from typing import Any
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from ratchet.canonical import canonical_json
-from ratchet.improve.receipt import ReceiptError, Signer, countersign, key_id, verify
+from ratchet.improve.receipt import ReceiptError, Signer, countersign, verify
+from ratchet.verify.dsse import keyid_of
 
 NOTE = "countersigned by the pinned decision key; the run signed with a per-run key that was not published"
 
@@ -72,9 +73,9 @@ def run_key(signer_json: Path) -> dict[str, Ed25519PublicKey]:
     """The run's published per-run key from `signer.json`; refused unless its keyid names that key."""
     raw = json.loads(signer_json.read_text(encoding="utf-8"))
     key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(str(raw["public_key"])))
-    if key_id(key) != raw.get("keyid"):
+    if keyid_of(key) != raw.get("keyid"):
         raise ReceiptError(f"{signer_json}: keyid does not name the public key it carries")
-    return {key_id(key): key}
+    return {keyid_of(key): key}
 
 
 def _decision(record: dict[str, Any]) -> dict[str, Any]:

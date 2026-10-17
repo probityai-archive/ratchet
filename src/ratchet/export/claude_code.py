@@ -34,8 +34,9 @@ from ratchet_cases.types import sha256_hex
 
 from ratchet.agent.guards import CHILD_PATH, GuardLimits
 from ratchet.export import hookrt
-from ratchet.improve.receipt import ReceiptError, key_id, verify
+from ratchet.improve.receipt import ReceiptError, verify
 from ratchet.types import Guard, Harness, Procedure
+from ratchet.verify.dsse import keyid_of
 
 RUNTIME_PATH = Path(hookrt.__file__)
 RUNTIME_BEGIN = hookrt.RUNTIME_BEGIN
@@ -299,7 +300,7 @@ def public_key(hex_key: str) -> Ed25519PublicKey:
 
 def trusted_keys(hex_keys: Sequence[str]) -> dict[str, Ed25519PublicKey]:
     keys = [public_key(k) for k in hex_keys]
-    return {key_id(k): k for k in keys}
+    return {keyid_of(k): k for k in keys}
 
 
 def _parser() -> argparse.ArgumentParser:

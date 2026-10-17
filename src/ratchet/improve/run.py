@@ -30,10 +30,11 @@ from ratchet.agent.worker import run_case
 from ratchet.improve.activate import MongoActivator
 from ratchet.improve.archive import ArchiveSelector
 from ratchet.improve.loop import EvolveResult, Lab, evolve
-from ratchet.improve.receipt import Signer, public_key_bytes
+from ratchet.improve.receipt import Signer
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.improve.worldsim import WorldSimulator
 from ratchet.store import Store
+from ratchet.verify.dsse import raw_public
 
 
 def _args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -114,7 +115,7 @@ def summary(result: EvolveResult, signer: Signer, wall_s: float, config: dict[st
     return {
         "config": config,
         "signer_keyid": signer.keyid,
-        "signer_public_key_hex": public_key_bytes(signer.public_key).hex(),
+        "signer_public_key_hex": raw_public(signer.public_key).hex(),
         "final_harness": result.harness.version,
         "final_instructions": result.instructions.version,
         "wall_s": round(wall_s, 1),

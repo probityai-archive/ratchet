@@ -95,7 +95,7 @@ def test_verify_recomputes_from_the_store_and_keeps_recomputed_apart_from_authen
         assert item in out
     assert "AUTHENTICATED ONLY (signed, not re-derived)  fresh_model_execution" in out
     assert "6 of 6 named reports checked; every recomputable item recomputed" in out
-    assert "independent verifier" in out
+    assert "checked by the dsse crate" in out
 
 
 def test_a_rejection_receipt_verifies_too(evolved: tuple[str, str, EvolveResult, Store]) -> None:

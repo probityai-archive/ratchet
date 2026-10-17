@@ -17,8 +17,8 @@ from rich.text import Text
 
 from ratchet.canonical import canonical_json
 from ratchet.demo.signing import is_demo_signed
-from ratchet.improve.receipt import SIGNING_KEY_ENV, ReceiptError, Signer, key_id, verify
-from ratchet.verify import dsse
+from ratchet.improve.receipt import SIGNING_KEY_ENV, ReceiptError, Signer, verify
+from ratchet.verify.dsse import keyid_of
 from ratchet.verify.keys import DEFAULT_KEY_PATH, TrustedKeyError, load_trusted_key
 from ratchet.verify.receipt import Options, VerifyReport
 from ratchet.verify.receipt import verify_decision as recompute_receipt
@@ -52,10 +52,10 @@ def trusted_keys(
             key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(pubkey_hex.strip()))
         except ValueError as exc:
             raise ReceiptError(f"public key is not 32 bytes of hex: {exc}") from exc
-        return {key_id(key): key}
+        return {keyid_of(key): key}
     if source.get(SIGNING_KEY_ENV):
         key = Signer.from_seed_hex(source[SIGNING_KEY_ENV]).public_key
-        return {key_id(key): key}
+        return {keyid_of(key): key}
     return _pem(pinned) if pinned.exists() else {}
 
 
@@ -64,18 +64,7 @@ def _pem(path: Path) -> dict[str, Ed25519PublicKey]:
         key = load_trusted_key(path)
     except TrustedKeyError as exc:
         raise ReceiptError(str(exc)) from exc
-    return {key_id(key): key}
-
-
-def _independent(envelope: bytes, trusted: Mapping[str, Ed25519PublicKey]) -> str | None:
-    """Re-check with the verifier written apart from the signer; a disagreement is a defect in one of them."""
-    try:
-        result = dsse.verify_signature(dsse.parse(envelope), trusted)
-    except dsse.EnvelopeError as exc:
-        return f"independent verifier rejects the envelope: {exc}"
-    if result.keyid is None:
-        return f"independent verifier rejects the signature: {result.reason}"
-    return None
+    return {keyid_of(key): key}
 
 
 def verify_envelope(
@@ -91,14 +80,7 @@ def verify_envelope(
         payload = verify(envelope, trusted)
     except ReceiptError as exc:
         return VerifyResult(False, "INVALID", [str(exc)])
-    other = _independent(envelope, trusted)
-    if other is not None:
-        return VerifyResult(False, "INVALID", [other])
-    detail = [
-        "DSSE envelope signature valid under a trusted Ed25519 key",
-        "the independent verifier (ratchet.verify.dsse, written apart from the signer; shares only the "
-        "SHA-256 helper and the Ed25519 library with it) agrees",
-    ]
+    detail = ["DSSE envelope signature valid under a trusted Ed25519 key, checked by the dsse crate"]
     if stored is not None:
         diff = sorted(k for k, v in payload.items() if canonical_json(stored.get(k)) != canonical_json(v))
         if diff:

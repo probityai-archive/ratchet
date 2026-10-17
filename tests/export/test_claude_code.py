@@ -33,8 +33,9 @@ from ratchet.export.claude_code import (
 )
 from ratchet.export.hookrt import parse_transcript
 from ratchet.improve.admit import Check, Decision
-from ratchet.improve.receipt import Signer, public_key_bytes, receipt
+from ratchet.improve.receipt import Signer, receipt
 from ratchet.types import Guard, Harness
+from ratchet.verify.dsse import raw_public
 
 from .synth import Session, hook_event
 
@@ -248,7 +249,7 @@ def write_inputs(tmp_path: Path, signer: Signer, admitted: bool = True) -> list[
     h = harness()
     (tmp_path / "harness.json").write_text(json.dumps(asdict(h)), encoding="utf-8")
     (tmp_path / "receipt.json").write_bytes(receipt(decision(h, admitted), signer))
-    key = public_key_bytes(signer.public_key).hex()
+    key = raw_public(signer.public_key).hex()
     return [
         "--harness",
         "harness.json",
