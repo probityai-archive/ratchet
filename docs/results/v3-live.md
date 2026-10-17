@@ -29,3 +29,46 @@ Run of 2026-10-11 on gpt-oss-120b, database `ratchet_v3_full`: 19 held-out cases
 Both refusals are signed receipts that name the v3 policy. Check one with `ratchet verify`.
 Because an unchanged copy of the agent moved one case by 9 of 40, no candidate can be admitted on this
 endpoint under v3 as written: the noise is larger than the per-case tolerance.
+
+## One cell on the referee path, 2026-10-17
+
+This cell checks the referee path end to end on a live model. It is one held-out case, so it is a check of
+the path and not a new admission result.
+
+- Command: `python -m ratchet.improve.run_v3 --endpoints-file v3.json --cases policy_changed.v6
+  --candidate ratchet_improve_oss:b972467a3b9a --schedule-seed 20261011 --workers 2 --db ratchet_v3_cell
+  --out docs/results/v3-cell/v3-cell.json`, from `main` at `9115509`.
+- Model: `gpt-oss-120b`, served by vLLM 0.26.0 on one B200 on HiPerGator, temperature 0.0, `seed_base`
+  1000. The endpoint configuration is [v3-cell/v3.json](v3-cell/v3.json) (digest `36b3e902d077`).
+- Store: the hosted Atlas cluster, in a database that was new for this run (`ratchet_v3_cell`). The
+  candidate's decision came from `ratchet_improve_oss`, and the seed harness is still `dfdfffeeb388`.
+- Network route: the machine that ran the driver is not on the cluster's access list. The driver
+  reached the three replica-set members through ssh forwards from a host that is on the list. Only the
+  addresses changed: the TLS server names, the certificate checks, the credentials and the wire protocol
+  are the driver's own. The policy, the schedule and the referee are the same as in any other run.
+- Wall time 641.7 s, 160 executions (4 arms x 40), 0 invalid.
+
+| Arm | `policy_changed.v6` passed, of 40 | Panels (of 20) |
+|---|---|---|
+| Unchanged agent (parent `dfdfffeeb388`) | 12 | 7, 5 |
+| Identity control 1 | 10 | 5, 5 |
+| Identity control 2 | 11 | 5, 6 |
+| Procedure `b972467a3b9a` | 35 | 17, 18 |
+
+Result: the cohort is unqualified, so the candidate is refused (`stochastic_v3`, `cohort_qualified`). Both
+identity controls fell 10 points below the parent in panel 0, and the per-panel limit is 5 points. With one
+case, 5 points is a single execution in a 20-run panel, so a one-case cohort qualifies only when neither
+unchanged copy loses even one run in either panel. The candidate's own gain (12 to 35 of 40, intermediate
+to high) is in the signed record, but no candidate can be admitted while the controls fail.
+
+The per-case table above is read from the referee-signed results file
+[v3-cell/v3-cell-results/v3-cell.dsse](v3-cell/v3-cell-results/v3-cell.dsse) (sha256 `49f5e8ecc0bb`,
+signer keyid `b61d7e39c111`). To check it:
+
+```
+python -m ratchet.verify.results docs/results/v3-cell/v3-cell-results/v3-cell.dsse --case-suite
+```
+
+It prints `supported verified: 1 of 1 decisions verified`. It recounts and regrades the 80 parent and
+candidate executions from their traces. The identity-control arms are authenticated (their digests are in
+the receipt) but are not recounted.
