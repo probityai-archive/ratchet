@@ -8,7 +8,10 @@ python -m ratchet.verify receipt.json \
   --report parent_run_1=parent_run_1.json --report parent_run_2=parent_run_2.json \
   --report candidate_run=candidate_run.json --report candidate_confirm_run=candidate_confirm_run.json \
   --harness parent=parent.json --harness candidate=candidate.json \
-  --recomputed overfit_lint=overfit.json --require-admitted
+  --recomputed overfit_lint=overfit.json \
+  --traces parent_run_1=parent_run_1.jsonl --traces parent_run_2=parent_run_2.jsonl \
+  --traces candidate_run=candidate_run.jsonl --traces candidate_confirm_run=candidate_confirm_run.jsonl \
+  --case-suite --require-admitted --require-complete
 ```
 
 `--key` defaults to `keys/ratchet-decisions.pub`. Exit 0 verifies, 1 does not, 2 means the input was malformed and no
@@ -46,6 +49,7 @@ Clean-environment result for the earlier pins (`probity-verify==0.1.0`, `agent-e
 | Payload fields; `admitted` agrees with the gate list | | `adapter.py` |
 | Report digests against supplied stored reports | | `evidence.py` |
 | Admission gates recomputed from stored evidence | | `recompute.py` |
+| Run records, traces and held-out grades recomputed from reports, traces and case documents | | `runs.py` |
 
 `probity-verify` has no DSSE or Ratchet-payload support of its own. The adapter `ratchet_decision/v1`
 (`src/ratchet/verify/adapter.py`) is the extension point its `adapters=` argument provides. Every PAE, signature
@@ -72,15 +76,29 @@ RECOMPUTED, derived by this verifier from bytes:
 | `gate:authority` | parent and candidate harness documents; a human approval when authority grew by declared exception; for a tool grant or procedure edit, the k-session bundle (`--sessions DIR`), recomputed and checked against the parent and candidate. That item reads `partial`: that the candidate's runs called the tool or used the procedure is read from the signed evidence |
 | `gate:replay` | the replay result recomputed from the recorded inputs, per added guard (`recomputed: replay:<guard id>`) |
 | `gate:overfit_lint` | the screen result recomputed from the training literals (`recomputed: overfit_lint`) |
+| `model_call_records`: every counted model call is committed once, in its own run, with the row's fresh and cached counts; no run id or model event appears in two reports; each supplied trace's model events digest to exactly the committed list | the evaluation reports; their traces (`--traces NAME=FILE`, JSON lines), else `partial` |
+| `record_chain`: each supplied trace digests to the trace its report commits, is a run of the report's harness on the committed case, numbers its events in order, ends with one final event, acts only on calls the model turn before it asked for; each report row is what its trace yields (outcome, reasons, interventions, fresh and cached calls) | the evaluation reports and their traces; `partial` while a committed run's trace is withheld |
+| `tool_policy`: every recorded tool call is answered once, ran only when it is on the harness's allowlist and every guard of the harness decided, in order, not to block it, and was blocked only for a stated cause (off the allowlist, a blocking guard, invalid arguments) | the evaluation reports, their traces, and the parent and candidate harness documents |
+| `heldout_grades`: each held-out case is bound to one digest across every run; a disclosed case document is the committed one; each held-out run is graded again by rebuilding the world from the case, replaying every executed call (each recorded result must be what the world returns), and comparing the final state digest and the grader's verdict with the trace and the row | the evaluation reports, their traces, and the held-out case documents (`--case ID=FILE`, or `--case-suite` for every case of the installed `probity-ratchet-cases`); a case of a world this verifier cannot rebuild (a benchmark adapter's) is counted under `not_rebuildable` and leaves the item `partial` |
 
 Each item reads `recomputed`, `partial` or `not_supplied`. A disagreement between a recomputed gate and the
 receipt's claim is `contradicted` (`gate_recompute_mismatch:<gate>`), in both directions: a receipt that claims a
 failure the evidence does not show is as wrong as one that claims a pass it does not support.
 
-AUTHENTICATED ONLY, asserted by the evaluator and covered by its signature, never re-derived here:
-`fresh_model_execution`, `capture_fidelity`, `sandbox_enforcement`, `hidden_grades`. A recomputed replay or
-overfit result is supplied by the caller who ran it from the recorded inputs; this verifier compares it with the
-receipt and does not run the sandboxed guard itself.
+The four run-record items replace what earlier versions listed as authenticated only. Reports written before run
+records (`runs`) or case digests (`case_digest`) leave those items `not_supplied`, so such a receipt never reads as
+complete; nothing about it is re-signed.
+
+AUTHENTICATED ONLY, asserted by the referee and covered by the decision key (which the referee holds and the
+improver process never does), never re-derived here. Each carries its reason in `authenticated_only_limits`:
+
+| Item | Why no record re-derives it |
+|---|---|
+| `model_turns_as_recorded` | that each recorded model turn is the endpoint's unaltered answer and none was left out: a chat-completions response carries no signature of its provider, so only the referee's key says a model, not the referee, wrote the turns |
+| `container_isolation` | what a world running outside the referee's process (the terminal benchmark's container) let the agent's commands reach: no launcher records an isolation report for these runs; the record shows which commands the policy let through |
+
+A recomputed replay or overfit result is supplied by the caller who ran it from the recorded inputs; this verifier
+compares it with the receipt and does not run the sandboxed guard itself.
 
 The gate rules follow `docs/CONTRACT.md`, ruling 2: at least two stable recoveries (failing in P1 and P2, passing
 in C1 and C2); every case passing in P1 or P2 passes in C1 and C2; only FRESH passes count; zero must-succeed
@@ -108,6 +126,12 @@ Evaluation reports are found by name: `parent_run_1`, `parent_run_2`, `candidate
 `candidate_confirm_run` (the consumer can map others with `Options.eval_roles`). A receipt that names the first three but no `candidate_confirm_run` records a refusal made before C2 ran; a receipt that names C2 needs C2 supplied. Replay reports are named
 `replay:<guard id>`. These are the names `admit()` writes today.
 
+Each evaluation report (`EvalReport.to_payload`) commits its runs under `runs`: per run, `run_id`, `case_id`,
+`trace_digest` (SHA-256 of the RFC 8785 canonical JSON of the trace document) and `model_calls` (the same digest of
+each model event, in order). Each result row carries `case_digest`, the digest of the case document it graded
+(`ratchet.verify.runs.case_document`; for the case suite, the case as `probity-ratchet-cases` publishes it). The
+referee writes both from the traces and cases it holds, and the decision signs them through `report_digests`.
+
 Known drift: the admission lane's held-out gate still uses the margin `max(2, D + 1)`; ruling 2 requires two stable
 recoveries and no loss of a protected case. Supplying the four evaluation reports exposes any disagreement as
 `gate_recompute_mismatch:heldout`.
@@ -117,8 +141,8 @@ recoveries and no loss of a protected case. Supplying the four evaluation report
 | Decision | Reason |
 |---|---|
 | supported | `admitted_receipt_verified`, `rejection_receipt_verified` |
-| contradicted | `untrusted_key`, `signature_invalid`, `consumer_binding_mismatch`, `admitted_with_failed_gate:<g>`, `rejected_with_all_gates_passed`, `report_digest_mismatch:<n>`, `report_not_named:<n>`, `gate_recompute_mismatch:<g>`, `authority_recompute_failed_without_exception`, `admitted_with_refused_extended_change`, `sessions_bundle_refused:<why>`, `sessions_verdict_not_admitted`, `sessions_bundle_not_the_named_one`, `sessions_bundle_compares_other_harnesses`, `harness_not_the_decided_candidate`, `harness_not_the_decided_parent`, `replay_recompute_mismatch:<guard>:<field>`, `replay_snapshot_mismatch:<guard>`, `replay_new_guards_mismatch`, `replay_check_passed_with_failed_guard`, `report_malformed:<detail>`, `evidence_not_json:<role>` |
-| not_established | `unsupported_payload_type`, `unsupported_predicate`, `payload_not_json_object`, `payload_field_invalid:<field>`, `gate_missing:<g>`, `report_not_supplied:<n>`, `authority_exception_unverified:<why>`, `recomputation_incomplete:<item>`, `envelope_unavailable` |
+| contradicted | `run_records_malformed:<n>`, `run_record_case_mismatch:<n>:<case>`, `model_call_count_mismatch:<n>:<case>`, `fresh_row_with_cached_calls:<n>:<case>`, `run_reused:<n>:<n>:<run>`, `model_call_reused:<n>:<run>`, `model_calls_not_the_trace:<n>:<run>`, `cached_calls_not_the_trace:<n>:<run>`, `trace_not_committed:<n>:<run>`, `trace_digest_mismatch:<n>:<run>`, `record_chain_mismatch:<n>:<case>:<field>`, `tool_policy_violated:<n>:<case>:<rule>`, `report_of_unknown_harness:<n>`, `heldout_case_changed:<case>`, `heldout_case_digest_mismatch:<case>`, `case_document_names_another_case:<case>`, `grade_mismatch:<n>:<case>:<field>`, `untrusted_key`, `signature_invalid`, `consumer_binding_mismatch`, `admitted_with_failed_gate:<g>`, `rejected_with_all_gates_passed`, `report_digest_mismatch:<n>`, `report_not_named:<n>`, `gate_recompute_mismatch:<g>`, `authority_recompute_failed_without_exception`, `admitted_with_refused_extended_change`, `sessions_bundle_refused:<why>`, `sessions_verdict_not_admitted`, `sessions_bundle_not_the_named_one`, `sessions_bundle_compares_other_harnesses`, `harness_not_the_decided_candidate`, `harness_not_the_decided_parent`, `replay_recompute_mismatch:<guard>:<field>`, `replay_snapshot_mismatch:<guard>`, `replay_new_guards_mismatch`, `replay_check_passed_with_failed_guard`, `report_malformed:<detail>`, `evidence_not_json:<role>` |
+| not_established | `run_record_missing:<n>:<case>`, `case_digest_missing:<n>:<case>`, `unsupported_payload_type`, `unsupported_predicate`, `payload_not_json_object`, `payload_field_invalid:<field>`, `gate_missing:<g>`, `report_not_supplied:<n>`, `authority_exception_unverified:<why>`, `recomputation_incomplete:<item>`, `envelope_unavailable` |
 | no_verdict | malformed envelope, `invalid_report_name:<n>`, `invalid_harness_role`, `no_trusted_key`, or a malformed case or policy |
 
 `Options(require_reports=True)` demands every named report; `Options(require_complete=True)` demands every
@@ -157,9 +181,9 @@ posture_and_coverage:
     definition: >
       Whether a proposed change to an agent harness was admitted against a frozen comparison, with every
       gate recorded as a named check carrying the counts and identifiers it rests on. A consumer MUST
-      recompute the gates it can from the digest-committed reports and MUST treat the gates it cannot
-      recompute (fresh model execution, capture fidelity, sandbox enforcement, hidden grades) as
-      authenticated only.
+      recompute what it can from the digest-committed reports, traces and case documents, and MUST
+      treat what no record re-derives (that the recorded model turns are the endpoint's answers, and
+      what a container outside the referee's process let a command reach) as authenticated only.
     values: [admitted, rejected]
     source_path: predicate.admitted
     status: proposed
@@ -172,6 +196,9 @@ Field mapping: `witnessScope` is `SELF` (the evaluator signs its own run), `clai
 
 ## What a verified receipt does not establish
 
-That the evaluations ran, that the stored reports are true, that the capture was faithful, that the sandbox
-enforced its limits, or that the key holder is honest. Replay shows a guard's behaviour on recorded inputs, not
+That a model endpoint, not the referee, wrote the recorded model turns, or that none was left out; what a
+container outside the referee's process let a command reach; the grade of a held-out run whose case or trace was
+withheld, or whose world this verifier cannot rebuild (each is reported `partial`, with the count); or that the key
+holder is honest. A run record shows that the reports, traces and grades agree with each other and with the
+published cases, not that the run happened at the time it says. Replay shows a guard's behaviour on recorded inputs, not
 that the counterfactual continuation succeeds. Authority is an enforced policy, not a safety proof.
