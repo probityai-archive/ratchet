@@ -121,33 +121,53 @@ def _count(row: Mapping[str, Any], name: str) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else -1
 
 
+def _check_rows(report: Report, runs: Mapping[str, Mapping[str, Any]]) -> None:
+    """Each result row with a run names a committed run of its case, with as many committed model calls as
+    it counts fresh and cached, and no cached call when it says FRESH."""
+    for row in rows_of(report):
+        run_id, case_id = row.get("run_id"), row.get("case_id")
+        if run_id is None:
+            continue
+        entry = runs.get(str(run_id))
+        if entry is None:
+            raise RecordError("not_established", f"run_record_missing:{report.name}:{case_id}")
+        if entry["case_id"] != case_id:
+            raise RecordError("contradicted", f"run_record_case_mismatch:{report.name}:{case_id}")
+        fresh, cached = _count(row, "fresh_calls"), _count(row, "cached_calls")
+        if fresh < 0 or cached < 0 or fresh + cached != len(entry["model_calls"]):
+            raise RecordError("contradicted", f"model_call_count_mismatch:{report.name}:{case_id}")
+        if row.get("mode") == "FRESH" and cached:
+            raise RecordError("contradicted", f"fresh_row_with_cached_calls:{report.name}:{case_id}")
+
+
+def _check_trace_calls(report: Report, run_id: str, entry: Mapping[str, Any]) -> bool:
+    """When the run's trace is supplied, its model events are exactly the committed calls and its cached
+    calls are the row's. False when no trace was supplied."""
+    trace = (report.traces or {}).get(run_id)
+    if trace is None:
+        return False
+    if model_call_digests(trace) != entry["model_calls"]:
+        raise RecordError("contradicted", f"model_calls_not_the_trace:{report.name}:{run_id}")
+    rows = [r for r in rows_of(report) if r.get("run_id") == run_id]
+    if rows and cached_calls(trace) != _count(rows[0], "cached_calls"):
+        raise RecordError("contradicted", f"cached_calls_not_the_trace:{report.name}:{run_id}")
+    return True
+
+
 def check_model_calls(reports: Sequence[Report]) -> dict[str, Any]:
     """Every counted model call is committed, once, in the run that made it.
 
-    For each result row with a run: the run is committed with the row's case, its committed model calls
-    number exactly the row's fresh plus cached calls, and a FRESH row has no cached call. Across every report
-    of the decision, no run id and no model-call digest appears twice, so no run and no answer is counted in
-    two places. Where a run's trace is supplied, its model events digest to exactly the committed list and
-    its cached calls equal the row's. Returns the counts it checked."""
+    Each report's rows agree with its run records (`_check_rows`). Across every report of the decision, no
+    run id and no model-call digest appears twice, so no run and no recorded turn is counted in two places.
+    Where a run's trace is supplied, its model events digest to exactly the committed list (and so carry the
+    run's own sequence numbers and timestamps) and its cached calls equal the row's. Returns the counts it
+    checked."""
     seen_runs: dict[str, str] = {}
     seen_calls: dict[str, str] = {}
     runs_total = traced = 0
     for report in reports:
         runs = runs_of(report)
-        for row in rows_of(report):
-            run_id, case_id = row.get("run_id"), row.get("case_id")
-            if run_id is None:
-                continue
-            entry = runs.get(str(run_id))
-            if entry is None:
-                raise RecordError("not_established", f"run_record_missing:{report.name}:{case_id}")
-            if entry["case_id"] != case_id:
-                raise RecordError("contradicted", f"run_record_case_mismatch:{report.name}:{case_id}")
-            fresh, cached = _count(row, "fresh_calls"), _count(row, "cached_calls")
-            if fresh < 0 or cached < 0 or fresh + cached != len(entry["model_calls"]):
-                raise RecordError("contradicted", f"model_call_count_mismatch:{report.name}:{case_id}")
-            if row.get("mode") == "FRESH" and cached:
-                raise RecordError("contradicted", f"fresh_row_with_cached_calls:{report.name}:{case_id}")
+        _check_rows(report, runs)
         for run_id, entry in runs.items():
             if run_id in seen_runs:
                 raise RecordError("contradicted", f"run_reused:{seen_runs[run_id]}:{report.name}:{run_id}")
@@ -157,15 +177,7 @@ def check_model_calls(reports: Sequence[Report]) -> dict[str, Any]:
                     raise RecordError("contradicted", f"model_call_reused:{report.name}:{run_id}")
                 seen_calls[call] = run_id
             runs_total += 1
-            trace = (report.traces or {}).get(run_id)
-            if trace is None:
-                continue
-            if model_call_digests(trace) != entry["model_calls"]:
-                raise RecordError("contradicted", f"model_calls_not_the_trace:{report.name}:{run_id}")
-            rows = [r for r in rows_of(report) if r.get("run_id") == run_id]
-            if rows and cached_calls(trace) != _count(rows[0], "cached_calls"):
-                raise RecordError("contradicted", f"cached_calls_not_the_trace:{report.name}:{run_id}")
-            traced += 1
+            traced += _check_trace_calls(report, run_id, entry)
     return {"runs": runs_total, "model_calls": len(seen_calls), "traces_checked": traced}
 
 
