@@ -33,6 +33,18 @@ jobs:
       # check-docs imports ratchet_cases to count the case families, so it runs inside the synced virtualenv
       - run: uv run python scripts/check-docs.py
 
+  # The signed v3 refusal example: offline verification of the pinned results file, so the example cannot rot.
+  refusal-example:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - run: uv sync
+      - run: uv run python examples/refusal-v3-cell/verify.py | tee refusal.out
+      - run: |
+          grep -qx 'decision verified, candidate refused, reason: identity controls breached' refusal.out
+
   # The case suite on its own: built as a wheel and tested from a clean environment on the oldest and a
   # current supported Python, so nothing in the harness's workspace can hide a missing file or dependency.
   cases:

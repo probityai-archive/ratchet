@@ -35,6 +35,8 @@ blocked by guard no-force-push-main: force push to main rewrites shared history;
 
 Before export, the guard was replayed over six recorded Claude Code sessions: it fired on the three calls it was written for and on none of the other twelve (`examples/claude-code/replay.json`). The hook's header names the receipt (the signed decision) that admitted it; `uv run python -m ratchet.export.claude_code --verify examples/claude-code/hooks/ratchet_no_force_push_main.py` checks that receipt.
 
+A signed refusal you can check offline is in `examples/refusal-v3-cell/`: `uv run python examples/refusal-v3-cell/verify.py` regrades 80 executions and prints `decision verified, candidate refused, reason: identity controls breached`. "Decision verified" is not "candidate accepted": it says the signed record is genuine, and here the record is a refusal. It is single-cell evidence from one run by the operator.
+
 ## What it does
 
 A support agent works in a simulated company: a billing provider, tickets, approvals and mail. Its eight case families are seven kinds of trap, each with benign twins (matching cases where the action is allowed, so a rule that blocks them fails), plus ordinary requests that must succeed. Every case is graded on the final state of every system, never on the agent's words.
@@ -56,20 +58,6 @@ Version 0.1.2, built on 2026-10-11 at the MongoDB harness hackathon. The suite, 
 | [Verifying a decision](docs/VERIFY.md) | Check a receipt offline |
 | [Results](docs/RESULTS.md) | Every measured result and its records |
 | [Claude Code hook](examples/claude-code/README.md) | Prove a guard on your own sessions, then install it |
+| [Built today and reused](docs/REUSED.md) | What was written at the event and what is pinned |
+| [Signed refusal example](examples/refusal-v3-cell/README.md) | Check a refused candidate offline |
 | [Build contract](docs/CONTRACT.md) | Types, lane interfaces and the full admission rule |
-
-## Built today and reused
-
-The repository's first commit is from 2026-10-11, and everything under `src/ratchet`, `probity-ratchet-cases`, `tests`, `examples` and `docs` was written at the event. The rest is a pinned dependency or a service.
-
-| Reused | Pin |
-|---|---|
-| Runtime | `jcs-admit==0.1.0`, `httpx>=0.27`, `cryptography>=44`, `rich>=15`; extras: `pymongo>=4.10`, `raindrop-ai==0.0.75` |
-| Earlier work of the same authors | `probity-verify==0.1.1`, `agent-evidence-vectors==0.19.0` |
-| Benchmark extra | `agentdojo==0.1.35` (tool outputs carry hidden prompt-injection attacks), `litellm==1.102.1`, `terminal-bench==0.2.18`, `tau-bench` at `59a200c` (simulated customer-service tasks graded on the final database state), `tau2` at `4ce7c03`, `tool-sandbox` at `c8571d7` |
-| Instruction search extra | `gepa==0.1.4` |
-| Services | MongoDB Atlas (`mongodb-atlas-local:8.3.9-20260928T091948Z` for development), Voyage embeddings, Raindrop |
-
-The integration that writes and checks Ratchet's own admission records is new. The verifier it calls is not.
-
-License: Apache-2.0.
