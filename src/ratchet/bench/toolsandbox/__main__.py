@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 from collections.abc import Sequence
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,7 @@ from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.evaluate import evaluate_many
 from ratchet.improve.loop import Lab, evolve
 from ratchet.improve.receipt import Signer
+from ratchet.improve.referee import ProcessReferee, RefereeParts
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.types import Harness
 
@@ -239,16 +241,56 @@ def evolve_cases(
     return out
 
 
+def _evolve_cases(args: argparse.Namespace) -> list[Any]:
+    key = keyring_key()
+    if key:
+        os.environ["RAPID_API_KEY"] = key
+    everything = build_cases(seed=args.seed, n_train=args.n_train)
+    return evolve_cases(everything, args.train_bases, args.heldout_bases, args.seed)
+
+
+def _model_config(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "agent_model": args.agent_model,
+        "user_model": args.user_model,
+        "temperature": args.temperature,
+        "tool_sandbox_commit": tool_sandbox_commit(),
+    }
+
+
+def referee_parts(config: dict[str, Any]) -> RefereeParts:
+    """The held-out side of `evolve`, rebuilt in the referee's process from the same command line."""
+    args = parser().parse_args(config["argv"])
+    base_url, api_key = _endpoint(args)
+    cases = _evolve_cases(args)
+    held = [c for c in cases if c.split == "heldout"]
+    store = RunStore(Path(config["root"]))
+    stack = ExitStack()
+    runtime = stack.enter_context(GuardRuntime())
+    user = endpoint_user(args.user_base_url or base_url, api_key, args.user_model)
+    return RefereeParts(
+        cases=held,
+        run_case=RecordingRunner(ToolSandboxRunner(user=user), store, len(held)),
+        model=_client(base_url, api_key, args.agent_model, args.temperature),
+        simulator=ToolSandboxSimulator(),
+        runner=SandboxRunner(runtime),
+        signer=Signer.for_decisions(),
+        store=store,
+        # The same rules as the Atlas activator over this run's own decision log.
+        activator=MemoryActivator(store.decision),
+        model_config=_model_config(args),
+        suite_digest=split_record(cases, args.seed)["digest"],
+        workers=args.workers,
+        close=stack.close,
+    )
+
+
 def cmd_evolve(args: argparse.Namespace) -> int:
     base_url, api_key = _endpoint(args)
     root = Path(args.out) / "evolve" / args.name
     if (root / "traces.jsonl").exists():
         raise SystemExit(f"{root} already has a run; pick another --name")
-    key = keyring_key()
-    if key:
-        os.environ["RAPID_API_KEY"] = key
-    everything = build_cases(seed=args.seed, n_train=args.n_train)
-    cases = evolve_cases(everything, args.train_bases, args.heldout_bases, args.seed)
+    cases = _evolve_cases(args)
     store = RunStore(root)
     store.write_cases(cases)
     record = split_record(cases, args.seed)
@@ -273,12 +315,12 @@ def cmd_evolve(args: argparse.Namespace) -> int:
     (root / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     model = _client(base_url, api_key, args.agent_model, args.temperature)
     improver = _client(base_url, api_key, args.improver_model, None)
+    training = [c for c in cases if c.split != "heldout"]
     runner = RecordingRunner(
         ToolSandboxRunner(user=endpoint_user(args.user_base_url or base_url, api_key, args.user_model)),
         store,
-        len(cases),
+        len(training),
     )
-    signer = Signer.for_decisions()
     log_path = root / "log.txt"
 
     def log(msg: str) -> None:
@@ -287,37 +329,37 @@ def cmd_evolve(args: argparse.Namespace) -> int:
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
-    # Activation follows the same rules as the Atlas activator (stored, admitting, signed decision; compare
-    # and swap on the active pointer) over this run's own decision log.
-    activator = MemoryActivator(store.decision)
     started = time.perf_counter()
-    with GuardRuntime() as runtime:
+    # Held-out runs, admission, decisions and activation: the referee, in its own process and directory.
+    referee_config = {"argv": args.argv, "root": str(root / "referee")}
+    with (
+        ProcessReferee("ratchet.bench.toolsandbox.__main__:referee_parts", referee_config) as referee,
+        GuardRuntime() as runtime,
+    ):
         lab = Lab(
-            cases=cases,
+            cases=training,
             run_case=runner,
             simulator=ToolSandboxSimulator(),
             runner=SandboxRunner(runtime),
-            signer=signer,
-            activator=activator,
+            referee=referee,
             improver=improver,
             workers=args.workers,
             max_clusters=args.max_clusters,
             candidates_per_cluster=args.candidates_per_cluster,
             max_evals=args.max_evals,
             suite_digest=record["digest"],
-            model_config={
-                k: config[k] for k in ("agent_model", "user_model", "temperature", "tool_sandbox_commit")
-            },
+            model_config=_model_config(args),
             log=log,
         )
         result = evolve(store, model, args.generations, lab=lab, seed=seed_harness())
+        public_key, active = referee.public_key(), referee.active()
     out = {
         "config": config,
         "final_harness": result.harness.version,
         "instructions": result.instructions.version,
         "generations": [r.to_payload() for r in result.generations],
-        "keyid": signer.keyid,
-        "active": list(activator.active()),
+        "decision_public_key": public_key,
+        "active": list(active),
         "wall_s": round(time.perf_counter() - started, 1),
     }
     (root / "result.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
@@ -408,6 +450,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    args.argv = list(sys.argv[1:] if argv is None else argv)
     code: int = args.func(args)
     return code
 

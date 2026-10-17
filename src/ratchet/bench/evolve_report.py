@@ -25,6 +25,12 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def _records(folder: Path, name: str) -> list[dict[str, Any]]:
+    """A run's records of one kind: the improver's, then the referee's (`referee/`, held-out runs and
+    decisions), which the report reads as an auditor does."""
+    return _jsonl(folder / name) + _jsonl(folder / "referee" / name)
+
+
 def _config(folder: Path) -> dict[str, Any]:
     path = folder / "config.json"
     if not path.is_file():
@@ -45,7 +51,7 @@ def unique_stores(paths: list[Path]) -> list[Path]:
         if key not in best:
             order.append(key)
             best[key] = path
-        elif len(_jsonl(path / "evals.jsonl")) > len(_jsonl(best[key] / "evals.jsonl")):
+        elif len(_records(path, "evals.jsonl")) > len(_records(best[key], "evals.jsonl")):
             best[key] = path
     return [best[k] for k in order]
 
@@ -75,7 +81,7 @@ def evolve_stores(root: Path, domain: str | None = None) -> list[Path]:
 
 def _reports(folder: Path) -> list[dict[str, Any]]:
     out = []
-    for rec in _jsonl(folder / "evals.jsonl"):
+    for rec in _records(folder, "evals.jsonl"):
         report = rec.get("report", rec)
         if isinstance(report, dict):
             out.append(report)
@@ -143,11 +149,11 @@ def _outside(folder: Path, evals: list[dict[str, Any]]) -> list[str]:
         return []
     finished = {str(r.get("run_id")) for e in evals for r in e.get("results", []) if r.get("run_id")}
     runs: dict[str, dict[str, Any]] = {}
-    for t in _jsonl(folder / "traces.jsonl"):
+    for t in _records(folder, "traces.jsonl"):
         if t["run_id"] not in finished:
             runs[t["run_id"]] = t
     parents = {str(e.get("harness_version")) for e in evals if str(e.get("role", "")).startswith("parent")}
-    parents |= {h["version"] for h in _jsonl(folder / "harnesses.jsonl") if h.get("parent") is None}
+    parents |= {h["version"] for h in _records(folder, "harnesses.jsonl") if h.get("parent") is None}
     split = _split_of(folder, evals)
     groups: dict[str, list[dict[str, Any]]] = {}
     for t in runs.values():
@@ -171,7 +177,7 @@ def render_run(folder: Path, label: str) -> list[str]:
     config = _config(folder)
     reports = _reports(folder)
     evals = [r for r in reports if r.get("type") == "eval"]
-    decisions = _jsonl(folder / "decisions.jsonl")
+    decisions = _records(folder, "decisions.jsonl")
     models = ", ".join(
         f"{k.replace('_', ' ')} `{config[k]}`"
         for k in ("agent_model", "user_model", "improver_model")

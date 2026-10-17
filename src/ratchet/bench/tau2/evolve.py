@@ -19,11 +19,13 @@ import json
 import threading
 import time
 from collections.abc import Callable
+from contextlib import ExitStack
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from ratchet_cases.types import Trace
 
 import ratchet.bench.tau2  # noqa: F401  # sets TAU2_DATA_DIR before tau2-bench is imported
@@ -35,6 +37,7 @@ from ratchet.bench.tau2.tasks import Tau2Case
 from ratchet.improve.activate import MemoryActivator
 from ratchet.improve.loop import Lab, evolve
 from ratchet.improve.receipt import Signer
+from ratchet.improve.referee import Referee, RefereeParts
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.improve.sim import RecordedViews
 from ratchet.types import Harness
@@ -76,14 +79,51 @@ def signer_from_env() -> Signer:
     return Signer.for_decisions()
 
 
-def frozen_record(store: JsonlStore, active: str | None, seed: Harness) -> dict[str, Any]:
-    """The active harness and the decision that admitted it (none for the seed)."""
+def referee_parts_for(
+    root: Path,
+    cases: list[Tau2Case],
+    runner: Tau2Runner | EndpointPool,
+    model: Any,
+    config: dict[str, Any],
+    workers: int,
+) -> RefereeParts:
+    """The referee of a tau2 run: the held-out cases, a store of its own under `root`, the decision key."""
+    store = JsonlStore(root)
+    stack = ExitStack()
+    runtime = stack.enter_context(GuardRuntime())
+    runner.runtime = runtime
+    held = [c for c in cases if c.split == "heldout"]
+    return RefereeParts(
+        cases=held,
+        run_case=RecordingRunner(runner, store, RunWriter(root), print),
+        model=model,
+        simulator=RecordedViews(),
+        runner=SandboxRunner(runtime),
+        signer=signer_from_env(),
+        store=store,
+        activator=MemoryActivator(store.decision),
+        model_config=_model_config(config),
+        suite_digest=config["tau2_data_digest"],
+        workers=workers,
+        close=stack.close,
+    )
+
+
+def _model_config(config: dict[str, Any]) -> dict[str, Any]:
+    return {k: config[k] for k in ("agent_model", "user_model", "judge_model", "temperature")}
+
+
+def frozen_record(
+    store: JsonlStore, decisions: JsonlStore, active: str | None, seed: Harness
+) -> dict[str, Any]:
+    """The active harness (from the improver's store) and the decision that admitted it (from the referee's;
+    none for the seed)."""
     harness = store.get_harness(active) if active else None
     if harness is None or harness.version == seed.version:
         return {"harness": asdict(seed), "decision_id": None, "decision": None}
     found = [
         r
-        for r in store.read("decisions")
+        for r in decisions.read("decisions")
         if (r["decision"] or {}).get("candidate") == harness.version and (r["decision"] or {}).get("admitted")
     ]
     last = found[-1] if found else {"decision_id": None, "decision": None}
@@ -104,17 +144,17 @@ def run_evolve(
     max_clusters: int,
     candidates_per_cluster: int,
     max_evals: int,
-    signer: Signer,
+    referee: Referee,
     log: Log,
 ) -> dict[str, Any]:
+    """Run the loop over the training `cases`; held-out runs, decisions and activation are the referee's,
+    which keeps them under `root/referee/`."""
     store = JsonlStore(root)
     # The public half of the key that signs this run's decisions, so its receipts verify on their own.
-    pem = signer.public_key.public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
-    )
+    key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(referee.public_key()))
+    pem = key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     (root / "signer.pub").write_bytes(pem)
     recording = RecordingRunner(runner, store, RunWriter(root), log)
-    activator = MemoryActivator(store.decision)
     started = time.perf_counter()
     with GuardRuntime() as runtime:
         runner.runtime = runtime
@@ -123,20 +163,19 @@ def run_evolve(
             run_case=recording,
             simulator=RecordedViews(),
             runner=SandboxRunner(runtime),
-            signer=signer,
-            activator=activator,
+            referee=referee,
             improver=improver,
             workers=workers,
             max_clusters=max_clusters,
             candidates_per_cluster=candidates_per_cluster,
             max_evals=max_evals,
             suite_digest=config["tau2_data_digest"],
-            model_config={k: config[k] for k in ("agent_model", "user_model", "judge_model", "temperature")},
+            model_config=_model_config(config),
             log=log,
         )
         result = evolve(store, model, generations, lab=lab, seed=seed)
-    active = activator.active()[0]
-    frozen = frozen_record(store, active, seed)
+    active = referee.active()[0]
+    frozen = frozen_record(store, JsonlStore(root / "referee"), active, seed)
     (root / "frozen.json").write_text(json.dumps(frozen, indent=2, default=str), encoding="utf-8")
     envelope = (frozen["decision"] or {}).get("envelope")
     if envelope:
@@ -148,7 +187,7 @@ def run_evolve(
         "frozen_decision": frozen["decision_id"],
         "instructions": result.instructions.version,
         "generations": [r.to_payload() for r in result.generations],
-        "keyid": signer.keyid,
+        "decision_public_key": referee.public_key(),
         "wall_s": round(time.perf_counter() - started, 1),
     }
     (root / "result.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")

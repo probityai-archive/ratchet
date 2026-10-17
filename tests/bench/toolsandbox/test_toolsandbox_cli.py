@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,10 @@ from ratchet.bench.toolsandbox.runner import seed_harness
 
 
 @pytest.fixture
-def offline(monkeypatch: pytest.MonkeyPatch, all_cases: list[ToolSandboxCase]) -> None:
+def offline(
+    monkeypatch: pytest.MonkeyPatch, all_cases: list[ToolSandboxCase], inprocess_referee: Callable[..., Any]
+) -> None:
+    monkeypatch.setattr(cli, "ProcessReferee", inprocess_referee)
     monkeypatch.setenv("RATCHET_BASE_URL", "http://endpoint.test/v1")
     monkeypatch.setenv("RATCHET_API_KEY", "k")
     monkeypatch.setattr(cli, "keyring_key", lambda: None)
@@ -263,7 +267,8 @@ def test_evolve_wires_the_lab_and_writes_the_result(
     root = tmp_path / "evolve" / "t"
     result = json.loads((root / "result.json").read_text(encoding="utf-8"))
     assert result["final_harness"] == seed_harness().version and result["config"]["max_evals"] == 2
-    assert result["config"]["cases"] == 16 and len(seen["lab"].cases) == 16
+    assert result["config"]["cases"] == 16 and 0 < len(seen["lab"].cases) < 16
+    assert all(c.split != "heldout" for c in seen["lab"].cases)  # held-out cases are the referee's
     assert seen["generations"] == 2 and seen["lab"].max_evals == 2
     assert seen["lab"].suite_digest == result["config"]["split_record"]["digest"]
     assert "hello" in (root / "log.txt").read_text(encoding="utf-8")

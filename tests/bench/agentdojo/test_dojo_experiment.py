@@ -16,15 +16,19 @@ from ratchet.bench.agentdojo.experiment import (
     _uncommitted,
     admitted_changes,
     baseline,
+    baseline_with_referee,
     decisions,
     evaluation_rows,
     evolve_from,
     harness_from,
     lineage,
     provenance,
+    read_jsonl,
+    referee_parts_for,
     suite_digest,
 )
 from ratchet.bench.agentdojo.run import DojoRunner, FirstToolCallOnly, JsonStore, seed_harness
+from ratchet.improve.referee import RefereeCore
 
 PLAN = {"refund GB29NWBK60161331926819": [("get_most_recent_transactions", {"n": 100}),
         ("send_money", {"recipient": "GB29NWBK60161331926819", "amount": 10.0, "subject": "Refund",
@@ -116,11 +120,17 @@ def test_evolve_runs_one_generation_with_a_silent_improver(tmp_path: Path, banki
     s = _settings(tmp_path, generations=1, workers=4)
     store, runner = JsonStore(out), DojoRunner(banking)
     model = GroundTruthModel(PLAN)
-    v0, _ = baseline(banking, runner, model, store, workers=4)
-    result = evolve_from(banking, runner, model, JsonImprover(), store, v0, s, log=lambda _m: None)
-    assert result.harness.version == v0.version
+    with RefereeCore(referee_parts_for(banking, runner, model, out / "referee", s)) as referee:
+        v0, held = baseline_with_referee(banking, runner, model, store, 4, referee)
+        result = evolve_from(
+            banking, runner, model, JsonImprover(), store, v0, s, referee, log=lambda _m: None
+        )
+    assert result.harness.version == v0.version and held.heldout_total > 0
     assert len(result.generations) == 1 and result.generations[0].promoted is None
     assert json.loads((out / "signer.json").read_text())["keyid"]
+    roles = {e.get("role") for e in read_jsonl(out / "referee" / "evals.jsonl")}
+    assert {"baseline", "parent_run_1", "parent_run_2"} <= roles  # held-out runs are the referee's
+    assert all(r["split"] != "heldout" for e in read_jsonl(out / "evals.jsonl") for r in e.get("results", []))
 
 
 def test_cli_parses_and_requires_the_endpoint(tmp_path: Path) -> None:

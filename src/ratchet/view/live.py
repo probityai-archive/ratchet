@@ -12,7 +12,6 @@ from typing import Any
 from rich.console import Console
 from rich.text import Text
 
-from ratchet.store import WATCHABLE, ChangeEvent
 from ratchet.view.data import ViewStore, decision_info, eval_mode
 from ratchet.view.show import clip
 
@@ -143,38 +142,10 @@ def format_change(
     return None if body is None else _line(collection, body, now)
 
 
-def raw_watch(
-    store: ViewStore,
-    name: str,
-    *,
-    timeout_s: float | None,
-    resume_after: dict[str, Any] | None,
-    poll_ms: int = 250,
-) -> Iterator[ChangeEvent]:
-    """A change stream on a collection the store does not list as watchable (the activation log)."""
-    deadline = None if timeout_s is None else time.monotonic() + timeout_s
-    with store.db[name].watch(
-        [], full_document="updateLookup", resume_after=resume_after, max_await_time_ms=poll_ms
-    ) as stream:
-        while deadline is None or time.monotonic() < deadline:
-            change = stream.try_next()
-            if change is None:
-                continue
-            yield ChangeEvent(
-                change["operationType"],
-                name,
-                change["documentKey"]["_id"],
-                change.get("fullDocument"),
-                change["_id"],
-            )
-
-
 def _watch(
     store: ViewStore, name: str, timeout_s: float | None, resume_after: dict[str, Any] | None
 ) -> Iterator[Any]:
-    if name in WATCHABLE:
-        return store.watch(name, timeout_s=timeout_s, resume_after=resume_after)
-    return raw_watch(store, name, timeout_s=timeout_s, resume_after=resume_after)
+    return store.watch(name, timeout_s=timeout_s, resume_after=resume_after)
 
 
 def follow(

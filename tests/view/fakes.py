@@ -195,46 +195,10 @@ class FakeNode:
             yield from c.walk()
 
 
-class FakeStream:
-    def __init__(self, changes: list[dict[str, Any]]) -> None:
-        self.changes = list(changes)
-
-    def __enter__(self) -> FakeStream:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-    def try_next(self) -> dict[str, Any] | None:
-        return self.changes.pop(0) if self.changes else None
-
-
-class FakeCollection:
-    def __init__(self, docs: list[dict[str, Any]], changes: list[dict[str, Any]]) -> None:
-        self.docs, self.changes = docs, changes
-        self.watch_args: list[dict[str, Any]] = []
-
-    def find_one(self, flt: dict[str, Any] | None = None) -> dict[str, Any] | None:
-        return self.docs[0] if self.docs else None
-
-    def watch(self, pipeline: list[Any], **kw: Any) -> FakeStream:
-        self.watch_args.append(kw)
-        return FakeStream(self.changes)
-
-
-class FakeDb:
-    def __init__(self, store: FakeStore) -> None:
-        self.store = store
-
-    def __getitem__(self, name: str) -> FakeCollection:
-        return FakeCollection(self.store.collections.get(name, []), self.store.raw_changes.get(name, []))
-
-
 class FakeStore:
     def __init__(self) -> None:
         self.checkpoints: dict[str, dict[str, Any]] = {}
-        self.collections: dict[str, list[dict[str, Any]]] = {}
-        self.raw_changes: dict[str, list[dict[str, Any]]] = {}
+        self.active: dict[str, Any] | None = None
         self.harnesses: dict[str, Harness] = {}
         self.eval_docs: list[dict[str, Any]] = []
         self.decision_docs: list[dict[str, Any]] = []
@@ -282,9 +246,8 @@ class FakeStore:
     ) -> Iterator[ChangeEvent]:
         yield from self.changes.get(collection, [])
 
-    @property
-    def db(self) -> FakeDb:
-        return FakeDb(self)
+    def active_record(self) -> dict[str, Any] | None:
+        return self.active
 
     def close(self) -> None:
         self.closed = True

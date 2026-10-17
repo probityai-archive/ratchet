@@ -161,22 +161,50 @@ def test_activation_moves_only_from_the_expected_pointer(tmp_path: Path, key: Ed
 
 
 def test_the_loop_runs_on_the_file_store(tmp_path: Path, key: Ed25519PrivateKey) -> None:
+    """The improver and the referee each on a signed file store of their own."""
     from improve.fakes import FakeRunCase, FakeSimulator, LocalRunner
     from improve.test_loop import CASES, RoutingChat
     from improve.test_loop import SEED as LOOP_SEED
 
     from ratchet.improve.loop import Lab, evolve
     from ratchet.improve.receipt import Signer, verify
+    from ratchet.improve.referee import RefereeCore, RefereeParts
 
-    store, signer = FileStore(tmp_path, key=key), Signer.generate()
-    lab = Lab(cases=CASES, run_case=FakeRunCase(), simulator=FakeSimulator(), runner=LocalRunner(),
-              signer=signer, activator=FileActivator(store), improver=RoutingChat(), workers=4, max_evals=4,
-              suite_digest="suite", max_clusters=1)  # fmt: skip
-    result = evolve(store, model=None, generations=1, lab=lab, seed=LOOP_SEED)
-    reopened = FileStore(tmp_path, trusted=key.public_key())
-    admitted = reopened.decisions({"admitted": True})
+    signer = Signer.generate()
+    improver_store = FileStore(tmp_path / "improver", key=key)
+    referee_store = FileStore(tmp_path / "referee", key=signer.private_key)
+    referee = RefereeCore(
+        RefereeParts(
+            cases=[c for c in CASES if c.split == "heldout"],
+            run_case=FakeRunCase(),
+            model=None,
+            simulator=FakeSimulator(),
+            runner=LocalRunner(),
+            signer=signer,
+            store=referee_store,
+            activator=FileActivator(referee_store),
+            suite_digest="suite",
+            workers=4,
+        )
+    )
+    lab = Lab(
+        cases=[c for c in CASES if c.split != "heldout"],
+        run_case=FakeRunCase(),
+        simulator=FakeSimulator(),
+        runner=LocalRunner(),
+        referee=referee,
+        improver=RoutingChat(),
+        workers=4,
+        max_evals=4,
+        suite_digest="suite",
+        max_clusters=1,
+    )
+    result = evolve(improver_store, model=None, generations=1, lab=lab, seed=LOOP_SEED)
+    held = FileStore(tmp_path / "referee", trusted=signer.public_key)
+    admitted = held.decisions({"admitted": True})
     assert admitted and result.generations[0].promoted is not None
     for d in admitted:
         payload = verify(base64.b64decode(d["envelope"]), {signer.keyid: signer.public_key})
         assert payload["candidate"] == d["candidate"]
-    assert FileActivator(reopened).active()[0] == result.generations[0].promoted
+    assert FileActivator(held).active()[0] == result.generations[0].promoted
+    assert not FileStore(tmp_path / "improver", trusted=key.public_key()).decisions()

@@ -12,7 +12,16 @@ from ratchet_cases.types import sha256_hex
 from ratchet.canonical import canonical_json
 
 Doc = dict[str, Any]
-WATCHABLE = ("harness_versions", "runs", "traces", "evals", "decisions", "failures", "checkpoints")
+WATCHABLE = (
+    "harness_versions",
+    "runs",
+    "traces",
+    "evals",
+    "decisions",
+    "failures",
+    "checkpoints",
+    "activations",
+)
 
 
 class IntegrityError(RuntimeError):

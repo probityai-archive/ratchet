@@ -12,9 +12,11 @@ failures --> diagnose --> propose --> replay --> fresh evaluation --> admit --> 
 2. The improver clusters the failures and proposes guards, procedures and prompt sections. It sees
    training material only, plus lessons retrieved from earlier attempts on similar failures.
 3. Each guard is replayed over the recorded traces. No model is called.
-4. Candidates that survive run on held-out cases, with the parent run twice and the candidate run twice.
-5. The admission rule decides. The decision, with its evidence digests, is signed.
-6. Activation moves the active-version pointer in one database transaction that checks the receipt.
+4. Candidates that survive run on the training cases in the loop's process and on the held-out cases at
+   the referee, which also runs the parent twice on them and the candidate a second time to confirm.
+5. The referee applies the admission rule and signs the decision with a key the loop never holds.
+6. The referee activates: it moves the active-version pointer only from the expected version, after it
+   checks the stored receipt.
 
 ## The case suite (`probity-ratchet-cases/`)
 
@@ -69,6 +71,7 @@ than a string, runs too long or kills its process blocks the call, and the error
 | `checkpoints` | The state after each committed world call, so a killed run resumes without repeating a side effect |
 | `embedding_cache` | Embeddings keyed by content |
 | `cases` (held-out database) | Held-out cases, in a separate database that the improver's role has no privilege on |
+| held-out database, every collection | The referee's records: held-out runs and traces, referee-side replays, decisions and activation |
 
 Every write is idempotent. A second write of the same document is a no-op, and a second write of different
 content under the same id raises an error instead of replacing history.
@@ -85,6 +88,20 @@ content under the same id raises an error instead of replacing history.
 
 The improver's database user holds the working database and nothing on held-out cases. The boundary is a
 server-side role, so a bug in Ratchet's code cannot widen it.
+
+## The referee
+
+The loop (`ratchet.improve.loop`) holds training cases only. Everything that reads a held-out case or its
+trace belongs to the referee (`ratchet.improve.referee`): the parent's held-out runs, each candidate's
+held-out run and confirming run, the referee-side replay over every passing and benign-twin trace, the
+admission rule, the decision signature and activation. `ProcessReferee` runs it as its own Python process,
+built there by a factory (`module:function`) from a JSON config, and the two speak JSON lines: the referee
+parses data and never unpickles anything the loop sends. The loop gets back counts (held-out passes, the
+admission flag, the names of failed gates, the number of stable recoveries, the receipt digest) and keeps
+them as `verdict` records, which the version archive reads; it never receives a held-out case id, outcome or
+trace. With Atlas the referee writes to `<db>_heldout`, which the improver's role cannot read
+(`tests/store/test_store_roles.py`); with the file store it writes beside it (`RATCHET_REFEREE_STORE_DIR`,
+signed with the decision key). `ratchet show`, `verify` and `report` read both stores, as an auditor does.
 
 ## Receipts
 

@@ -40,18 +40,18 @@ def test_recording_runner_keeps_trace_and_simulation(tmp_path: Path) -> None:
 def test_frozen_record_names_the_admitting_decision(tmp_path: Path) -> None:
     store = JsonlStore(tmp_path)
     seed = seed_harness("airline")
-    assert frozen_record(store, None, seed)["decision"] is None
+    assert frozen_record(store, store, None, seed)["decision"] is None
     child = seed.child(created_by="improver")
     store.put_harness(seed)
     store.put_harness(child)
-    assert frozen_record(store, seed.version, seed)["harness"]["version"] == seed.version
+    assert frozen_record(store, store, seed.version, seed)["harness"]["version"] == seed.version
     envelope = base64.b64encode(b'{"payload": "x"}').decode("ascii")
     store.put_decision({"candidate": child.version, "admitted": False}, decision_id="d0")
     store.put_decision({"candidate": child.version, "admitted": True, "envelope": envelope}, decision_id="d1")
-    out = frozen_record(store, child.version, seed)
+    out = frozen_record(store, store, child.version, seed)
     assert out["harness"] == asdict(child) and out["decision_id"] == "d1"
     store.put_harness(seed.child(created_by="human", procedures=[]))
-    lone = frozen_record(store, store.read("harnesses")[-1]["version"], seed)
+    lone = frozen_record(store, store, store.read("harnesses")[-1]["version"], seed)
     assert lone["decision"] is None
 
 

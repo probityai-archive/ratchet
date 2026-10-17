@@ -180,6 +180,11 @@ class Store:
             self.setup(wait_search=False)
         return self.db[name]
 
+    def active_record(self) -> Doc | None:
+        """The active pointer (version, revision, decision id, receipt digest), or None before a bootstrap."""
+        doc: Doc | None = self._r("active").find_one({})
+        return doc
+
     def _r(self, name: str) -> Collection[Doc]:
         """A collection for reading: never creates or changes schema, so a read cannot fail on index setup."""
         return self.db[name]

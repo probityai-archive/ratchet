@@ -15,31 +15,30 @@ batch: clusters of a later generation that neither version has seen. Both propos
 the same parent; the challenger replaces the champion only if its admission yield (admitted / proposed) on
 the batch is strictly higher. With no unseen cluster there is no comparison and no level-2 claim.
 
-The firewall: diagnosis and proposal read training traces only. Held-out cases and their traces reach the
-admission check (the referee) and nothing else.
+The firewall: the loop holds training cases only. Held-out cases, their runs and traces, the referee-side
+replay, the admission rule, the decision signature and activation all belong to the referee
+(`ratchet.improve.referee`), a separate process with its own key, which answers with totals.
 """
 
 from __future__ import annotations
 
-import base64
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 from ratchet_cases import released_digest
 from ratchet_cases.types import Trace, sha256_hex
 
 from ratchet.canonical import canonical_json
-from ratchet.improve.activate import ActivationError, Activator
-from ratchet.improve.admit import Decision, admit, awaiting_confirmation
+from ratchet.improve.activate import ActivationError
 from ratchet.improve.diagnose import FailureCluster, diagnose
 from ratchet.improve.evaluate import CaseLike, EvalReport, RunCase, evaluate_many
-from ratchet.improve.evaluator import evaluator_identity, require_same
+from ratchet.improve.evaluator import evaluator_identity
 from ratchet.improve.llm import Chat, Meter, ask_json
 from ratchet.improve.overfit import Literals, lint, training_literals
 from ratchet.improve.propose import SEED, Candidate, Instructions, propose, revise_guard
-from ratchet.improve.receipt import Signer, receipt
+from ratchet.improve.referee import Referee, Totals, Verdict
 from ratchet.improve.replay import GuardRunner, ReplayReport, WalkCache, replay
 from ratchet.improve.sim import Simulator
 from ratchet.types import Guard, Harness, Procedure
@@ -68,12 +67,11 @@ class ImproveStore(Protocol):
 class Lab:
     """Everything the loop needs besides the store and the agent model."""
 
-    cases: Sequence[CaseLike]
+    cases: Sequence[CaseLike]  # training cases; held-out cases belong to the referee
     run_case: RunCase
     simulator: Simulator
     runner: GuardRunner
-    signer: Signer
-    activator: Activator
+    referee: Referee
     improver: Chat | None = None
     workers: int = 8
     repeats: int = 1
@@ -95,9 +93,9 @@ class Lab:
         return frozenset(families) - evaluation, frozenset(evaluation)
 
     @property
-    def decision_cases(self) -> list[CaseLike]:
-        """Train and held-out cases. The audit cohort is never used for any decision."""
-        return [c for c in self.cases if c.split in ("train", "heldout")]
+    def train_cases(self) -> list[CaseLike]:
+        """The cases the improver runs. The audit cohort is never used for any decision."""
+        return [c for c in self.cases if c.split == "train"]
 
     log: Callable[[str], None] = lambda _msg: None
 
@@ -186,9 +184,8 @@ class _Tried:
     replay: ReplayReport | None = None
     status: str = "proposed"
     lint_hits: list[dict[str, str]] = field(default_factory=list)
-    decision: Decision | None = None
-    report: EvalReport | None = None
-    confirm: EvalReport | None = None
+    verdict: Verdict | None = None
+    report: EvalReport | None = None  # the training run; held-out runs stay with the referee
 
 
 @dataclass
@@ -197,7 +194,8 @@ class _Gen:
 
     gen: int
     parent: Harness
-    parent_runs: tuple[EvalReport, EvalReport]
+    parent_eval: EvalReport  # the parent's training run
+    parent_totals: tuple[Totals, Totals]
     evaluator: dict[str, Any]
     walks: WalkCache
     literals: Literals
@@ -208,19 +206,14 @@ class _Gen:
     inspiration: Harness | None = None
     archive_context: dict[str, Any] = field(default_factory=dict)
     task_stats: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
-    receipts: dict[str, tuple[str, str]] = field(default_factory=dict)  # candidate -> (decision id, digest)
-
-    @property
-    def parent_eval(self) -> EvalReport:
-        return self.parent_runs[0]
 
 
-def _score(r: EvalReport) -> dict[str, int]:
+def _score(r: EvalReport, heldout_passed: int, heldout_total: int) -> dict[str, int]:
     return {
         "train_passed": len(r.passed("train")),
         "train_total": r.count("train"),
-        "heldout_passed": len(r.passed("heldout")),
-        "heldout_total": r.count("heldout"),
+        "heldout_passed": heldout_passed,
+        "heldout_total": heldout_total,
     }
 
 
@@ -354,92 +347,24 @@ def propose_instructions(
     return Instructions.build(text, parent=champion.version)
 
 
-def _decide(
+def _verdict(
     store: ImproveStore,
     lab: Lab,
-    model: Any,
     g: _Gen,
     harness: Harness,
     report: EvalReport,
-    replays: dict[str, ReplayReport],
+    targets: Sequence[FailureCluster],
+    guard_clusters: dict[str, str],
     context: dict[str, Any],
-    targets: Sequence[FailureCluster] = (),
-) -> tuple[Decision, EvalReport | None]:
-    """Admit or reject. A candidate that clears every gate on its first run gets one more fresh held-out
-    run to confirm; only the final decision is signed and stored. Returns it and the confirming run."""
-    require_same(g.evaluator, evaluator_identity(lab.cases, lab.model_config, lab.suite_digest))
-    composed = _composed_replay(g, lab, harness, targets)
-    if composed is not None:
-        _persist_replay(store, g, composed)
-    kw: dict[str, Any] = {
-        "parent_runs": g.parent_runs,
-        "cand_eval": report,
-        "replays": replays,
-        "composed": composed,
-        "literals": g.literals,
-        "visible_case_ids": g.visible,
-        "evaluator": g.evaluator,
-        "context": context,
-    }
-    d = admit(g.parent, harness, confirm_eval=None, **kw)
-    confirm: EvalReport | None = None
-    if awaiting_confirmation(d):
-        heldout = [c for c in lab.cases if c.split == "heldout"]
-        confirm = evaluate_many(
-            [harness], heldout, lab.run_case, model, workers=lab.workers, repeats=lab.repeats
-        )[0]
-        _persist_eval(store, confirm, {"generation": g.gen, "role": "confirm", "harness": harness.version})
-        d = admit(g.parent, harness, confirm_eval=confirm, **kw)
-    env = receipt(d, lab.signer)
-    decision_id = f"{d.parent}->{d.candidate}"
-    store.put_decision(
-        {**d.to_payload(), "envelope": base64.b64encode(env).decode("ascii"), "keyid": lab.signer.keyid},
-        decision_id=decision_id,
+) -> Verdict:
+    v = lab.referee.decide(g.gen, harness, report, targets, guard_clusters, g.literals, g.visible, context)
+    g.rec.decisions.append(v.decision_id)
+    # The improver keeps the referee's answer, totals only, beside its own runs.
+    store.put_eval(
+        {"type": "verdict", "generation": g.gen, "parent": g.parent.version, **asdict(v)},
+        eval_id=f"verdict-{v.decision_id}",
     )
-    g.receipts[d.candidate] = (decision_id, sha256_hex(env))
-    g.rec.decisions.append(f"{d.parent}->{d.candidate}")
-    return d, confirm
-
-
-def _referee_sets(g: _Gen) -> tuple[list[Trace], list[Trace]]:
-    """The referee's clearance traces: every passing parent trace and every benign-twin trace, held-out
-    included. Their detailed results stay evaluator-side."""
-    passing = [t for t in g.parent_eval.traces if t.outcome.passed]
-    benign = [t for t in g.parent_eval.traces if t.case_id in g.benign_ids]
-    return passing, benign
-
-
-def _composed_replay(
-    g: _Gen, lab: Lab, harness: Harness, clusters: Sequence[FailureCluster]
-) -> ReplayReport | None:
-    """Every guard of the candidate at once, to catch interactions; None when it adds no guard."""
-    if len(harness.guards) == len(g.parent.guards) or not clusters:
-        return None
-    members = [m for c in clusters for m in c.members]
-    failing = {k: v for c in clusters for k, v in c.traces.items()}
-    passing, benign = _referee_sets(g)
-    return replay(harness.guards, members, failing, passing, g.walks, lab.runner, benign)
-
-
-def _referee_replays(
-    store: ImproveStore, tried: list[_Tried], g: _Gen, clusters: dict[str, FailureCluster], lab: Lab
-) -> dict[str, ReplayReport]:
-    """Rule 1 on the referee's side: every passing trace of the parent and every benign-twin trace,
-    held-out included."""
-    passing, benign = _referee_sets(g)
-    out: dict[str, ReplayReport] = {}
-    for t in tried:
-        for guard in t.candidate.new_guards(g.parent):
-            cl = clusters[t.candidate.cluster_id]
-            out[guard.id] = replay(guard, cl.members, cl.traces, passing, g.walks, lab.runner, benign)
-            _persist_replay(store, g, out[guard.id])
-    return out
-
-
-def _persist_replay(store: ImproveStore, g: _Gen, report: ReplayReport) -> None:
-    """Protected replay detail is evaluator-side evidence: stored, never shown to the proposer."""
-    store.put_eval({"type": "replay", "role": "referee", "generation": g.gen, "parent": g.parent.version,
-                    **report.to_payload()})  # fmt: skip
+    return v
 
 
 def _promote(
@@ -448,41 +373,40 @@ def _promote(
     model: Any,
     g: _Gen,
     admitted: list[_Tried],
-    referee: dict[str, ReplayReport],
     clusters: dict[str, FailureCluster],
-) -> tuple[Harness, EvalReport, Decision] | None:
+) -> tuple[Harness, EvalReport, Verdict] | None:
     """The best admitted candidate, or the composition of all of them when that is admitted and better."""
     if not admitted:
         return None
 
     def key(t: _Tried) -> tuple[int, int, int]:
-        assert t.report is not None
-        return (len(t.report.passed("heldout")), len(t.report.passed("train")), -t.report.cost().model_calls)
+        assert t.report is not None and t.verdict is not None
+        return (t.verdict.heldout_passed, len(t.report.passed("train")), -t.report.cost().model_calls)
 
     best = max(admitted, key=key)
-    assert best.report is not None and best.decision is not None
+    assert best.report is not None and best.verdict is not None
     picks = list({t.candidate.cluster_id: t for t in sorted(admitted, key=key)}.values())
     if len(picks) < 2:
-        return best.candidate.harness, best.report, best.decision
+        return best.candidate.harness, best.report, best.verdict
     combo = compose(g.parent, [t.candidate for t in picks])
     report = evaluate_many(
-        [combo], lab.decision_cases, lab.run_case, model, workers=lab.workers, repeats=lab.repeats
+        [combo], lab.train_cases, lab.run_case, model, workers=lab.workers, repeats=lab.repeats
     )[0]
     _persist_eval(store, report, {"generation": g.gen, "role": "composite"})
-    d, _ = _decide(
+    guarded = [t for t in picks if t.candidate.kind == "guard"]
+    v = _verdict(
         store,
         lab,
-        model,
         g,
         combo,
         report,
-        referee,
+        [clusters[t.candidate.cluster_id] for t in guarded],
+        {x.id: t.candidate.cluster_id for t in guarded for x in t.candidate.new_guards(g.parent)},
         {"generation": g.gen, "composite_of": [t.candidate.id for t in picks], **g.archive_context},
-        [clusters[t.candidate.cluster_id] for t in picks if t.candidate.kind == "guard"],
     )
-    if d.admitted and len(report.passed("heldout")) > len(best.report.passed("heldout")):
-        return combo, report, d
-    return best.candidate.harness, best.report, best.decision
+    if v.admitted and v.heldout_passed > best.verdict.heldout_passed:
+        return combo, report, v
+    return best.candidate.harness, best.report, best.verdict
 
 
 def _families(cluster: FailureCluster, family_of: dict[str, str]) -> set[str]:
@@ -517,16 +441,17 @@ def evolve(
     parent, champion = seed, instructions
     challenger: Instructions | None = None
     seen: dict[str, set[str]] = {champion.version: set()}
-    train_cases = [c for c in lab.cases if c.split == "train"]
-    heldout_cases = [c for c in lab.cases if c.split == "heldout"]
+    if any(c.split == "heldout" for c in lab.cases):
+        raise ValueError("held-out cases belong to the referee; the loop takes training cases only")
+    train_cases = lab.train_cases
     visible = sorted(c.id for c in train_cases)
     benign_ids = {c.id for c in lab.cases if c.kind == "benign_twin"}
     family_of = {c.id: c.family for c in lab.cases}
     tune_families, eval_families = lab.family_split()
-    evaluator = evaluator_identity(lab.cases, lab.model_config, lab.suite_digest)
+    evaluator = lab.referee.start(evaluator_identity(train_cases, lab.model_config, lab.suite_digest))
     store.put_eval({"type": "evaluator", **evaluator}, eval_id=f"evaluator-{evaluator['version']}")
     store.put_harness(parent)
-    active, revision = lab.activator.bootstrap(parent.version)
+    active, revision = lab.referee.bootstrap(parent.version)
     if active != parent.version:
         raise ActivationError(f"the active harness is {active}, not the seed {parent.version}; rebase first")
     _record_instructions(store, champion, seen[champion.version], 0)
@@ -535,24 +460,23 @@ def evolve(
         started = time.perf_counter()
         meter = Meter()
         rec = GenerationRecord(gen, parent.version)
-        # The parent runs twice, fresh, every generation: the noise floor is measured, never assumed.
-        parent_eval = evaluate_many([parent], lab.decision_cases, lab.run_case, model, workers=lab.workers,
+        # The parent runs on the training cases here and twice, fresh, on the held-out cases at the referee:
+        # the noise floor is measured, never assumed.
+        parent_eval = evaluate_many([parent], train_cases, lab.run_case, model, workers=lab.workers,
                                     repeats=lab.repeats)[0]  # fmt: skip
-        _persist_eval(store, parent_eval, {"generation": gen, "role": "parent_run_1"})
-        parent_rerun = evaluate_many([parent], heldout_cases, lab.run_case, model, workers=lab.workers,
-                                     repeats=lab.repeats)[0]  # fmt: skip
-        _persist_eval(store, parent_rerun, {"generation": gen, "role": "parent_run_2"})
+        _persist_eval(store, parent_eval, {"generation": gen, "role": "parent_train"})
+        p1, p2 = lab.referee.parent_runs(gen, parent, parent_eval)
         rec.level1 = {
             "parent": parent.version,
             "evaluator": evaluator["version"],
-            "parent_score": _score(parent_eval),
-            "parent_run_2_heldout_passed": len(parent_rerun.passed("heldout")),
+            "parent_score": _score(parent_eval, p1.heldout_passed, p1.heldout_total),
+            "parent_run_2_heldout_passed": p2.heldout_passed,
         }
         lab.log(f"gen {gen}: parent {parent.version} {rec.level1}")
 
         # The firewall: from here to the shortlist, only training traces are read.
         train = parent_eval.train_traces()
-        g = _Gen(gen, parent, (parent_eval, parent_rerun), evaluator, WalkCache(lab.simulator),
+        g = _Gen(gen, parent, parent_eval, (p1, p2), evaluator, WalkCache(lab.simulator),
                  training_literals(train), visible, benign_ids, rec, meter)  # fmt: skip
         if select_parent is not None:
             choice = select_parent(parent.version, gen)
@@ -585,7 +509,7 @@ def evolve(
         failures = sum(1 for _, text in rejected if "model call failed" in text)
         if failures:
             rec.note = f"improver model calls failed for {failures} proposal task(s)"
-        reports, referee = _evaluate_and_admit(
+        reports = _evaluate_and_admit(
             store,
             lab,
             model,
@@ -595,12 +519,12 @@ def evolve(
             clusters,
         )
         admitted = [t for t in tried if t.status == "admitted"]
-        promoted = _promote(store, lab, model, g, admitted, referee, {c.id: c for c in clusters})
+        promoted = _promote(store, lab, model, g, admitted, {c.id: c for c in clusters})
         if promoted is not None:
-            child, child_eval, decision = promoted
+            child, child_eval, verdict = promoted
             store.put_harness(child)
-            decision_id, digest = g.receipts[child.version]
-            act = lab.activator.activate(
+            decision_id, digest = verdict.decision_id, verdict.receipt_digest
+            act = lab.referee.activate(
                 candidate=child.version,
                 expected=parent.version,
                 expected_revision=revision,
@@ -619,12 +543,12 @@ def evolve(
             }
             rec.level1 |= {
                 "promoted": parent.version,
-                "child_score": _score(child_eval),
-                "rates": decision.rates,
+                "child_score": _score(child_eval, verdict.heldout_passed, verdict.heldout_total),
+                "rates": verdict.rates,
             }
         rec.level1 |= {
             "candidates": len(tried),
-            "evaluated": sum(1 for t in tried if t.decision),
+            "evaluated": sum(1 for t in tried if t.verdict),
             "admitted": len(admitted),
         }
 
@@ -726,38 +650,29 @@ def _evaluate_and_admit(
     tried: list[_Tried],
     frozen_ids: set[str] | None,
     clusters: list[FailureCluster],
-) -> tuple[list[EvalReport], dict[str, ReplayReport]]:
+) -> list[EvalReport]:
+    """The shortlist runs on the training cases here; the referee runs each on the held-out cases, replays its
+    guards over the protected traces, admits or rejects it and signs the decision."""
     shortlist = _shortlist(tried, lanes_for(frozen_ids, lab.max_evals))
     reports = evaluate_many(
         [t.candidate.harness for t in shortlist],
-        lab.decision_cases,
+        lab.train_cases,
         lab.run_case,
         model,
         workers=lab.workers,
         repeats=lab.repeats,
     )
-    referee = _referee_replays(store, shortlist, g, {c.id: c for c in clusters}, lab)
+    by_id = {c.id: c for c in clusters}
     for t, report in zip(shortlist, reports, strict=True):
         t.report = report
         _persist_eval(store, report, {"generation": g.gen, "role": "candidate", "candidate": t.candidate.id})
-        new_ids = {x.id for x in t.candidate.new_guards(g.parent)}
         ctx = {"generation": g.gen, "arm": t.arm, **t.candidate.to_payload(), **g.archive_context}
-        t.decision, t.confirm = _decide(
-            store,
-            lab,
-            model,
-            g,
-            t.candidate.harness,
-            report,
-            {k: v for k, v in referee.items() if k in new_ids},
-            ctx,
-            [c for c in clusters if c.id == t.candidate.cluster_id],
+        guards = {x.id: t.candidate.cluster_id for x in t.candidate.new_guards(g.parent)}
+        t.verdict = _verdict(
+            store, lab, g, t.candidate.harness, report, [by_id[t.candidate.cluster_id]], guards, ctx
         )
-        if t.decision.admitted:
-            t.status = "admitted"
-        else:
-            t.status = "rejected: " + ", ".join(c.name for c in t.decision.checks if not c.passed)
-    return reports, referee
+        t.status = "admitted" if t.verdict.admitted else "rejected: " + ", ".join(t.verdict.failed)
+    return reports
 
 
 def _level2(
@@ -793,11 +708,11 @@ def _level2(
             s.screened_out += t.status.startswith("screened")
             s.replay_tested += t.replay is not None
             s.replay_passed += bool(t.replay and t.replay.passed)
-            s.evaluated += t.decision is not None
+            s.evaluated += t.verdict is not None
             s.rejected += t.status.startswith(("rejected", "screened", "replay_failed"))
-            if t.status == "admitted" and t.decision is not None:
+            if t.status == "admitted" and t.verdict is not None:
                 s.admitted += 1
-                s.stable_recoveries += len(t.decision.check("heldout").evidence["stable_recoveries"])
+                s.stable_recoveries += t.verdict.stable_recoveries
         scored[arm] = s
     level2: dict[str, Any] = {
         "metric": "descendant admission yield",

@@ -25,6 +25,7 @@ from rich.text import Text
 
 from ratchet.improve.replay import GuardRunner, WalkCache
 from ratchet.improve.sim import Simulator
+from ratchet.store.union import ReadUnion
 from ratchet.types import Harness
 from ratchet.view import resume as resume_view
 from ratchet.view.data import (
@@ -56,6 +57,7 @@ from ratchet.view.verify import render_verify, trusted_keys, verify_decision, ve
 
 URI_ENV, DB_ENV = "RATCHET_MONGODB_URI", "RATCHET_DB"
 STORE_DIR_ENV, STORE_KEY_ENV = "RATCHET_STORE_DIR", "RATCHET_STORE_KEY"
+REFEREE_DIR_ENV, REFEREE_URI_ENV = "RATCHET_REFEREE_STORE_DIR", "RATCHET_REFEREE_MONGODB_URI"
 
 
 class CliError(Exception):
@@ -114,10 +116,16 @@ class LiveBackend:
         self._store: Any = None
 
     def open_store(self) -> AbstractContextManager[WriteStore]:
-        """The signed file store when RATCHET_STORE_DIR is set, else Atlas at RATCHET_MONGODB_URI."""
+        """The signed file store when RATCHET_STORE_DIR is set, else Atlas at RATCHET_MONGODB_URI; with the
+        referee's store beside it when there is one, so the views read held-out runs and decisions too."""
+        main = self._main_store()
+        referee = self._referee_reader()
+        self._store = main if referee is None else ReadUnion(main, referee)
+        return self._store  # type: ignore[no-any-return]
+
+    def _main_store(self) -> Any:
         if self.env.get(STORE_DIR_ENV):
-            self._store = self._file_store(Path(self.env[STORE_DIR_ENV]))
-            return self._store  # type: ignore[no-any-return]
+            return self._file_store(Path(self.env[STORE_DIR_ENV]))
         uri = self.env.get(URI_ENV)
         if not uri:
             raise CliError(
@@ -129,9 +137,24 @@ class LiveBackend:
         except ImportError as exc:
             need = "the Atlas store needs the atlas extra: pip install 'probity-ratchet[atlas]'"
             raise CliError(f"{need}: {exc}") from exc
-        store = Store(uri, self.env.get(DB_ENV, "ratchet"))
-        self._store = store
-        return store
+        return Store(uri, self.env.get(DB_ENV, "ratchet"))
+
+    def _referee_reader(self) -> Any:
+        """The referee's store, read-only, or None when this run has none yet."""
+        spec = self.referee_store()
+        if spec["kind"] == "file":
+            if not Path(spec["dir"]).is_dir():
+                return None
+            from ratchet.improve.receipt import TRUSTED_KEY_ENV
+            from ratchet.store.file_store import FileStore
+            from ratchet.verify.keys import DEFAULT_KEY_PATH, load_trusted_key
+
+            pinned = load_trusted_key(Path(self.env.get(TRUSTED_KEY_ENV) or DEFAULT_KEY_PATH))
+            return FileStore(Path(spec["dir"]), trusted=pinned)
+        from ratchet.store.atlas import Store
+
+        uri = self.env.get(REFEREE_URI_ENV) or self.env.get(URI_ENV, "")
+        return Store(uri, spec["db"])
 
     def _file_store(self, root: Path) -> Any:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -222,34 +245,54 @@ class LiveBackend:
 
         from ratchet.agent.guards import GuardRuntime
         from ratchet.agent.worker import run_case
-        from ratchet.improve.loop import Lab, evolve
-        from ratchet.improve.receipt import Signer
+        from ratchet.improve.loop import Lab, evolve, frozen_suite_digest
         from ratchet.improve.sandbox import SandboxRunner
         from ratchet.improve.worldsim import WorldSimulator
-        from ratchet.store.file_store import FileActivator, FileStore
 
         if self._store is None:
             raise CliError("evolve needs the store open first (open_store)")
-        activator: Any
-        if isinstance(self._store, FileStore):
-            activator = FileActivator(self._store)
-        else:
-            from ratchet.store.activation import MongoActivator
-
-            activator = MongoActivator(self._store.db.client, self._store.db.name)
-        with GuardRuntime() as runtime:
+        config = {
+            "cases": [c.id for c in cases if c.split == "heldout"],
+            "store": self.referee_store(),
+            "workers": workers,
+            "repeats": repeats,
+            "suite_digest": frozen_suite_digest(),
+        }
+        with (
+            self.referee(config) as referee,
+            GuardRuntime() as runtime,
+        ):
             lab = Lab(
-                cases=cases,
+                cases=[c for c in cases if c.split != "heldout"],
                 run_case=run_case,
                 simulator=WorldSimulator(all_cases()),
                 runner=SandboxRunner(runtime),
-                signer=Signer.for_decisions(),
-                activator=activator,
+                referee=referee,
                 workers=workers,
                 repeats=repeats,
                 log=log,
             )
             return evolve(store, model, generations, lab=lab, seed=self.seed())
+
+    def referee(self, config: Mapping[str, Any]) -> AbstractContextManager[Any]:
+        """The held-out side of `ratchet evolve`: the case-suite referee, in a process of its own."""
+        from ratchet.improve.referee import ProcessReferee
+
+        return ProcessReferee(
+            "ratchet.improve.referee_live:case_suite_parts", config, env=self._referee_env()
+        )
+
+    def _referee_env(self) -> dict[str, str]:
+        """The referee process's environment: this process's, plus this backend's store settings."""
+        return {**os.environ, **{k: v for k, v in self.env.items() if isinstance(v, str)}}
+
+    def referee_store(self) -> dict[str, Any]:
+        """Where the referee keeps held-out runs, decisions and activation: beside the file store, or the
+        Atlas held-out database, which the improver's database role cannot read."""
+        if self.env.get(STORE_DIR_ENV):
+            root = self.env.get(REFEREE_DIR_ENV) or f"{self.env[STORE_DIR_ENV].rstrip('/')}-referee"
+            return {"kind": "file", "dir": root}
+        return {"kind": "atlas", "db": f"{self.env.get(DB_ENV, 'ratchet')}_heldout"}
 
     def runner(self) -> AbstractContextManager[GuardRunner]:
         from ratchet.agent.guards import GuardRuntime
@@ -389,7 +432,9 @@ def cmd_evolve(args: argparse.Namespace, backend: Backend, console: Console) -> 
         def warn(msg: str) -> None:
             console.print(Text(msg, style="yellow"))
 
-        target: RunStore = store if sink is None else TelemetryStore(store, sink, cases, _label(args), warn)
+        # The loop gets the improver's store only, never the referee's.
+        run_store: RunStore = store.main if isinstance(store, ReadUnion) else store
+        target = run_store if sink is None else TelemetryStore(run_store, sink, cases, _label(args), warn)
         result = backend.evolve(
             target, backend.model(), args.generations, cases, args.workers, args.repeats, log
         )

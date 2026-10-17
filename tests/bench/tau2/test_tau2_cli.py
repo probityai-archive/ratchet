@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -67,10 +67,11 @@ class FakeMongo:
 
 
 @pytest.fixture
-def scripted(monkeypatch: pytest.MonkeyPatch) -> SayDone:
+def scripted(monkeypatch: pytest.MonkeyPatch, inprocess_referee: Callable[..., Any]) -> SayDone:
     model = SayDone()
     monkeypatch.setattr(cli, "ModelClient", lambda config: model)
     monkeypatch.setattr(cli, "Tau2Runner", lambda cfg: Tau2Runner(cfg, factory=fresh_factory()))
+    monkeypatch.setattr(cli, "ProcessReferee", inprocess_referee)
     monkeypatch.setenv("RATCHET_BASE_URL", "http://127.0.0.1:9/v1")
     monkeypatch.setenv("RATCHET_API_KEY", "k")
     monkeypatch.delenv("RATCHET_MONGODB_URI", raising=False)
@@ -307,7 +308,9 @@ def test_evolve_with_nothing_to_fix_freezes_the_seed(
     config = json.loads((root / "config.json").read_text(encoding="utf-8"))
     assert (config["train"], config["heldout"]) == (1, 1)
     assert (root / "signer.pub").read_bytes().startswith(b"-----BEGIN PUBLIC KEY-----")
-    assert len(list((root / "simulations").glob("*.json"))) >= 2
+    # The training conversation is the improver's; the held-out one is kept by the referee, apart from it.
+    assert len(list((root / "simulations").glob("*.json"))) == 1
+    assert len(list((root / "referee" / "simulations").glob("*.json"))) >= 1
     assert cli.load_harness(str(root / "frozen.json"), "airline").version == frozen["harness"]["version"]
     with pytest.raises(SystemExit, match="already has a run"):
         cli.main(args)
