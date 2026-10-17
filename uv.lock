@@ -1955,6 +1955,11 @@ wheels = [
 ]
 
 [[package]]
+name = "jcs-admit"
+version = "0.1.0"
+source = { git = "https://github.com/probityai/jcs-admit?subdirectory=python&rev=b69943787266702da3c02741dcc3a37643c7dc3e#b69943787266702da3c02741dcc3a37643c7dc3e" }
+
+[[package]]
 name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
@@ -4009,9 +4014,9 @@ dependencies = [
     { name = "agent-evidence-vectors" },
     { name = "cryptography" },
     { name = "httpx" },
+    { name = "jcs-admit" },
     { name = "probity-ratchet-cases" },
     { name = "probity-verify" },
-    { name = "probityai" },
     { name = "rich" },
 ]
 
@@ -4053,10 +4058,10 @@ requires-dist = [
     { name = "cryptography", specifier = ">=44" },
     { name = "gepa", marker = "extra == 'gepa'", specifier = "==0.1.4" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "jcs-admit", git = "https://github.com/probityai/jcs-admit?subdirectory=python&rev=b69943787266702da3c02741dcc3a37643c7dc3e" },
     { name = "litellm", marker = "extra == 'bench'", specifier = "==1.102.1" },
     { name = "probity-ratchet-cases", editable = "probity-ratchet-cases" },
     { name = "probity-verify", specifier = "==0.1.1" },
-    { name = "probityai", git = "https://github.com/probityai/jcs-admit?subdirectory=python&rev=58a48b2f33b55cafb72de9f187f0fa53eed74d95" },
     { name = "pymongo", marker = "extra == 'atlas'", specifier = ">=4.10" },
     { name = "pymongo", marker = "extra == 'bench'", specifier = ">=4.10" },
     { name = "raindrop-ai", marker = "extra == 'telemetry'", specifier = "==0.0.75" },
@@ -4101,11 +4106,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/49/58/53dc019ccfbbca461
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9e/57/159e958d57a093d3aa99e363cd470d10cc614b4ffbdf694eb52cb200d3fe/probity_verify-0.1.1-py3-none-any.whl", hash = "sha256:e5788644f64d4faf73d999f9b8371f761141493403f642659ba0ad36a15ef6cf", size = 59833, upload-time = "2026-10-15T22:37:15.112Z" },
 ]
-
-[[package]]
-name = "probityai"
-version = "0.1.0"
-source = { git = "https://github.com/probityai/jcs-admit?subdirectory=python&rev=58a48b2f33b55cafb72de9f187f0fa53eed74d95#58a48b2f33b55cafb72de9f187f0fa53eed74d95" }
 
 [[package]]
 name = "propcache"

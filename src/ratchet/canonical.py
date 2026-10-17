@@ -1,4 +1,4 @@
-"""RFC 8785 canonical JSON for every record Ratchet signs or digests, through the `probityai.jcs` binding.
+"""RFC 8785 canonical JSON for every record Ratchet signs or digests, through the `jcs_admit` binding.
 
 `canonical_json` admits the JSON text Python writes and returns its RFC 8785 form from the `jcs-admit` crate:
 members sorted by UTF-16 code units, numbers in ECMAScript form (`1.0` is `1`, `1e-07` is `1e-7`), no
@@ -20,7 +20,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from probityai import jcs
+import jcs_admit
 
 CANONICALIZATION = "rfc8785"
 
@@ -28,7 +28,7 @@ CANONICALIZATION = "rfc8785"
 def canonical_json(obj: Any) -> bytes:
     """RFC 8785 canonical JSON bytes of `obj`, the input to every digest and signature."""
     text = json.dumps(obj, ensure_ascii=False, allow_nan=False).encode("utf-8")
-    return jcs.admit_with(text, max_bytes=None)
+    return jcs_admit.admit_with(text, max_bytes=None)
 
 
 def _sorted_keys_json(obj: Any) -> bytes:

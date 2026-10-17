@@ -53,7 +53,7 @@ Clean-environment result for the earlier pins (`probity-verify==0.1.0`, `agent-e
 
 `probity-verify` has no DSSE or Ratchet-payload support of its own. The adapter `ratchet_decision/v1`
 (`src/ratchet/verify/adapter.py`) is the extension point its `adapters=` argument provides. Every PAE, signature
-and signature check, for signing and for verifying, goes through `probityai.dsse`, the binding of the `dsse` crate;
+and signature check, for signing and for verifying, goes through `jcs_admit.dsse`, the binding of the `dsse` crate;
 `dsse.py` adds only the structural read and the rule that a key is tried only when a signature entry names it.
 Two other implementations check it: the tests keep the earlier pure-Python reader (`tests/verify/python_dsse.py`)
 and require it to agree with the binding on honest, malformed and forged envelopes, and `securesystemslib`

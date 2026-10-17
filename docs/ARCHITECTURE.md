@@ -115,7 +115,7 @@ ratchet.verify.results` checks it ([VERIFY.md](VERIFY.md#referee-results-files))
 
 ## Receipts
 
-A decision is RFC 8785 canonical JSON (`ratchet.canonical.canonical_json`, through the `probityai.jcs`
+A decision is RFC 8785 canonical JSON (`ratchet.canonical.canonical_json`, through the `jcs_admit`
 binding of the `jcs-admit` crate), wrapped in a DSSE envelope and signed with Ed25519. Decisions signed before
 the RFC 8785 change keep their payload bytes as signed; nothing re-serialises a stored payload, so their
 signatures still verify, and `tests/records` re-derives every stored record under both canonicalisers. The receipt names the

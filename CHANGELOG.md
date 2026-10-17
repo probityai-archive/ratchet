@@ -5,12 +5,12 @@
 Hardening of what a receipt rests on: canonical bytes, signatures, the admission rule's statistics and the
 store. Every change below is in this repository; the releases it waits for are named at the end.
 
-- Every record Ratchet signs or digests is RFC 8785 canonical JSON, through `probityai.jcs` (the `jcs-admit`
+- Every record Ratchet signs or digests is RFC 8785 canonical JSON, through `jcs_admit` (the `jcs-admit`
   crate). Decisions name their canonicaliser (`canonicalization: rfc8785`) and stored traces and records name
   theirs (`digest_canonicalization`). A record that names none was written earlier: its digests are recomputed
   over the sorted-keys JSON it was signed with, so every stored decision still verifies. On the 105 stored
   public-benchmark decisions, RFC 8785 differs from the signed bytes only in number spelling, in 20 of them.
-- Every DSSE envelope is signed and verified by `probityai.dsse` (the `dsse` crate); the two Python
+- Every DSSE envelope is signed and verified by `jcs_admit.dsse` (the `dsse` crate); the two Python
   implementations are gone. The earlier pure-Python reader stays in the tests as an oracle that must agree with
   the binding. `verify(..., threshold=2)` holds a countersigned decision to both of its keys.
 - The k-session rule (ledger D37) as `ratchet.improve.sessions`: the protocol, a runner for one host or one
@@ -42,7 +42,7 @@ store. Every change below is in this repository; the releases it waits for are n
   `model_turns_as_recorded` and `container_isolation`. Reports written before run records leave the four
   items not supplied, so an older receipt never reads as complete.
 
-Waits for: `probityai` 0.1.0 on PyPI (built from its merged source until then).
+Waits for: `jcs-admit` 0.1.0 on PyPI (built from its merged source until then).
 
 ## 0.1.2 (2026-10-13)
 

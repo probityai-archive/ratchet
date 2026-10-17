@@ -6,7 +6,7 @@ import json
 import math
 
 import pytest
-from probityai import jcs
+import jcs_admit
 
 from ratchet.canonical import CANONICALIZATION, canonical_json, canonicalizer
 
@@ -40,7 +40,7 @@ def test_rfc8785_section_3_2_2_example() -> None:
 
 def test_output_is_canonical_and_stable() -> None:
     once = canonical_json({"b": [1, {"d": 1.5, "c": "x"}], "a": None})
-    assert jcs.is_canonical(once)
+    assert jcs_admit.is_canonical(once)
     assert canonical_json(json.loads(once)) == once
 
 
