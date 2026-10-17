@@ -1,0 +1,1 @@
+{"endpoints":["http://127.0.0.1:18801/v1"],"model":"gpt-oss-120b","temperature":0.0,"seed_base":1000,"api_key_env":"VLLM_API_KEY","serving":{"engine":"vllm 0.26.0","job":"46468085","max_model_len":65536,"gpus":"1x B200"}}
