@@ -132,6 +132,17 @@ def declared_canonicalization(envelope: bytes) -> str | None:
     return value if value in (None, CANONICALIZATION) else CANONICALIZATION
 
 
+def named_suite_digest(envelope: bytes) -> str | None:
+    """The case suite digest the (not yet verified) payload names (`evaluator.components.suite_file`), so a
+    caller disclosing an installed suite can check it is the suite the receipt was made on."""
+    try:
+        payload = json.loads(base64.b64decode(json.loads(envelope)["payload"], validate=True))
+        value = payload["evaluator"]["components"]["suite_file"]
+    except (TypeError, KeyError, ValueError, binascii.Error, UnicodeDecodeError):
+        return None
+    return value if isinstance(value, str) else None
+
+
 def _write(root: Path, relative: str, data: bytes) -> dict[str, Any]:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass
 from functools import cache
 from typing import Any
 
-from ratchet_cases.cases import get
+from ratchet_cases.cases import get, suite_digest
 
 from ratchet.agent.model import ModelTurn, ScriptedModel, scripted_turn
 from ratchet.agent.worker import run_case
@@ -122,6 +122,7 @@ def body_for(s: Scenario) -> dict[str, Any]:
         checks=[{"name": n, "passed": g.passed, "evidence": g.evidence} for n, g in gates.items()],
         corpus_digests={},
         report_digests={n: report_digest(s.reports[n]) for n in ROLES},
+        evaluator={"version": "e1", "components": {"suite_file": suite_digest()}},
     )
 
 

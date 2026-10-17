@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from ratchet.verify.keys import DEFAULT_KEY_PATH, TrustedKeyError, load_trusted_key
-from ratchet.verify.receipt import NO_VERDICT, Options, verify_decision
+from ratchet.verify.receipt import NO_VERDICT, Options, named_suite_digest, verify_decision
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -79,12 +79,20 @@ def _files(specs: list[str], flag: str) -> dict[str, bytes]:
     return out
 
 
-def _suite_cases() -> dict[str, Any]:
-    """Every case document of the installed case suite, the package a third party installs from PyPI."""
-    from ratchet_cases.cases import all_cases
+def _suite_cases(envelope: bytes) -> dict[str, Any]:
+    """Every case document of the installed case suite, the package a third party installs from PyPI. The
+    installed suite must be the one the receipt names, or its documents would contradict an honest receipt
+    made on another release."""
+    from ratchet_cases.cases import all_cases, suite_digest
 
     from ratchet.verify.runs import case_document
 
+    installed, named = suite_digest(), named_suite_digest(envelope)
+    if installed != named:
+        raise ValueError(
+            f"--case-suite: the installed case suite is {installed}, the receipt names {named}; "
+            "install the probity-ratchet-cases release whose suite digest the receipt names"
+        )
     return {c.id: case_document(c) for c in all_cases()}
 
 
@@ -97,9 +105,9 @@ def main(argv: list[str] | None = None) -> int:
         harnesses = _load(args.harness, "--harness")
         recomputed = _load(args.recomputed, "--recomputed")
         traces = _files(args.traces, "--traces")
-        cases = {**(_suite_cases() if args.case_suite else {}), **_load(args.case, "--case")}
         approval = args.approval.read_bytes() if args.approval else None
         envelope = args.receipt.read_bytes()
+        cases = {**(_suite_cases(envelope) if args.case_suite else {}), **_load(args.case, "--case")}
     except (TrustedKeyError, OSError, ValueError) as exc:
         print(f"ratchet-verify: {exc}", file=sys.stderr)
         return 2

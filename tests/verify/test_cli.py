@@ -129,6 +129,15 @@ def test_json_output(files: dict[str, Path], capsys: pytest.CaptureFixture[str])
     assert out["authenticated_only"] == list(AUTHENTICATED_ONLY)
 
 
+def test_case_suite_refuses_an_installed_suite_the_receipt_does_not_name(
+    files: dict[str, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(files, "--case-suite") == 2
+    files["receipt"].write_bytes(b"not an envelope")
+    assert run(files, "--case-suite") == 2
+    assert capsys.readouterr().err.count("the installed case suite is") == 2
+
+
 def test_traces_flag_needs_name_and_file(files: dict[str, Path], capsys: pytest.CaptureFixture[str]) -> None:
     assert run(files, "--traces", "no-equals-sign") == 2
     assert run(files, "--traces", f"x={files['dir'] / 'absent.jsonl'}") == 2

@@ -117,3 +117,16 @@ def test_the_store_supplies_the_traces_a_report_commits_and_the_suite_cases_it_n
     }
     assert report_traces(store, {"p1": report, "legacy": {"results": []}}) == {"p1": [asdict(kept)]}
     assert suite_cases({"p1": report}) == {"refund_lost_reply.v3": case_document(get("refund_lost_reply.v3"))}
+
+
+def test_suite_cases_are_supplied_only_for_the_suite_the_decision_names() -> None:
+    from ratchet_cases.cases import suite_digest
+
+    from ratchet.view.evidence import Evidence, _matching_suite_cases
+
+    out = Evidence(reports={"p1": {"results": [{"case_id": "refund_lost_reply.v3", "split": "heldout"}]}})
+    named = {"evaluator": {"components": {"suite_file": suite_digest()}}}
+    assert list(_matching_suite_cases(named, out)) == ["refund_lost_reply.v3"]
+    assert _matching_suite_cases({}, out) == {} and out.notes == []
+    assert _matching_suite_cases({"evaluator": {"components": {"suite_file": "0" * 64}}}, out) == {}
+    assert out.notes == ["the installed case suite is not the decision's; held-out runs are not regraded"]

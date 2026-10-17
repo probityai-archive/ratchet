@@ -106,6 +106,20 @@ def suite_cases(reports: Mapping[str, Mapping[str, Any]]) -> dict[str, Doc]:
     return out
 
 
+def _matching_suite_cases(doc: Mapping[str, Any], out: Evidence) -> dict[str, Doc]:
+    """The installed suite's held-out cases, only when it is the suite the decision was made on: another
+    release's documents would contradict an honest receipt."""
+    from ratchet_cases.cases import suite_digest
+
+    named = ((doc.get("evaluator") or {}).get("components") or {}).get("suite_file")
+    if named is None:
+        return {}
+    if named != suite_digest():
+        out.notes.append("the installed case suite is not the decision's; held-out runs are not regraded")
+        return {}
+    return suite_cases(out.reports)
+
+
 def harness_doc(h: Harness) -> Doc:
     return asdict(h)
 
@@ -221,7 +235,7 @@ def collect(
         if digest in by_digest:
             out.reports[name] = by_digest[digest]
     out.traces = report_traces(store, out.reports)
-    out.cases = suite_cases(out.reports)
+    out.cases = _matching_suite_cases(doc, out)
     parent = store.get_harness(str(doc.get("parent")))
     if parent is None:
         out.notes.append("the parent harness is not in the store")
