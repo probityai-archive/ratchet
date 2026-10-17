@@ -109,12 +109,14 @@ def test_verify_recomputes_from_the_store_and_keeps_recomputed_apart_from_authen
     assert code == 0, out
     assert "VERIFIED" in out
     assert "reason code supported: admitted_receipt_verified" in out
-    assert "NOT SUPPLIED" not in out and "PARTIAL" not in out
+    assert "NOT SUPPLIED" not in out
     items = ("report_digests", "gate:heldout", "gate:replay", "gate:overfit_lint", "gate:authority")
-    for item in (*items, "model_call_records"):
+    for item in (*items, "model_call_records", "record_chain", "tool_policy"):
         assert item in out
+    # The fake world's cases are not in the published case suite, so no third party can grade them again.
+    assert "PARTIAL  heldout_grades" in out or "PARTIAL: heldout_grades" in out, out
     assert "AUTHENTICATED ONLY (signed, not re-derived)  model_turns_as_recorded" in out
-    assert "6 of 6 named reports checked; every recomputable item recomputed" in out
+    assert "6 of 6 named reports checked; recomputation INCOMPLETE" in out
     assert "checked by the dsse crate" in out
 
 

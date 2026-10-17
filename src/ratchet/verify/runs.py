@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any
 
 from ratchet_cases.types import sha256_hex
@@ -55,6 +55,20 @@ def cached_calls(trace: Mapping[str, Any]) -> int:
     return sum(
         1 for e in _events(trace) if e.get("kind") == MODEL and (e.get("payload") or {}).get("cached") is True
     )
+
+
+def case_document(case: Any) -> dict[str, Any]:
+    """The JSON document of a case: every field of a dataclass case (for the case suite's own cases, what
+    `ratchet_cases.types.to_jsonable` gives, so anyone holding the published suite can rebuild it), else the
+    fields every case carries."""
+    if is_dataclass(case) and not isinstance(case, type):
+        return asdict(case)
+    return {"id": case.id, "split": case.split, "kind": case.kind, "must_succeed": case.must_succeed}
+
+
+def case_digest(case: Any) -> str:
+    """What a result row commits about the case it graded."""
+    return digest(case_document(case))
 
 
 def run_record(trace: Mapping[str, Any]) -> dict[str, Any]:
@@ -334,3 +348,147 @@ def check_tool_policy(
             calls += sum(1 for e in events if e.get("kind") == "tool_call")
             checked += 1
     return {"runs": total, "traces_checked": checked, "tool_calls": calls}
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Held-out grades
+# ---------------------------------------------------------------------------------------------------------
+
+
+def _suite_case(doc: Mapping[str, Any]) -> Any:
+    """The case suite's own `Case` rebuilt from its document, or None for a case of another world (a
+    benchmark adapter's), which this verifier cannot rebuild."""
+    from ratchet_cases.cases.model import Case, Expect
+    from ratchet_cases.world.faults import Fault
+
+    try:
+        fields = {**doc, "faults": [Fault(**f) for f in doc["faults"]], "grader": Expect(**doc["grader"])}
+        return Case(**fields)
+    except (KeyError, TypeError):
+        return None
+
+
+def _trace_of(doc: Mapping[str, Any]) -> Any:
+    from ratchet_cases.types import Cost, Event, Outcome, Trace
+
+    o = doc["outcome"]
+    return Trace(
+        str(doc["run_id"]),
+        str(doc["case_id"]),
+        str(doc["harness_version"]),
+        str(doc["model"]),
+        [Event(int(e["seq"]), e["kind"], dict(e["payload"]), float(e["ts"])) for e in _events(doc)],
+        Outcome(bool(o["passed"]), list(o["reasons"]), str(o["final_state_digest"]), Cost(**o["cost"])),
+    )
+
+
+def _replay(world: Any, trace: Mapping[str, Any]) -> bool:
+    """Apply every call the trace records as executed to `world`, in order; False at the first recorded
+    result the world does not give back."""
+    from ratchet_cases.types import ToolCall
+
+    calls: dict[str, Mapping[str, Any]] = {}
+    for e in _events(trace):
+        p = _payload(e)
+        if e.get("kind") == "tool_call":
+            call = p.get("call") or {}
+            calls[str(call.get("call_id"))] = call
+        elif e.get("kind") == "tool_result":
+            recorded = p.get("result") or {}
+            call = calls.get(str(recorded.get("call_id"))) or {}
+            done = world.call(
+                ToolCall(str(call.get("name")), dict(call.get("args") or {}), str(call.get("call_id")))
+            )
+            if canonical_json(asdict(done)) != canonical_json(recorded):
+                return False
+    return True
+
+
+def regrade(case_doc: Mapping[str, Any], trace: Mapping[str, Any]) -> str | None:
+    """Grade a run again from the case document and its trace, as the worker graded it: rebuild the world
+    from the case, apply every call the trace records as executed, in order, comparing each recorded result
+    with the world's; then the final state digest, and the grader's verdict on that world (a run that did
+    not end with the model's answer fails as incomplete). Returns the first field that disagrees, or None.
+    Raises `LookupError` for a case of a world this verifier cannot rebuild."""
+    from ratchet_cases.cases.grade import grade
+    from ratchet_cases.world import World
+
+    case = _suite_case(case_doc)
+    if case is None:
+        raise LookupError(str(case_doc.get("id")))
+    world = World.from_case(case)
+    if not _replay(world, trace):
+        return "tool_result"
+    outcome = trace.get("outcome") or {}
+    if world.digest() != outcome.get("final_state_digest"):
+        return "final_state"
+    graded = grade(case, world, _trace_of(trace))
+    events = _events(trace)
+    final = _payload(events[-1]) if events else {}
+    complete = final.get("complete") is True
+    reasons = [*graded.reasons, *([] if complete else [f"incomplete: {final.get('reason')}"])]
+    if (graded.passed and complete) != outcome.get("passed"):
+        return "passed"
+    return "reasons" if reasons != outcome.get("reasons") else None
+
+
+def _committed_cases(reports: Sequence[Report]) -> dict[str, str]:
+    """Held-out case id to the case digest every report commits for it. A held-out row without a digest is
+    not established; two digests for one case are a contradiction."""
+    committed: dict[str, str] = {}
+    for report in reports:
+        for row in rows_of(report):
+            if row.get("split") != "heldout":
+                continue
+            case_id, d = str(row.get("case_id")), row.get("case_digest")
+            if not isinstance(d, str) or not HEX64.fullmatch(d):
+                raise RecordError("not_established", f"case_digest_missing:{report.name}:{case_id}")
+            if committed.setdefault(case_id, d) != d:
+                raise RecordError("contradicted", f"heldout_case_changed:{case_id}")
+    return committed
+
+
+def commits_cases(reports: Sequence[Report]) -> bool:
+    """Whether the reports were written with case digests at all (reports written before them carry none)."""
+    return any("case_digest" in row for report in reports for row in rows_of(report))
+
+
+def check_heldout_grades(reports: Sequence[Report], cases: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """The held-out grades, recomputed. Every report commits one case digest for each held-out case, the
+    same in every run; a disclosed case document (`cases`, by id) must be the committed one; and every
+    held-out run whose case and trace are supplied is graded again (`regrade`) and must agree with its
+    trace and its row. A case of a world this verifier cannot rebuild is counted as not regraded. Returns
+    the counts it checked."""
+    committed = _committed_cases(reports)
+    disclosed = {k: v for k, v in cases.items() if k in committed}
+    for case_id, doc in disclosed.items():
+        if doc.get("id") != case_id:
+            raise RecordError("contradicted", f"case_document_names_another_case:{case_id}")
+        if digest(doc) != committed[case_id]:
+            raise RecordError("contradicted", f"heldout_case_digest_mismatch:{case_id}")
+    rows = regraded = 0
+    other_world: set[str] = set()
+    for report in reports:
+        for row in rows_of(report):
+            if row.get("split") != "heldout":
+                continue
+            rows += 1
+            case_id, trace = str(row.get("case_id")), (report.traces or {}).get(str(row.get("run_id")))
+            if case_id not in disclosed or trace is None:
+                continue
+            try:
+                problem = regrade(disclosed[case_id], trace)
+            except LookupError:
+                other_world.add(case_id)
+                continue
+            if problem is None and row.get("passed") != trace["outcome"]["passed"]:
+                problem = "row"
+            if problem is not None:
+                raise RecordError("contradicted", f"grade_mismatch:{report.name}:{case_id}:{problem}")
+            regraded += 1
+    return {
+        "heldout_rows": rows,
+        "cases_disclosed": len(disclosed),
+        "regraded": regraded,
+        "not_rebuildable": sorted(other_world),
+    }

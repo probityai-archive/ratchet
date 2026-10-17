@@ -26,6 +26,7 @@ from ratchet.improve.receipt import Signer
 from ratchet.types import Guard, Harness
 from ratchet.verify import Options, VerifyReport, report_digest, verify_decision
 from ratchet.verify import recompute as rc
+from ratchet.verify.runs import case_document
 
 from .helpers import NOOP, payload, sign
 
@@ -44,6 +45,8 @@ PARENT = Harness.build(
 )
 CANDIDATE = PARENT.child(system_prompt=f"{PARENT.system_prompt}\nBe brief.", created_by="improver")
 RECOMPUTED = {"overfit_lint": {"hits": []}}
+# The held-out case documents a third party holds: the published case suite's own cases.
+CASES = {i: case_document(get(i)) for i in HELDOUT}
 
 
 def _script(ticket: str) -> list[ModelTurn]:
@@ -128,6 +131,7 @@ def verify(
     *,
     traces: bool = True,
     harnesses: bool = True,
+    cases: dict[str, Any] | None = None,
     options: Options = OPTIONS,
     **kw: Any,
 ) -> VerifyReport:
@@ -139,6 +143,7 @@ def verify(
         harnesses=s.harnesses if harnesses else {},
         recomputed=RECOMPUTED,
         traces=s.traces if traces else {},
+        cases=CASES if cases is None else cases,
         options=options,
         **kw,
     )

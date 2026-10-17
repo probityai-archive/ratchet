@@ -8,7 +8,8 @@ Four kinds, each loaded only when the store holds exactly what the receipt descr
   and used only when the rebuilt digest equals the one the receipt signed);
 - results recomputed here from recorded inputs: every added guard replayed over the recorded traces of its
   generation, and the overfitting screen over that generation's training traces;
-- the trace of every run an evaluation report commits (its `runs`), for the run-record checks.
+- the trace of every run an evaluation report commits (its `runs`), for the run-record checks, and the
+  document of every held-out case the installed case suite holds, so those runs are graded again.
 
 Anything that cannot be loaded is simply absent. The verifier prints absent evidence as not supplied.
 """
@@ -41,6 +42,7 @@ class Evidence:
     harnesses: dict[str, Doc] = field(default_factory=dict)
     recomputed: dict[str, Doc] = field(default_factory=dict)
     traces: dict[str, list[Doc]] = field(default_factory=dict)
+    cases: dict[str, Doc] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
 
@@ -80,6 +82,27 @@ def report_traces(store: ViewStore, reports: Mapping[str, Mapping[str, Any]]) ->
         keys = [(str(r.get("run_id")), str(r.get("case_id"))) for r in runs if isinstance(r, dict)]
         found = (store.get_trace(run_id, case_id) for run_id, case_id in keys)
         out[name] = [asdict(t) for t in found if t is not None]
+    return out
+
+
+def suite_cases(reports: Mapping[str, Mapping[str, Any]]) -> dict[str, Doc]:
+    """The case suite's document of every held-out case the reports name that the suite holds."""
+    from ratchet_cases.cases import get
+
+    from ratchet.verify.runs import case_document
+
+    ids = {
+        str(r.get("case_id"))
+        for report in reports.values()
+        for r in report.get("results") or []
+        if isinstance(r, dict) and r.get("split") == "heldout"
+    }
+    out: dict[str, Doc] = {}
+    for case_id in sorted(ids):
+        try:
+            out[case_id] = case_document(get(case_id))
+        except KeyError:
+            continue  # a benchmark's case: the verifier reports its run as not regraded
     return out
 
 
@@ -198,6 +221,7 @@ def collect(
         if digest in by_digest:
             out.reports[name] = by_digest[digest]
     out.traces = report_traces(store, out.reports)
+    out.cases = suite_cases(out.reports)
     parent = store.get_harness(str(doc.get("parent")))
     if parent is None:
         out.notes.append("the parent harness is not in the store")

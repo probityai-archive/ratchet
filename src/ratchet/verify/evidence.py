@@ -44,6 +44,7 @@ class Ctx:
     require_reports: bool
     sessions: dict[str, bytes] = field(default_factory=dict)  # a k-session bundle's files, by file name
     traces: dict[str, bytes] = field(default_factory=dict)  # JSON lines of trace documents, by report name
+    cases: dict[str, bytes] = field(default_factory=dict)  # disclosed case documents, by case id
     items: list[dict[str, Any]] = field(default_factory=list)
     scope: dict[str, Any] = field(default_factory=dict)
 
@@ -303,12 +304,12 @@ def _run_reports(ctx: Ctx, item: str) -> list[runs.Report] | None:
     return reports
 
 
-def _records(item: str, check: Any, *args: Any) -> dict[str, Any]:
+def _records(item: str, check: Any, *args: Any) -> Any:
+    """Run one `ratchet.verify.runs` check; its disagreement ends the verdict under `item`."""
     try:
-        result: dict[str, Any] = check(*args)
+        return check(*args)
     except runs.RecordError as exc:
         raise Refuse(exc.decision, exc.reason, item) from exc
-    return result
 
 
 MODEL_CALLS = "model_call_records"
@@ -364,3 +365,23 @@ def recompute_tool_policy(ctx: Ctx) -> None:
     counts = _records(TOOL_POLICY, runs.check_tool_policy, reports, by_version)
     status = "recomputed" if counts["traces_checked"] == counts["runs"] else "partial"
     ctx.item(TOOL_POLICY, status, **counts)
+
+
+HELDOUT_GRADES = "heldout_grades"
+
+
+def recompute_heldout_grades(ctx: Ctx) -> None:
+    """Hidden grades, recomputed: the held-out cases are bound by digest across every run, each disclosed
+    case document is the committed one, and every held-out run whose case and trace are supplied is graded
+    again from them. `partial` while a held-out run is not regraded (its case or trace withheld, or a world
+    this verifier cannot rebuild); not supplied for reports written before case digests."""
+    reports = _run_reports(ctx, HELDOUT_GRADES)
+    if reports is None:
+        return
+    if not _records(HELDOUT_GRADES, runs.commits_cases, reports):
+        ctx.item(HELDOUT_GRADES, "not_supplied", needs=[f"case digests in report:{r.name}" for r in reports])
+        return
+    cases = {k: _load(raw, f"case:{k}") for k, raw in ctx.cases.items()}
+    counts = _records(HELDOUT_GRADES, runs.check_heldout_grades, reports, cases)
+    status = "recomputed" if counts["regraded"] == counts["heldout_rows"] else "partial"
+    ctx.item(HELDOUT_GRADES, status, **counts)

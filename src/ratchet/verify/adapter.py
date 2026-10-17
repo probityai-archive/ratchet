@@ -61,6 +61,7 @@ REPORT_ROLE = "report:"
 HARNESS_ROLE = "harness:"
 RECOMPUTED_ROLE = "recomputed:"
 TRACES_ROLE = "traces:"
+CASE_ROLE = "case:"
 DEFAULT_EVAL_ROLES = {
     "p1": "parent_run_1",
     "p2": "parent_run_2",
@@ -80,7 +81,6 @@ AUTHENTICATED_ONLY_LIMITS = {
         "agent's commands inside it: no launcher records an isolation report for these runs, so the record "
         "shows which commands the policy let through, not what the container let them reach"
     ),
-    "hidden_grades": "that the held-out grades are the grader's verdicts",
 }
 AUTHENTICATED_ONLY = tuple(AUTHENTICATED_ONLY_LIMITS)
 REPORT_NAME = re.compile(r"^[^\x00-\x1f\x7f]{1,200}$")
@@ -158,7 +158,7 @@ def _assessment(case_id: str, policy: Any) -> dict[str, Any]:
     return a
 
 
-_PREFIX_NAME = {REPORT_ROLE, RECOMPUTED_ROLE, TRACES_ROLE}
+_PREFIX_NAME = {REPORT_ROLE, RECOMPUTED_ROLE, TRACES_ROLE, CASE_ROLE}
 
 
 SESSIONS_ROLE = "sessions:"
@@ -315,6 +315,7 @@ def _pipeline(ctx: evidence.Ctx) -> None:
     evidence.recompute_model_calls(ctx)
     evidence.recompute_record_chain(ctx)
     evidence.recompute_tool_policy(ctx)
+    evidence.recompute_heldout_grades(ctx)
 
 
 def _run_evidence(v: _Verdict, ctx: evidence.Ctx, require_complete: bool) -> dict[str, Any]:
@@ -432,5 +433,6 @@ def adjudicate(case: Any, policy: Any, artifact_root: Path) -> dict[str, Any]:
         require_reports=a["require_reports"],
         sessions=_supplied(data, SESSIONS_ROLE),
         traces=_supplied(data, TRACES_ROLE),
+        cases=_supplied(data, CASE_ROLE),
     )
     return _run_evidence(v, ctx, a["require_complete"])

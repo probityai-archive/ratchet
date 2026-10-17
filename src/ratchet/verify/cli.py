@@ -39,6 +39,12 @@ def _parser() -> argparse.ArgumentParser:
         metavar="NAME=FILE",
         help="JSON lines of the trace documents of the evaluation report NAME",
     )
+    add("--case", action="append", default=[], metavar="ID=FILE", help="a disclosed held-out case document")
+    add(
+        "--case-suite",
+        action="store_true",
+        help="disclose every case of the installed probity-ratchet-cases package to regrade held-out runs",
+    )
     add("--approval", type=Path, help="human approval envelope for an authority exception")
     add(
         "--sessions",
@@ -73,6 +79,15 @@ def _files(specs: list[str], flag: str) -> dict[str, bytes]:
     return out
 
 
+def _suite_cases() -> dict[str, Any]:
+    """Every case document of the installed case suite, the package a third party installs from PyPI."""
+    from ratchet_cases.cases import all_cases
+
+    from ratchet.verify.runs import case_document
+
+    return {c.id: case_document(c) for c in all_cases()}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -82,6 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         harnesses = _load(args.harness, "--harness")
         recomputed = _load(args.recomputed, "--recomputed")
         traces = _files(args.traces, "--traces")
+        cases = {**(_suite_cases() if args.case_suite else {}), **_load(args.case, "--case")}
         approval = args.approval.read_bytes() if args.approval else None
         envelope = args.receipt.read_bytes()
     except (TrustedKeyError, OSError, ValueError) as exc:
@@ -102,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         options=options,
         sessions=args.sessions,
         traces=traces,
+        cases=cases,
     )
     if args.json:
         print(json.dumps(result.to_dict(), sort_keys=True, indent=2))

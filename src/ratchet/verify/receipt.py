@@ -173,6 +173,7 @@ def _artifacts(
     approval: bytes | None,
     sessions: Path | None = None,
     traces: Mapping[str, Traces] | None = None,
+    cases: Mapping[str, Doc] | None = None,
 ) -> dict[str, Any]:
     traces = traces or {}
     canonicalization = declared_canonicalization(envelope)
@@ -189,6 +190,10 @@ def _artifacts(
         )
     for name, lines in traces.items():
         out[f"{adapter.TRACES_ROLE}{name}"] = _write(root, f"traces/{_slot(name)}.jsonl", _jsonl(lines))
+    for case_id, doc in (cases or {}).items():
+        out[f"{adapter.CASE_ROLE}{case_id}"] = _write(
+            root, f"cases/{_slot(case_id)}.json", _bytes(doc, canonicalization)
+        )
     if approval is not None:
         out["approval"] = _write(root, "approval.json", approval)
     if sessions is not None:
@@ -217,6 +222,7 @@ def _build(
         approval,
         sessions,
         evidence.get("traces", {}),
+        evidence.get("cases", {}),
     )
     case_id = f"ratchet-decision-{artifacts['envelope']['sha256'][:16]}"
     case = {"schema_version": adapter.CASE_SCHEMA, "case_id": case_id, "artifacts": artifacts}
@@ -275,6 +281,7 @@ def verify_decision(
     options: Options = Options(),  # noqa: B008 - frozen dataclass, safe as a default
     sessions: Path | None = None,
     traces: Mapping[str, Traces] | None = None,
+    cases: Mapping[str, Doc] | None = None,
 ) -> VerifyReport:
     """Verify a signed admission receipt. Never raises on bad evidence: it returns a failing report.
 
@@ -293,6 +300,9 @@ def verify_decision(
     - `sessions`: the k-session bundle directory a tool addition or procedure edit was admitted on.
     - `traces`: by evaluation report name, the trace documents of its runs (or their JSON lines); checked
       against the run records the report commits (`ratchet.verify.runs`).
+    - `cases`: by case id, disclosed held-out case documents (`ratchet.verify.runs.case_document`; for the
+      case suite, what the published `probity-ratchet-cases` package holds); with the traces, each held-out
+      run is graded again.
 
     Anything not supplied is reported as not supplied, never as recomputed.
     """
@@ -306,8 +316,9 @@ def verify_decision(
         "harnesses": dict(harnesses or {}),
         "recomputed": dict(recomputed or {}),
         "traces": dict(traces or {}),
+        "cases": dict(cases or {}),
     }
-    bad = _bad_names(evidence["reports"], evidence["recomputed"], evidence["traces"])
+    bad = _bad_names(evidence["reports"], evidence["recomputed"], evidence["traces"], evidence["cases"])
     if bad is not None:
         return VerifyReport(NO_VERDICT, f"invalid_report_name:{bad}")
     if set(evidence["harnesses"]) - {"parent", "candidate"}:

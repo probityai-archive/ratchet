@@ -88,11 +88,24 @@ def scenario_args(d: Path, signer: Signer) -> list[str]:
 def test_a_receipt_over_real_runs_with_its_traces_recomputes_every_item(
     tmp_path: Path, signer: Signer, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code = main([*scenario_args(tmp_path, signer), "--require-reports", "--require-complete"])
+    args = [*scenario_args(tmp_path, signer), "--case-suite", "--require-reports", "--require-complete"]
+    code = main(args)
     out = capsys.readouterr().out
     assert code == 0, out
     assert "every recomputable item recomputed" in out and "NOT SUPPLIED" not in out
-    assert "AUTHENTICATED ONLY (not re-derived): model_turns_as_recorded" in out
+    assert "AUTHENTICATED ONLY (not re-derived): model_turns_as_recorded, container_isolation" in out
+
+
+def test_a_case_flag_discloses_one_case(
+    tmp_path: Path, signer: Signer, capsys: pytest.CaptureFixture[str]
+) -> None:
+    held = runs_scenario.HELDOUT
+    files = [
+        f"--case={i}={dump(tmp_path / f'case{n}.json', runs_scenario.CASES[i])}" for n, i in enumerate(held)
+    ]
+    assert main([*scenario_args(tmp_path, signer), *files, "--require-complete"]) == 0
+    assert main([*scenario_args(tmp_path, signer), files[0], "--require-complete"]) == 1
+    assert "PARTIAL: heldout_grades" in capsys.readouterr().out
 
 
 def test_missing_evidence_is_never_printed_as_recomputed(
