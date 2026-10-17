@@ -573,6 +573,8 @@ class RefereeCore:
         digests = {t.case_id: normalized(t) for t in first.traces}
         again = {t.case_id: normalized(t) for t in second.traces}
         repeat = {c.id: digests.get(c.id) == again.get(c.id) for c in probe}
+        self.ledger.run_traces("repeat_a", [wire.trace_doc(t) for t in first.traces])
+        self.ledger.run_traces("repeat_b", [wire.trace_doc(t) for t in second.traces])
         self.ledger.note("repeatability", {"cases": repeat, "digests_a": digests, "digests_b": again})
         out["repeatability"] = {
             "probed": len(repeat),

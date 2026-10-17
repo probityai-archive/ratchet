@@ -32,7 +32,7 @@ from ratchet_cases.types import sha256_hex
 
 from ratchet.canonical import canonical_json
 
-RESULTS_TYPE = "application/vnd.ratchet.referee-results+json"
+RESULTS_TYPE = "application/vnd.ratchet.referee-results+json"  # read by ratchet.verify.results
 RESULTS_VERSION = 1
 
 
@@ -88,8 +88,9 @@ class Ledger:
         (base / "receipt.dsse").write_bytes(envelope)
         manifest: dict[str, Any] = {"decision_id": decision_id, "reports": {}, "traces": {}, "harnesses": {}}
         if cohort is not None:
-            manifest["arms"] = {a: f"../../{cohort}/arms/{_safe(a)}.json" for a in arms}
-            manifest["arm_traces"] = {a: f"../../{cohort}/traces/{_safe(a)}.jsonl" for a in arms}
+            # Relative to the results directory: a cohort's records are shared by its decisions.
+            manifest["arms"] = {a: f"{cohort}/arms/{_safe(a)}.json" for a in arms}
+            manifest["arm_traces"] = {a: f"{cohort}/traces/{_safe(a)}.jsonl" for a in arms}
         for role, doc in reports.items():
             name = _safe(role)
             _dump(base / "reports" / f"{name}.json", doc)
@@ -134,6 +135,11 @@ class Ledger:
             if self.root is not None:
                 with (self.root / "entries.jsonl").open("a", encoding="utf-8") as f:
                     f.write(json.dumps(entry, sort_keys=True, default=str) + "\n")
+
+    def run_traces(self, name: str, docs: Sequence[Any]) -> None:
+        """The traces behind a run-level table (the repeatability probe's two runs), for recomputing it."""
+        if self.root is not None:
+            _jsonl(self.root / "runs" / f"{_safe(name)}.jsonl", docs)
 
     def note(self, key: str, value: Any) -> None:
         """A run-level table (repeatability, discordance, identity controls) for the results document."""

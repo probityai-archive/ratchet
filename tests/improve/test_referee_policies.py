@@ -228,9 +228,9 @@ def test_stochastic_v3_runs_every_arm_on_one_schedule_and_returns_counts_only(tm
     assert {r["case_id"]: r["arm"] for r in entry["per_case"]}["omit-9"] == 40
     assert set(doc["runs"]["v3_identity_controls"]) == {"identity_1", "identity_2"}
     manifest = json.loads((tmp_path / "results" / entry["bundle"] / "manifest.json").read_text())
-    arms = tmp_path / "results" / entry["bundle"] / manifest["arms"]["parent"]
+    arms = tmp_path / "results" / manifest["arms"]["parent"]
     assert len(json.loads(arms.read_text())) == len(HELDOUT_IDS) * 40
-    traces = tmp_path / "results" / entry["bundle"] / manifest["arm_traces"][f"candidate:{FIX.version}"]
+    traces = tmp_path / "results" / manifest["arm_traces"][f"candidate:{FIX.version}"]
     assert len(traces.read_text().splitlines()) == len(HELDOUT_IDS) * 40
 
 
