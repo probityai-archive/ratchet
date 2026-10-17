@@ -341,3 +341,26 @@ def recompute_record_chain(ctx: Ctx) -> None:
     counts = _records(RECORD_CHAIN, runs.check_record_chain, reports)
     status = "recomputed" if counts["traces_checked"] == counts["runs"] else "partial"
     ctx.item(RECORD_CHAIN, status, **counts)
+
+
+TOOL_POLICY = "tool_policy"
+
+
+def recompute_tool_policy(ctx: Ctx) -> None:
+    """Sandbox enforcement, as far as records show it: every recorded tool call was answered once, ran only
+    when the harness's allowlist and every one of its guards let it, and was blocked only for a stated
+    cause. Needs the parent and candidate harness documents and the traces."""
+    reports = _run_reports(ctx, TOOL_POLICY)
+    if reports is None:
+        return
+    if len(ctx.harnesses) < 2:
+        ctx.item(TOOL_POLICY, "not_supplied", needs=["harness:parent", "harness:candidate"])
+        return
+    if all(r.traces is None for r in reports):
+        ctx.item(TOOL_POLICY, "not_supplied", needs=[f"traces:{r.name}" for r in reports])
+        return
+    parent, candidate = _harness_pair(ctx)
+    by_version = {str(h.get("version")): h for h in (parent, candidate)}
+    counts = _records(TOOL_POLICY, runs.check_tool_policy, reports, by_version)
+    status = "recomputed" if counts["traces_checked"] == counts["runs"] else "partial"
+    ctx.item(TOOL_POLICY, status, **counts)

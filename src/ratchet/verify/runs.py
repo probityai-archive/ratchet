@@ -265,3 +265,72 @@ def check_record_chain(reports: Sequence[Report]) -> dict[str, Any]:
                 raise RecordError("contradicted", f"record_chain_mismatch:{report.name}:{case_id}:{problem}")
             checked += 1
     return {"runs": total, "traces_checked": checked}
+
+
+def _answer_problem(
+    kind: str, p: Mapping[str, Any], name: str, allowed: set[str], guards: list[str]
+) -> str | None:
+    """The rule an answer to a call of tool `name` breaks, or None."""
+    decisions = [d for d in p.get("decisions") or [] if isinstance(d, dict)]
+    ids, blocked = [str(d.get("guard_id")) for d in decisions], any(d.get("blocked") for d in decisions)
+    source = p.get("source")
+    problems = {
+        "tool_outside_allowlist": kind == "tool_result" and name not in allowed,
+        "guards_not_consulted": kind == "tool_result" and ids != guards,
+        "blocked_call_executed": kind == "tool_result" and blocked,
+        "allowed_tool_blocked_as_off_the_allowlist": source == "allowlist" and name in allowed,
+        "guard_block_without_a_blocking_guard": source == "guard" and (ids != guards or not blocked),
+        "block_of_unknown_source": kind == "guard_block"
+        and source not in ("allowlist", "guard", "arguments"),
+    }
+    return next((k for k, broken in problems.items() if broken), None)
+
+
+def _policy_problem(events: Sequence[Mapping[str, Any]], harness: Mapping[str, Any]) -> str | None:
+    """The first rule of the harness's tool policy that the recorded run breaks, or None.
+
+    Each tool call is answered by exactly one event naming it, before the next call: a `tool_result` when it
+    ran, a `guard_block` when it did not. A call that ran names a tool on the allowlist and carries one
+    decision from every guard of the harness, in order, none of them blocking. A block names its source: the
+    allowlist only for a tool off it, a guard only with a blocking decision from the full guard list."""
+    allowed = {str(t) for t in harness.get("tool_allowlist") or []}
+    guards = [str((g or {}).get("id")) for g in harness.get("guards") or []]
+    pending: Mapping[str, Any] | None = None
+    for e in events:
+        kind, p = str(e.get("kind")), _payload(e)
+        if kind == "tool_call":
+            if pending is not None:
+                return "tool_call_unanswered"
+            call = p.get("call")
+            pending = call if isinstance(call, dict) else {}
+        elif kind in ("tool_result", "guard_block"):
+            answered = (p.get("result") or {}).get("call_id") if kind == "tool_result" else p.get("call_id")
+            if pending is None or answered != pending.get("call_id"):
+                return "answer_without_call"
+            if problem := _answer_problem(kind, p, str(pending.get("name")), allowed, guards):
+                return problem
+            pending = None
+    return "tool_call_unanswered" if pending is not None else None
+
+
+def check_tool_policy(
+    reports: Sequence[Report], harnesses: Mapping[str, Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Every supplied trace obeys the tool policy of the harness its report ran (`harnesses`, by version):
+    see `_policy_problem`. The traces are bound to the reports by `check_record_chain`, which runs first.
+    Returns the counts it checked."""
+    total = checked = calls = 0
+    for report in reports:
+        harness = harnesses.get(str(report.doc.get("harness_version")))
+        if harness is None:
+            raise RecordError("contradicted", f"report_of_unknown_harness:{report.name}")
+        runs = runs_of(report)
+        total += len(runs)
+        for run_id, trace in (report.traces or {}).items():
+            events = _events(trace)
+            if problem := _policy_problem(events, harness):
+                case_id = runs[run_id]["case_id"] if run_id in runs else trace.get("case_id")
+                raise RecordError("contradicted", f"tool_policy_violated:{report.name}:{case_id}:{problem}")
+            calls += sum(1 for e in events if e.get("kind") == "tool_call")
+            checked += 1
+    return {"runs": total, "traces_checked": checked, "tool_calls": calls}

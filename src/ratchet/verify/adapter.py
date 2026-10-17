@@ -75,7 +75,11 @@ AUTHENTICATED_ONLY_LIMITS = {
         "chat-completions response carries no signature of its provider, so only the referee's key says a "
         "model, not the referee, wrote the turns its traces record"
     ),
-    "sandbox_enforcement": "that the harness's tool allowlist and guards were enforced",
+    "container_isolation": (
+        "that a world running outside the referee's process, the terminal benchmark's container, kept the "
+        "agent's commands inside it: no launcher records an isolation report for these runs, so the record "
+        "shows which commands the policy let through, not what the container let them reach"
+    ),
     "hidden_grades": "that the held-out grades are the grader's verdicts",
 }
 AUTHENTICATED_ONLY = tuple(AUTHENTICATED_ONLY_LIMITS)
@@ -310,6 +314,7 @@ def _pipeline(ctx: evidence.Ctx) -> None:
     evidence.recompute_overfit(ctx)
     evidence.recompute_model_calls(ctx)
     evidence.recompute_record_chain(ctx)
+    evidence.recompute_tool_policy(ctx)
 
 
 def _run_evidence(v: _Verdict, ctx: evidence.Ctx, require_complete: bool) -> dict[str, Any]:

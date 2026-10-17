@@ -160,12 +160,25 @@ def run_of(s: Scenario, role: str, case_id: str) -> tuple[dict[str, Any], dict[s
     return row, record, trace
 
 
-def recommit(s: Scenario, role: str, edit: Callable[[dict[str, Any]], None] | None = None) -> None:
+def recommit(
+    s: Scenario, role: str, edit: Callable[[dict[str, Any]], None] | None = None, *, rows: bool = False
+) -> None:
     """After a trace was edited, rewrite the report's run records from the traces, as a signer who
-    re-signs would; `edit` then changes the report itself."""
-    from ratchet.verify.runs import run_record
+    re-signs would; with `rows`, also rewrite each result row from its trace. `edit` then changes the
+    report itself."""
+    from ratchet.verify.runs import cached_calls, run_record
 
     s.reports[role]["runs"] = sorted((run_record(t) for t in s.traces[role]), key=lambda r: r["run_id"])
+    if rows:
+        by_run = {t["run_id"]: t for t in s.traces[role]}
+        for row in s.reports[role]["results"]:
+            t = by_run[row["run_id"]]
+            models = by_kind(t, "model")
+            row["passed"], row["reasons"] = t["outcome"]["passed"], t["outcome"]["reasons"]
+            blocks = [e for e in by_kind(t, "guard_block") if e["payload"]["source"] != "arguments"]
+            row["interventions"] = len(blocks)
+            row["cached_calls"] = cached_calls(t)
+            row["fresh_calls"] = len(models) - row["cached_calls"]
     if edit is not None:
         edit(s.reports[role])
 

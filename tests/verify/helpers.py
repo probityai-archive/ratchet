@@ -20,7 +20,7 @@ from ratchet.verify import DEFAULT_GATES, PREDICATE_URI, report_digest
 # Items recomputed from the run records a report commits (`ratchet.verify.runs`). The hand-written reports
 # here predate run records, so with them these items are never more than not supplied; the decision over
 # real runs in `runs_scenario` recomputes them.
-RUN_RECORD_ITEMS = ("model_call_records", "record_chain")
+RUN_RECORD_ITEMS = ("model_call_records", "record_chain", "tool_policy")
 SUITE = "a" * 64
 SNAPSHOT = "c" * 64
 NOOP = "def check(call, view, history):\n    return None\n"
