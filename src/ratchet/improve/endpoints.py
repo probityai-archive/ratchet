@@ -120,14 +120,15 @@ RunCase = Callable[..., Trace]
 
 
 class RoundRobin:
-    """The deterministic worker: one client per endpoint, each sending the configuration's fixed seed, used
-    in turn. A `RunCase` that ignores the model it is handed."""
+    """One client per endpoint, used in turn: a `RunCase` that ignores the model it is handed. `seeded` (the
+    deterministic worker) requires the configuration's fixed seed and sends it with every request; unseeded,
+    a seed the configuration names is still sent."""
 
-    def __init__(self, endpoints: Endpoints, run_case: RunCase) -> None:
+    def __init__(self, endpoints: Endpoints, run_case: RunCase, *, seeded: bool = True) -> None:
         seed = endpoints.doc.get("seed")
-        if seed is None:
+        if seed is None and seeded:
             raise EndpointsError("a deterministic configuration names a seed")
-        self.clients = [endpoints.client(u, int(seed)) for u in endpoints.urls]
+        self.clients = [endpoints.client(u, None if seed is None else int(seed)) for u in endpoints.urls]
         self._next = itertools.count(1)
         self._lock = threading.Lock()
         self._run_case = run_case

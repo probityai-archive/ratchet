@@ -112,3 +112,11 @@ def test_a_real_client_takes_its_key_from_the_named_variable(monkeypatch: pytest
         assert client._config.api_key == "k1" and client._config.temperature == 0.0
     finally:
         client.close()
+
+
+def test_an_unseeded_round_robin_needs_no_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ep.Endpoints, "client", lambda self, url, seed: _Client(url, seed))
+    rr = ep.RoundRobin(
+        ep.parse({"endpoints": ["u1", "u2"], "model": "m"}), lambda *a, **k: None, seeded=False
+    )
+    assert [(c.url, c.seed) for c in rr.clients] == [("u1", None), ("u2", None)]
