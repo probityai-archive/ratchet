@@ -27,6 +27,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import IO, Any, Protocol
 
 from ratchet_cases.types import Trace, sha256_hex
@@ -34,7 +35,7 @@ from ratchet_cases.types import Trace, sha256_hex
 from ratchet.canonical import canonical_json
 from ratchet.improve import wire
 from ratchet.improve.activate import Activation, Activator
-from ratchet.improve.admit import Decision, admit, awaiting_confirmation
+from ratchet.improve.admit import Decision, ExtendedChange, admit, awaiting_confirmation
 from ratchet.improve.diagnose import FailureCluster
 from ratchet.improve.evaluate import CaseLike, EvalReport, RunCase, evaluate_many
 from ratchet.improve.evaluator import evaluator_identity, require_same
@@ -71,6 +72,8 @@ class RefereeParts:
     suite_digest: str | None = None
     workers: int = 8
     repeats: int = 1
+    # Candidates that add a tool or edit a procedure, and the admitted k-session bundle each is admitted on.
+    session_bundles: Mapping[str, Path] = field(default_factory=dict)
     close: Callable[[], None] = lambda: None
 
 
@@ -316,6 +319,8 @@ class RefereeCore:
             "evaluator": self.evaluator,
             "context": dict(context),
         }
+        bundle = self.parts.session_bundles.get(candidate.version)
+        kw["extended"] = ExtendedChange(Path(bundle)) if bundle is not None else None
         d = admit(parent, candidate, confirm_eval=None, **kw)
         if awaiting_confirmation(d):
             confirm = self._run(candidate)

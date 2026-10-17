@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from ratchet.verify import dsse, recompute
@@ -41,6 +42,7 @@ class Ctx:
     eval_roles: dict[str, str]
     human_keys: dict[str, Any]
     require_reports: bool
+    sessions: dict[str, bytes] = field(default_factory=dict)  # a k-session bundle's files, by file name
     items: list[dict[str, Any]] = field(default_factory=list)
     scope: dict[str, Any] = field(default_factory=dict)
 
@@ -158,12 +160,59 @@ def recompute_authority(ctx: Ctx) -> None:
     if result.passed or not ctx.claimed["authority"]:
         _agree(ctx, "authority", result)
         return
+    claimed = next(c for c in ctx.payload["checks"] if c["name"] == "authority").get("evidence") or {}
+    if isinstance(claimed.get("extended"), dict):
+        _recompute_extended(ctx, parent, candidate, claimed["extended"])
+        return
     excepted = any(str(e).startswith(EXCEPTION_PREFIX) for e in ctx.payload["exceptions"])
     if not excepted:
         raise Refuse("contradicted", "authority_recompute_failed_without_exception", "gate:authority")
     if problem := _approval_covers(ctx, ctx.payload["candidate_digest"]):
         raise Refuse("not_established", problem, "gate:authority")
     ctx.item("gate:authority", "recomputed", passed=False, covered_by="verified human approval")
+
+
+BUNDLE_FILES = ("manifest.json", "executions.jsonl", "verdict.json")
+
+
+def _recompute_extended(
+    ctx: Ctx, parent: dict[str, Any], candidate: dict[str, Any], claimed: dict[str, Any]
+) -> None:
+    """An added tool or edited procedure admitted on k-session evidence: recompute the bundle's verdict and
+    check it compares exactly this parent and candidate. That the candidate's runs exercised each change is
+    read from the signed evidence, since the runs' traces are not supplied here."""
+    import tempfile
+
+    from ratchet.improve import sessions
+
+    if "refused" in claimed:
+        raise Refuse("contradicted", "admitted_with_refused_extended_change", "gate:authority")
+    if set(ctx.sessions) != set(BUNDLE_FILES):
+        ctx.item("gate:authority", "not_supplied", needs=[f"sessions:{n}" for n in BUNDLE_FILES])
+        return
+    with tempfile.TemporaryDirectory(prefix="ratchet-sessions-") as tmp:
+        for name, raw in ctx.sessions.items():
+            (Path(tmp) / name).write_bytes(raw)
+        try:
+            same, verdict = sessions.verify_bundle(Path(tmp))
+            protocol = sessions.load_bundle(Path(tmp)).protocol
+        except sessions.BundleError as exc:
+            raise Refuse("contradicted", f"sessions_bundle_refused:{exc}", "gate:authority") from exc
+    if not same or verdict["verdict"] != "admitted":
+        raise Refuse("contradicted", "sessions_verdict_not_admitted", "gate:authority")
+    if protocol.digest != claimed.get("protocol_digest"):
+        raise Refuse("contradicted", "sessions_bundle_not_the_named_one", "gate:authority")
+    arms = dict(protocol.arms)
+    if arms["candidate"] != candidate.get("version") or any(
+        arms[a] != parent.get("version") for a in sessions.UNCHANGED
+    ):
+        raise Refuse("contradicted", "sessions_bundle_compares_other_harnesses", "gate:authority")
+    ctx.item(
+        "gate:authority",
+        "partial",
+        covered_by="recomputed k-session verdict",
+        authenticated_only=["tools_called", "procedures_used"],
+    )
 
 
 def recompute_replay(ctx: Ctx) -> None:

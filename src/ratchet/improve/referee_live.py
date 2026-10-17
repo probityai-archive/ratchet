@@ -69,6 +69,7 @@ def case_suite_parts_with(
         suite_digest=config.get("suite_digest"),
         workers=int(config.get("workers", 8)),
         repeats=int(config.get("repeats", 1)),
+        session_bundles={str(k): Path(v) for k, v in config.get("session_bundles", {}).items()},
         close=stack.close,
     )
 

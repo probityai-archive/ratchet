@@ -33,6 +33,11 @@ def _parser() -> argparse.ArgumentParser:
         help="replay:<guard> or overfit_lint",
     )
     add("--approval", type=Path, help="human approval envelope for an authority exception")
+    add(
+        "--sessions",
+        type=Path,
+        help="the k-session bundle directory a tool addition or procedure edit was admitted on",
+    )
     add("--human-key", type=Path, action="append", default=[], help="pinned key of a human approver")
     add("--require-reports", action="store_true", help="every named report must be supplied")
     add("--require-complete", action="store_true", help="every recomputable item must be recomputed")
@@ -77,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         recomputed=recomputed,
         approval=approval,
         options=options,
+        sessions=args.sessions,
     )
     if args.json:
         print(json.dumps(result.to_dict(), sort_keys=True, indent=2))

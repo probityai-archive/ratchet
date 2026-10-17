@@ -69,7 +69,7 @@ RECOMPUTED, derived by this verifier from bytes:
 | `admission_flag`: `admitted` equals the conjunction of the required gates | the envelope |
 | `report_digests`: each supplied report hashes to the digest the receipt names | stored reports |
 | `gate:heldout`, `gate:no_regression`, `gate:benign_twins` | the evaluation reports the receipt names: P1, P2, C1 and C2, or P1, P2 and C1 for a refusal made after C1 (the gate runs C2 only when C1 clears every gate, so such a receipt names no C2; the held-out gate then recomputes as failed, since admission needs both candidate runs) |
-| `gate:authority` | parent and candidate harness documents; a human approval when authority grew by declared exception |
+| `gate:authority` | parent and candidate harness documents; a human approval when authority grew by declared exception; for a tool grant or procedure edit, the k-session bundle (`--sessions DIR`), recomputed and checked against the parent and candidate. That item reads `partial`: that the candidate's runs called the tool or used the procedure is read from the signed evidence |
 | `gate:replay` | the replay result recomputed from the recorded inputs, per added guard (`recomputed: replay:<guard id>`) |
 | `gate:overfit_lint` | the screen result recomputed from the training literals (`recomputed: overfit_lint`) |
 
@@ -117,7 +117,7 @@ recoveries and no loss of a protected case. Supplying the four evaluation report
 | Decision | Reason |
 |---|---|
 | supported | `admitted_receipt_verified`, `rejection_receipt_verified` |
-| contradicted | `untrusted_key`, `signature_invalid`, `consumer_binding_mismatch`, `admitted_with_failed_gate:<g>`, `rejected_with_all_gates_passed`, `report_digest_mismatch:<n>`, `report_not_named:<n>`, `gate_recompute_mismatch:<g>`, `authority_recompute_failed_without_exception`, `harness_not_the_decided_candidate`, `harness_not_the_decided_parent`, `replay_recompute_mismatch:<guard>:<field>`, `replay_snapshot_mismatch:<guard>`, `replay_new_guards_mismatch`, `replay_check_passed_with_failed_guard`, `report_malformed:<detail>`, `evidence_not_json:<role>` |
+| contradicted | `untrusted_key`, `signature_invalid`, `consumer_binding_mismatch`, `admitted_with_failed_gate:<g>`, `rejected_with_all_gates_passed`, `report_digest_mismatch:<n>`, `report_not_named:<n>`, `gate_recompute_mismatch:<g>`, `authority_recompute_failed_without_exception`, `admitted_with_refused_extended_change`, `sessions_bundle_refused:<why>`, `sessions_verdict_not_admitted`, `sessions_bundle_not_the_named_one`, `sessions_bundle_compares_other_harnesses`, `harness_not_the_decided_candidate`, `harness_not_the_decided_parent`, `replay_recompute_mismatch:<guard>:<field>`, `replay_snapshot_mismatch:<guard>`, `replay_new_guards_mismatch`, `replay_check_passed_with_failed_guard`, `report_malformed:<detail>`, `evidence_not_json:<role>` |
 | not_established | `unsupported_payload_type`, `unsupported_predicate`, `payload_not_json_object`, `payload_field_invalid:<field>`, `gate_missing:<g>`, `report_not_supplied:<n>`, `authority_exception_unverified:<why>`, `recomputation_incomplete:<item>`, `envelope_unavailable` |
 | no_verdict | malformed envelope, `invalid_report_name:<n>`, `invalid_harness_role`, `no_trusted_key`, or a malformed case or policy |
 

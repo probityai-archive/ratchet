@@ -12,7 +12,10 @@ records the counts, case ids and run ids it rests on, so the receipt carries the
 4. benign_twins: zero harness interventions on benign twins, in every split, in either candidate run.
 5. overfit_lint: no fixture-specific id, name or amount copied from training traces.
 6. authority: additive deltas only. Parent guards and procedures unchanged and in order, the parent prompt a
-   byte prefix, ids unique, tools a subset; anything else needs a separately signed human exception.
+   byte prefix, ids unique, tools a subset; anything else needs a separately signed human exception. One
+   wider class is admitted on evidence instead: added tools and edited procedures, when an admitted
+   k-session bundle (`ratchet.improve.sessions`) names exactly this parent and candidate and the candidate's
+   own runs called every added tool and used every edited procedure (`ExtendedChange`).
 7. cost: recorded and reported, never a gate.
 
 Only FRESH results count: a CACHED or RECORDED result, or a missing one, is invalid evidence for its case.
@@ -23,6 +26,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -284,11 +288,80 @@ def _approval(
     return True, f"human approval by {body.get('approver', 'unnamed')}"
 
 
+EXTENDABLE = frozenset({"tools_granted", "procedures_changed_or_reordered"})
+
+
+@dataclass(frozen=True)
+class ExtendedChange:
+    """The evidence that admits a tool addition or a procedure edit: an admitted k-session bundle for exactly
+    this parent and candidate, read and recomputed from its directory."""
+
+    bundle: Path
+
+
+def _edited_procedures(parent: Harness, candidate: Harness) -> list[str]:
+    old = {p.id: p for p in parent.procedures}
+    return sorted(p.name for p in candidate.procedures if p.id in old and old[p.id] != p)
+
+
+def _exercised(runs: Sequence[EvalReport], tools: Sequence[str], procedures: Sequence[str]) -> dict[str, Any]:
+    """Which added tools the candidate called and which edited procedures it used, in its fresh runs."""
+    called: set[str] = set()
+    used: set[str] = set()
+    fresh = {r.run_id for e in runs for r in e.results if r.mode == "FRESH" and not r.error}
+    for e in runs:
+        for t in e.traces:
+            if t.run_id not in fresh:
+                continue
+            for ev in t.events:
+                if ev.kind == "tool_call":
+                    called.add(str((ev.payload.get("call") or ev.payload).get("name", "")))
+                elif ev.kind == "procedure" and ev.payload.get("found"):
+                    used.add(str(ev.payload.get("name", "")))
+    return {
+        "tools_not_called": sorted(set(tools) - called),
+        "procedures_not_used": sorted(set(procedures) - used),
+    }
+
+
+def _extended_problem(
+    parent: Harness, candidate: Harness, extended: ExtendedChange, runs: Sequence[EvalReport]
+) -> tuple[str | None, dict[str, Any]]:
+    from ratchet.improve import sessions
+
+    try:
+        same, verdict = sessions.verify_bundle(extended.bundle)
+        protocol = sessions.load_bundle(extended.bundle).protocol
+    except (sessions.BundleError, OSError) as exc:
+        return f"k-session bundle refused: {exc}", {}
+    arms = dict(protocol.arms)
+    evidence: dict[str, Any] = {
+        "change_class": "exercised_under_k_sessions",
+        "protocol_digest": protocol.digest,
+        "verdict": verdict["verdict"],
+        "t_min": verdict.get("t_min"),
+    }
+    if not same:
+        return "k-session verdict does not recompute from its bundle", evidence
+    if verdict["verdict"] != "admitted":
+        return f"k-session verdict is {verdict['verdict']}", evidence
+    if arms["candidate"] != candidate.version or any(arms[a] != parent.version for a in sessions.UNCHANGED):
+        return "k-session bundle compares other harnesses", evidence
+    granted = sorted(set(candidate.tool_allowlist) - set(parent.tool_allowlist))
+    exercised = _exercised(runs, granted, _edited_procedures(parent, candidate))
+    evidence |= exercised
+    if exercised["tools_not_called"] or exercised["procedures_not_used"]:
+        return "an added tool or edited procedure was never exercised", evidence
+    return None, evidence
+
+
 def check_structure(
     parent: Harness,
     candidate: Harness,
     approval: bytes | None = None,
     trusted_humans: Mapping[str, Ed25519PublicKey] | None = None,
+    extended: ExtendedChange | None = None,
+    cand_runs: Sequence[EvalReport] = (),
 ) -> Check:
     """Additive deltas only: parent guards and procedures unchanged and in order, the parent prompt a byte
     prefix, every id unique, the tool allowlist a subset of the parent's."""
@@ -321,7 +394,12 @@ def check_structure(
         "prompt_bytes_added": len(candidate.system_prompt.encode()) - len(parent.system_prompt.encode()),
     }
     ok = not violations
-    if violations and "digest_invalid" not in violations:
+    if violations and extended is not None and set(violations) <= EXTENDABLE:
+        problem, evidence["extended"] = _extended_problem(parent, candidate, extended, cand_runs)
+        ok = problem is None
+        if problem is not None:
+            evidence["extended"]["refused"] = problem
+    elif violations and "digest_invalid" not in violations:
         ok, evidence["exception"] = _approval(approval, trusted_humans or {}, candidate)
     return Check("authority", ok, evidence)
 
@@ -371,6 +449,7 @@ def admit(
     approval: bytes | None = None,
     trusted_humans: Mapping[str, Ed25519PublicKey] | None = None,
     context: Mapping[str, Any] | None = None,
+    extended: ExtendedChange | None = None,
 ) -> Decision:
     """`parent_runs` are the parent's two fresh runs (the first over every case, the second at least over
     the held-out cases); `confirm_eval` is the candidate's confirming fresh held-out run, or None before it
@@ -378,7 +457,7 @@ def admit(
     if candidate.parent != parent.version:
         raise ValueError(f"candidate {candidate.version} is not a child of {parent.version}")
     cand_runs = [e for e in (cand_eval, confirm_eval) if e is not None]
-    authority = check_structure(parent, candidate, approval, trusted_humans)
+    authority = check_structure(parent, candidate, approval, trusted_humans, extended, cand_runs)
     checks = [
         check_replay(parent, candidate, replays, composed),
         check_fresh(parent_runs, cand_eval, confirm_eval),
