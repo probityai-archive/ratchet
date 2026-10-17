@@ -1,0 +1,82 @@
+name: release demo image
+
+# On a tag probity-ratchet-vX.Y.Z: build the demo image on x86-64 and on arm64, run the reviewer sequence
+# (docker/demo/check.sh) against each built image in a container with no network, push exactly the image
+# that passed, then join the two into one multi-architecture index tagged with the release tag. The index
+# digest is printed in the job summary; it is the digest the papers and docs pin.
+# A pull request that touches the image or this file runs the build and the check, never the push.
+
+on:
+  push:
+    tags: ["probity-ratchet-v*"]
+  pull_request:
+    paths: ["docker/**", ".github/workflows/release-demo-image.yml"]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/probityai/ratchet-demo
+
+jobs:
+  build:
+    name: build and check (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: build the demo image
+        run: >-
+          docker build -f docker/demo.Dockerfile
+          --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}"
+          --label "org.opencontainers.image.revision=${GITHUB_SHA}"
+          --label "org.opencontainers.image.licenses=Apache-2.0"
+          -t ratchet-demo:release .
+      - name: run the reviewer sequence on the image to be pushed
+        run: docker/demo/check.sh ratchet-demo:release
+      - name: push the checked image
+        if: github.event_name == 'push'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag ratchet-demo:release "$IMAGE:$GITHUB_REF_NAME-$ARCH"
+          docker push "$IMAGE:$GITHUB_REF_NAME-$ARCH"
+
+  index:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - name: join both architectures under the release tag
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx imagetools create -t "$IMAGE:$GITHUB_REF_NAME" \
+            "$IMAGE:$GITHUB_REF_NAME-amd64" "$IMAGE:$GITHUB_REF_NAME-arm64"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$GITHUB_REF_NAME" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          case "$digest" in sha256:*) ;; *) echo "no index digest read: '$digest'"; exit 1 ;; esac
+          {
+            echo "### Demo image"
+            echo
+            echo "\`$IMAGE@$digest\`"
+            echo
+            echo "tag \`$IMAGE:$GITHUB_REF_NAME\`, linux/amd64 and linux/arm64, each checked by docker/demo/check.sh before the push"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$IMAGE@$digest"

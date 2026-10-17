@@ -4,12 +4,19 @@
 
 One image holds the tool, a local Atlas store and the scripted double-refund scenario. The agent is a scripted
 worker with fixed replies, so the demo needs no model, no key, no GPU and no network once the image exists.
-Build it from a checkout, then run the scenario once:
+Each release tag publishes it as `ghcr.io/probityai/ratchet-demo:<tag>` for linux/amd64 and linux/arm64; the
+release workflow runs `docker/demo/check.sh` on each architecture's image before pushing that image, and its job
+summary prints the digest to pin. Pull it, or build it from a checkout, then run the scenario once:
 
 ```sh
-docker build -f docker/demo.Dockerfile -t ratchet-demo:dev .
+docker pull ghcr.io/probityai/ratchet-demo:<tag>                    # or pin: ghcr.io/probityai/ratchet-demo@sha256:<digest>
+docker tag ghcr.io/probityai/ratchet-demo:<tag> ratchet-demo:dev
+# or, from a checkout of the tag: docker build -f docker/demo.Dockerfile -t ratchet-demo:dev .
 docker run --rm ratchet-demo:dev ratchet demo double-refund
 ```
+
+The guard sandbox needs a Linux kernel with seccomp and Landlock enabled; without them it refuses to start a
+guard rather than run one unconfined.
 
 To read what the demo stored, keep one container running and run each command in it:
 

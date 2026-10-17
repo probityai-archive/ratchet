@@ -181,7 +181,7 @@ jobs:
   demo-image:
     # The no-build demo: build the image, then run the reviewer sequence in a fresh container with no network
     # and no host mount, on x86-64 and on arm64 (the image runs on Apple-silicon hosts and arm64 servers).
-    # The image is built here only; it is never pushed.
+    # The image is built here only; release-demo-image.yml publishes it on a release tag.
     name: demo-image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
