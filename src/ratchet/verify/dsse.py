@@ -1,4 +1,4 @@
-"""DSSE v1 envelopes for Ratchet, through the `probityai.dsse` binding of the `dsse` crate.
+"""DSSE v1 envelopes for Ratchet, through the `jcs_admit.dsse` binding of the `dsse` crate.
 
 Every pre-authentication encoding, signature and signature check goes through the crate; nothing here
 computes PAE or calls an Ed25519 primitive. This module adds what Ratchet's reason codes need around it:
@@ -18,10 +18,10 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+import jcs_admit
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from probityai import dsse as native
-from probityai import jcs
+from jcs_admit import dsse as native
 from ratchet_cases.types import sha256_hex
 
 MAX_ENVELOPE_BYTES = 4 * 1024 * 1024
@@ -136,7 +136,7 @@ def sign(payload_type: str, payload: bytes, keys: Sequence[Ed25519PrivateKey]) -
     """A DSSE envelope over `payload` signed by every key in `keys`, as RFC 8785 bytes."""
     if not keys:
         raise ValueError("at least one signing key is needed")
-    return jcs.admit(native.sign(payload_type, payload, [_native_signer(k) for k in keys]))
+    return jcs_admit.admit(native.sign(payload_type, payload, [_native_signer(k) for k in keys]))
 
 
 def signature_entry(payload_type: str, payload: bytes, key: Ed25519PrivateKey) -> dict[str, str]:

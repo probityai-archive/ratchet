@@ -2,7 +2,7 @@
 
 The envelope follows the DSSE v1 envelope format: the signature covers PAE(payloadType, payload), never the
 raw payload, so a payload cannot be replayed under another type. Signing and verification go through
-`ratchet.verify.dsse`, the one DSSE implementation in this package (the `probityai.dsse` binding).
+`ratchet.verify.dsse`, the one DSSE implementation in this package (the `jcs_admit.dsse` binding).
 """
 
 from __future__ import annotations

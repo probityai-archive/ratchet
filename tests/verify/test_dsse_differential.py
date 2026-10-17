@@ -131,5 +131,5 @@ def test_the_python_reader_shares_nothing_with_the_binding() -> None:
 
 def test_the_package_dsse_module_leaves_every_signature_to_the_crate() -> None:
     imported = _imports(Path(dsse.__file__))
-    assert "probityai.dsse" in imported
+    assert "jcs_admit.dsse" in imported
     assert "cryptography.exceptions.InvalidSignature" not in imported
