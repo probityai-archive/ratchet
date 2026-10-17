@@ -20,6 +20,11 @@ store. Every change below is in this repository; the releases it waits for are n
 - `pymongo` and `raindrop-ai` are the `atlas` and `telemetry` extras. Without them, records go to a signed
   append-only file store (`RATCHET_STORE_DIR`).
 - `probity-verify==0.1.1` and `agent-evidence-vectors==0.19.0`.
+- Stochastic policy v3.1: a cohort needs at least 8 cases, the size at which the 5-point aggregate limit
+  stops refusing a per-case decline the 8-of-40 tolerance accepts. A smaller cohort is `TOO_SMALL` and its
+  decisions fail the new `cohort_size` gate (`cohort_too_small`) instead of reporting a control failure.
+  Every v3 tolerance is unchanged. The verifier recomputes the gate from the signed comparison, and v3
+  receipts still verify as v3.
 - Held-out grading runs in a referee process with its own store and the decision key
   (`ratchet.improve.referee`). The improver gets counts and harness names only, and its database role cannot
   read the referee's Atlas database. `ratchet evolve` and every bench driver start one; the views read both

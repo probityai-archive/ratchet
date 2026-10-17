@@ -301,6 +301,51 @@ may be admitted using that cohort. Retain and report the failed controls.
 Do not replace unfavorable completed control runs or adjust tolerances
 within the cohort.
 
+#### Minimum cohort size (v3.1)
+
+A cohort qualifies only when its declared case manifest has at least
+`min_cohort_cases` = 8 cases. A smaller cohort is TOO_SMALL: every arm still
+runs, the controls are still compared and reported, and the run stands as
+a path check, but no candidate is admitted from it. Its decisions fail the
+separate gate `cohort_size` with reason `cohort_too_small`, so a refusal
+for size is never reported as a control failure. The rule reads the
+manifest only, so it is fixed before any outcome exists.
+
+Why 8. The policy accepts a per-case decline of up to 8 of 40 passes, and
+nothing in it limits how those losses fall between the panels; all 8 may
+fall in one panel of 20. In a cohort of n cases that one decline moves that
+panel's mean case pass rate by 100 x 8 / (20 x n) points, and the aggregate
+limit is 5 points. The two accepted tolerances agree only when
+100 x 8 / (20 x n) <= 5, that is n >= 8. In general,
+`min_cohort_cases = ceil(100 x min(max_case_decline, panel_size) /
+(panel_size x max_aggregate_decline_points))`. Below 8 cases the aggregate
+check refuses declines that the per-case tolerance accepts. At one case it
+refuses a single lost execution in a panel (100 / 20 = 5 points is the
+limit, so two lost runs fail). It then measures one run's noise rather than
+drift across cases.
+
+The live one-case cell shows the defect (docs/results/v3-live.md). The
+candidate went from 12 to 35 of 40 against the parent, and the cohort was
+UNQUALIFIED because each identity control lost 2 of 20 runs in panel 0
+(10 points). For an unchanged arm at a 50% pass rate, a one-case panel fails
+the aggregate check with probability 0.32, and at least one of the three
+aggregate checks fails with probability 0.53 (exact binomial arithmetic,
+`python docs/design/sequential-v3/cohort_size.py`).
+Under v3.1 the cell is TOO_SMALL. It could not admit a candidate under v3
+either, because two stable recoveries need two cases.
+
+The minimum keeps every false-admission property of v3 exactly. It adds
+one condition and changes no tolerance, so every candidate v3.1 admits is
+one v3 would admit on the same evidence. Making the control limit scale
+with the case count would loosen the controls while the candidate check
+stayed at 5 points. A small cohort could then qualify with control spread
+far above the candidate tolerance, and that tolerance would no longer be
+calibrated. The minimum does not make the aggregate check free of noise at
+8 cases or above. For an unchanged arm, every case at a 50% pass rate (the
+worst case), at least one aggregate check fails with probability 0.31 at
+8 cases and 0.15 at 19. A noise-calibrated limit is a separate proposal
+that needs operator acceptance (docs/design/sequential-v3.md).
+
 A candidate with no change to the effective system prompt, procedures,
 guards, or tool permissions is ineligible for improvement admission.
 Changes only to identifiers, provenance, parent references, or timestamps
@@ -331,8 +376,10 @@ continues to use the frozen sanitized report schema.
 Passing this policy authorizes admission only when every other applicable
 gate passes. Receipt-first conditional activation remains separate.
 
-Receipts name stochastic policy v3 and its exact thresholds. Existing
-ruling-2 decisions remain ruling-2 decisions.
+Receipts name stochastic policy v3 and its exact thresholds; a v3.1
+receipt also carries `min_cohort_cases` and the `cohort_size` gate.
+Decisions signed under v3 remain v3 decisions and verify with v3's gates.
+Existing ruling-2 decisions remain ruling-2 decisions.
 
 Operator acceptance, 2026-10-11: stochastic policy v3 is adopted for nondeterministic evaluators, including its tolerances (a per-case observed decline of up to 8 of 40 passes and an aggregate decline of up to 5 percentage points). A decision made under v3 never claims zero regressions.
 

@@ -61,6 +61,16 @@ case, 5 points is a single execution in a 20-run panel, so a one-case cohort qua
 unchanged copy loses even one run in either panel. The candidate's own gain (12 to 35 of 40, intermediate
 to high) is in the signed record, but no candidate can be admitted while the controls fail.
 
+Re-decided offline under stochastic policy v3.1 (2026-10-17), from the cell's recorded execution records
+with no new model calls: the cohort is TOO_SMALL (1 case against a minimum of 8, reason `cohort_too_small`),
+and the candidate is still refused, now by the `cohort_size` gate instead of a control failure. The
+controls' 10-point panel-0 declines are kept in the cohort record. The cell could not have admitted a
+candidate under either version: two stable recoveries need two cases, and the parent's 12 of 40 is
+intermediate, so this case is not a recovery. The test
+`test_a_one_case_cohort_is_too_small_not_unqualified_on_the_recorded_cell` pins this result. The signed
+receipt above stays a v3 decision and still verifies as one. The minimum and its derivation are in
+docs/CONTRACT.md under "Minimum cohort size (v3.1)".
+
 The per-case table above is read from the referee-signed results file
 [v3-cell/v3-cell-results/v3-cell.dsse](v3-cell/v3-cell-results/v3-cell.dsse) (sha256 `49f5e8ecc0bb`,
 signer keyid `b61d7e39c111`). To check it:
