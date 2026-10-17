@@ -11,18 +11,17 @@ import pytest
 from ratchet_cases.types import Cost, Event, Outcome, Trace
 
 from ratchet.canonical import CANONICALIZATION
-from ratchet.store import (
+from ratchet.store import IntegrityError, NewFailure, atlas, atlas_setup
+from ratchet.store.atlas import Store
+from ratchet.store.embed import (
+    EMBEDDING_DIMS,
+    CachedEmbedder,
     EmbeddingError,
-    IntegrityError,
     MissingKeyError,
-    NewFailure,
-    Store,
     VoyageEmbedder,
     VoyageReranker,
-    atlas,
-    atlas_setup,
+    cache_key,
 )
-from ratchet.store.embed import EMBEDDING_DIMS, CachedEmbedder, cache_key
 from ratchet.types import Harness
 
 

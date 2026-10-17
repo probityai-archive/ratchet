@@ -21,7 +21,7 @@ from ratchet.cli import LiveBackend, main
 from ratchet.improve.receipt import DECISION_TYPE, Signer
 from ratchet.improve.replay import GuardRunner
 from ratchet.improve.sim import RecordedViews, Simulator
-from ratchet.store import Store
+from ratchet.store.atlas import Store
 from ratchet.types import Harness
 from ratchet.view.matrix import CaseInfo
 

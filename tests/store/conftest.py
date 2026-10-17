@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from pymongo import MongoClient
 
-from ratchet.store import Store
+from ratchet.store.atlas import Store
 from ratchet.store.embed import EMBEDDING_DIMS, InputType
 
 ROOT = Path(__file__).resolve().parents[2]

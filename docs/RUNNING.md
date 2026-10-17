@@ -38,7 +38,18 @@ From a checkout instead, with the store of section 1 running, `uv run ratchet de
 
 ## 1. A store
 
-Ratchet keeps everything in MongoDB Atlas. For development, the local Atlas image runs mongod and the search
+Ratchet keeps every version, trace, evaluation and decision in one of two stores.
+
+**The signed file store**, with no database. Every record is one line of `records.jsonl`, a DSSE envelope signed
+by the store's key and linked to the line before it, so an edited, dropped or reordered line refuses to open:
+
+```sh
+export RATCHET_STORE_DIR=.ratchet-store
+export RATCHET_STORE_KEY=$(python3 -c 'import os; print(os.urandom(32).hex())')   # keep it outside the store
+```
+
+**MongoDB Atlas**, for vector search over failure memory and change streams (`ratchet live`). It needs the
+`atlas` extra (`uv sync --extra atlas`). For development, the local Atlas image runs mongod and the search
 service on one node, so Vector Search and change streams work offline:
 
 ```sh
@@ -56,12 +67,13 @@ cluster's connection string in `RATCHET_MONGODB_URI`.
 
 | Variable | Used for |
 |---|---|
-| `RATCHET_MONGODB_URI`, `RATCHET_DB` | the store (database defaults to `ratchet`) |
+| `RATCHET_STORE_DIR`, `RATCHET_STORE_KEY` | the signed file store and its 32-byte Ed25519 seed as hex; used when set |
+| `RATCHET_MONGODB_URI`, `RATCHET_DB` | the Atlas store, with the `atlas` extra (database defaults to `ratchet`) |
 | `RATCHET_BASE_URL`, `RATCHET_API_KEY`, `RATCHET_MODEL` | the agent model, through any OpenAI-compatible endpoint |
 | `RATCHET_IMPROVER_MODEL` | the model that proposes guards (with `RATCHET_IMPROVER_BASE_URL` and `RATCHET_IMPROVER_API_KEY` for a different endpoint) |
 | `RATCHET_SIGNING_KEY` | 32-byte Ed25519 seed as hex; signs decisions. Never stored in the repository |
 | `VOYAGE_API_KEY` | embeddings for failure retrieval |
-| `RAINDROP_WRITE_KEY` | with `--raindrop`, sends runs and decisions to Raindrop |
+| `RAINDROP_WRITE_KEY` | with `--raindrop` and the `telemetry` extra, sends runs and decisions to Raindrop |
 | `RATCHET_IMPROVER_URI` | the improver's connection string, a database user with no access to held-out cases |
 | `RATCHET_GUARD_REQUIRE` | isolation layers a guard child must apply (default `rlimits,netns,seccomp,landlock`; must keep `netns` or `seccomp`) |
 | `RATCHET_DEMO_DIR` | where `ratchet demo` writes its public key (default `.ratchet-demo`) |

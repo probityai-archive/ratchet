@@ -469,8 +469,10 @@ def test_default_console_and_backend_report_the_missing_store_uri(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv("RATCHET_MONGODB_URI", raising=False)
+    monkeypatch.delenv("RATCHET_STORE_DIR", raising=False)
     assert main(["show", "lineage"]) == 1
-    assert "RATCHET_MONGODB_URI is not set" in capsys.readouterr().err
+    err = " ".join(capsys.readouterr().err.split())
+    assert "set RATCHET_STORE_DIR for the file store, or RATCHET_MONGODB_URI for Atlas" in err
 
 
 # -- the real wiring ----------------------------------------------------------------------------------------

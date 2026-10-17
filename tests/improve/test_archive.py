@@ -23,7 +23,7 @@ from ratchet.improve.archive import (
     select_parent,
 )
 from ratchet.improve.evaluate import CaseResult, EvalReport
-from ratchet.store import Store
+from ratchet.store.atlas import Store
 from ratchet.types import Guard, Harness, Procedure
 
 # -- builders: the records are produced by the real report and decision types ------------------------------

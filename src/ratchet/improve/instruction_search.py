@@ -1110,7 +1110,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from ratchet.agent.worker import run_case
     from ratchet.improve.sandbox import SandboxRunner
     from ratchet.improve.worldsim import WorldSimulator
-    from ratchet.store import Store as AtlasStore
+    from ratchet.store.atlas import Store as AtlasStore
 
     a = _args(argv)
     key = os.environ.get("RATCHET_API_KEY", "")

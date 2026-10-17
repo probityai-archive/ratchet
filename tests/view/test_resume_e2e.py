@@ -21,7 +21,7 @@ from rich.console import Console
 
 from ratchet.agent.model import ModelTurn, ScriptedModel, scripted_turn
 from ratchet.cli import LiveBackend, main
-from ratchet.store import Store
+from ratchet.store.atlas import Store
 
 pytestmark = pytest.mark.integration
 
@@ -54,7 +54,7 @@ CHILD = textwrap.dedent(
     from ratchet.agent.seed import seed_harness
     from ratchet.agent.worker import run_case
     from ratchet_cases.cases import get
-    from ratchet.store import Store
+    from ratchet.store.atlas import Store
 
     uri, db, run_id, case_id, ticket, charge, cents = sys.argv[1:8]
     store = Store(uri, db)

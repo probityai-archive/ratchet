@@ -18,7 +18,9 @@ from conftest import HashEmbedder
 from pymongo.errors import OperationFailure
 from ratchet_cases.types import Cost, Event, Outcome, Trace
 
-from ratchet.store import Store, VoyageEmbedder, atlas_admin
+from ratchet.store import atlas_admin
+from ratchet.store.atlas import Store
+from ratchet.store.embed import VoyageEmbedder
 from ratchet.types import Harness
 
 PRIVATE = Path(__file__).resolve().parents[2] / "private"

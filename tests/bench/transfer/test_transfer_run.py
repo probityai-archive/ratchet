@@ -263,7 +263,7 @@ def test_cli_probe_writes_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 def test_cli_run_persists_when_a_store_uri_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import pymongo
 
-    import ratchet.store
+    import ratchet.store.atlas
 
     written: dict[str, Any] = {}
 
@@ -282,8 +282,8 @@ def test_cli_run_persists_when_a_store_uri_is_set(tmp_path: Path, monkeypatch: p
     h = candidate()
     monkeypatch.setenv("RATCHET_MONGODB_URI", "mongodb://fake")
     monkeypatch.setattr(pymongo, "MongoClient", FakeClient)
-    monkeypatch.setattr(ratchet.store, "Store", lambda *_a: FakeStore([{"_id": "d", "candidate": h.version,
-                                                                         "admitted": True}], h))  # fmt: skip
+    stored = [{"_id": "d", "candidate": h.version, "admitted": True}]
+    monkeypatch.setattr(ratchet.store.atlas, "Store", lambda *_a: FakeStore(stored, h))
     monkeypatch.setattr(cli, "endpoint_info", lambda *_a, **_k: {"served": [], "server_version": None})
     monkeypatch.setattr("ratchet.agent.worker.run_case", fake_run_case)
     out = tmp_path / "r.json"

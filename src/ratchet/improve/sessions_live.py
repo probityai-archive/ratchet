@@ -29,11 +29,10 @@ from typing import Any
 
 from ratchet_cases.cases import all_cases
 
-from ratchet.agent.model import ModelClient, ModelConfig
+from ratchet.agent.model import ModelClient, ModelConfig, SeededTransport
 from ratchet.agent.worker import run_case
 from ratchet.export.claude_code import harness_from_json
 from ratchet.improve.evaluate import RunCase, is_infra_failure, model_calls
-from ratchet.improve.run import SeededTransport
 from ratchet.improve.sessions import ARMS, Executor, Outcome, Protocol, Slot, run_protocol
 from ratchet.types import Harness
 

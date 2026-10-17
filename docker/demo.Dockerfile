@@ -49,7 +49,7 @@ COPY probity-ratchet-cases/ probity-ratchet-cases/
 COPY src/ src/
 COPY keys/ keys/
 COPY --from=native /wheels/ /wheels/
-RUN uv sync --locked --no-dev --python 3.14.8 --no-install-package probityai \
+RUN uv sync --locked --no-dev --extra atlas --python 3.14.8 --no-install-package probityai \
     && uv pip install --python /opt/ratchet/.venv/bin/python --no-deps /wheels/probityai-0.1.0-*.whl \
     && /opt/ratchet/.venv/bin/ratchet --help > /dev/null
 

@@ -321,3 +321,22 @@ class ScriptedModel:
         if index >= len(self._turns):
             raise ScriptExhaustedError(f"script has {len(self._turns)} turns; turn {index + 1} was requested")
         return self._turns[index]
+
+
+class SeededTransport(httpx.HTTPTransport):
+    """Adds a fixed sampling seed to every chat-completions request body, so an endpoint that honours seeds
+    (vLLM does) answers a repeated request the same way. Nothing else in the request changes."""
+
+    def __init__(self, seed: int) -> None:
+        super().__init__()
+        self.seed = seed
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/chat/completions"):
+            body = json.loads(request.content)
+            body["seed"] = self.seed
+            content = json.dumps(body).encode("utf-8")
+            headers = [(k, v) for k, v in request.headers.raw if k.lower() != b"content-length"]
+            headers.append((b"content-length", str(len(content)).encode()))
+            request = httpx.Request(request.method, request.url, headers=headers, content=content)
+        return super().handle_request(request)

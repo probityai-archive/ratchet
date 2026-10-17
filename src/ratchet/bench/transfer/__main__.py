@@ -142,7 +142,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     uri = os.environ.get("RATCHET_MONGODB_URI")
     source = None
     if uri:
-        from ratchet.store import Store
+        from ratchet.store.atlas import Store
 
         source = Store(uri, args.store_db)
     base = seed_harness()

@@ -14,9 +14,9 @@ from ratchet.improve.activate import (
     ActivationError,
     Activator,
     MemoryActivator,
-    MongoActivator,
     envelope_digest,
 )
+from ratchet.store.activation import MongoActivator
 
 LOCAL_URI = "mongodb://ratchet:ratchet-local-dev@127.0.0.1:27018/?directConnection=true"
 ENV = base64.b64encode(b"signed-envelope").decode()

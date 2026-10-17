@@ -4012,16 +4012,18 @@ dependencies = [
     { name = "probity-ratchet-cases" },
     { name = "probity-verify" },
     { name = "probityai" },
-    { name = "pymongo" },
-    { name = "raindrop-ai" },
     { name = "rich" },
 ]
 
 [package.optional-dependencies]
+atlas = [
+    { name = "pymongo" },
+]
 bench = [
     { name = "agentdojo" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
     { name = "litellm" },
+    { name = "pymongo" },
     { name = "tau-bench" },
     { name = "tau2" },
     { name = "terminal-bench" },
@@ -4029,6 +4031,9 @@ bench = [
 ]
 gepa = [
     { name = "gepa" },
+]
+telemetry = [
+    { name = "raindrop-ai" },
 ]
 
 [package.dev-dependencies]
@@ -4052,15 +4057,16 @@ requires-dist = [
     { name = "probity-ratchet-cases", editable = "probity-ratchet-cases" },
     { name = "probity-verify", specifier = "==0.1.0" },
     { name = "probityai", git = "https://github.com/probityai/jcs-admit?subdirectory=python&rev=58a48b2f33b55cafb72de9f187f0fa53eed74d95" },
-    { name = "pymongo", specifier = ">=4.10" },
-    { name = "raindrop-ai", specifier = "==0.0.75" },
+    { name = "pymongo", marker = "extra == 'atlas'", specifier = ">=4.10" },
+    { name = "pymongo", marker = "extra == 'bench'", specifier = ">=4.10" },
+    { name = "raindrop-ai", marker = "extra == 'telemetry'", specifier = "==0.0.75" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "tau-bench", marker = "extra == 'bench'", git = "https://github.com/sierra-research/tau-bench?rev=59a200c6d575d595120f1cb70fea53cef0632f6b" },
     { name = "tau2", marker = "extra == 'bench'", git = "https://github.com/sierra-research/tau2-bench?rev=4ce7c0397c1eb65c9bbe59aeacfe1ca44a1cd699" },
     { name = "terminal-bench", marker = "extra == 'bench'", specifier = "==0.2.18" },
     { name = "tool-sandbox", marker = "extra == 'bench'", git = "https://github.com/apple/ToolSandbox?rev=c8571d7854316d2e1c5f288e59fe1e34e53f6dd1" },
 ]
-provides-extras = ["bench", "gepa"]
+provides-extras = ["atlas", "telemetry", "bench", "gepa"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -17,12 +17,12 @@ from improve.test_loop import CASES, SEED, RoutingChat
 from rich.console import Console
 
 from ratchet.cli import LiveBackend, main
-from ratchet.improve.activate import MongoActivator
 from ratchet.improve.loop import EvolveResult, Lab, evolve
 from ratchet.improve.receipt import Signer
 from ratchet.improve.replay import GuardRunner
 from ratchet.improve.sim import Simulator
-from ratchet.store import Store
+from ratchet.store.activation import MongoActivator
+from ratchet.store.atlas import Store
 from ratchet.view.matrix import CaseInfo
 
 pytestmark = pytest.mark.integration

@@ -55,6 +55,7 @@ from ratchet.view.telemetry import Sink, TelemetryStore, usage_line
 from ratchet.view.verify import render_verify, trusted_keys, verify_decision, verify_envelope
 
 URI_ENV, DB_ENV = "RATCHET_MONGODB_URI", "RATCHET_DB"
+STORE_DIR_ENV, STORE_KEY_ENV = "RATCHET_STORE_DIR", "RATCHET_STORE_KEY"
 
 
 class CliError(Exception):
@@ -113,16 +114,36 @@ class LiveBackend:
         self._store: Any = None
 
     def open_store(self) -> AbstractContextManager[WriteStore]:
-        from ratchet.store import Store
-
+        """The signed file store when RATCHET_STORE_DIR is set, else Atlas at RATCHET_MONGODB_URI."""
+        if self.env.get(STORE_DIR_ENV):
+            self._store = self._file_store(Path(self.env[STORE_DIR_ENV]))
+            return self._store  # type: ignore[no-any-return]
         uri = self.env.get(URI_ENV)
         if not uri:
             raise CliError(
-                f"{URI_ENV} is not set (local Atlas: docker compose -f docker/compose.yaml up -d --wait)"
+                f"set {STORE_DIR_ENV} for the file store, or {URI_ENV} for Atlas "
+                "(local Atlas: docker compose -f docker/compose.yaml up -d --wait)"
             )
+        try:
+            from ratchet.store.atlas import Store
+        except ImportError as exc:
+            need = "the Atlas store needs the atlas extra: pip install 'probity-ratchet[atlas]'"
+            raise CliError(f"{need}: {exc}") from exc
         store = Store(uri, self.env.get(DB_ENV, "ratchet"))
         self._store = store
         return store
+
+    def _file_store(self, root: Path) -> Any:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        from ratchet.store.file_store import FileStore
+
+        seed = self.env.get(STORE_KEY_ENV, "")
+        try:
+            key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed.strip()))
+        except ValueError as exc:
+            raise CliError(f"{STORE_KEY_ENV} must hold the file store's 32-byte Ed25519 seed in hex") from exc
+        return FileStore(root, key=key)
 
     def model(self) -> Any:
         from ratchet.agent.model import ModelClient
@@ -201,15 +222,21 @@ class LiveBackend:
 
         from ratchet.agent.guards import GuardRuntime
         from ratchet.agent.worker import run_case
-        from ratchet.improve.activate import MongoActivator
         from ratchet.improve.loop import Lab, evolve
         from ratchet.improve.receipt import Signer
         from ratchet.improve.sandbox import SandboxRunner
         from ratchet.improve.worldsim import WorldSimulator
+        from ratchet.store.file_store import FileActivator, FileStore
 
         if self._store is None:
             raise CliError("evolve needs the store open first (open_store)")
-        activator = MongoActivator(self._store.db.client, self._store.db.name)
+        activator: Any
+        if isinstance(self._store, FileStore):
+            activator = FileActivator(self._store)
+        else:
+            from ratchet.store.activation import MongoActivator
+
+            activator = MongoActivator(self._store.db.client, self._store.db.name)
         with GuardRuntime() as runtime:
             lab = Lab(
                 cases=cases,
@@ -238,7 +265,16 @@ class LiveBackend:
         return WorldSimulator(all_cases())
 
     def telemetry(self) -> Sink:
+        import importlib.util
+
         from ratchet.telemetry import RaindropSink, ledger_default_path, resolve_write_key
+
+        try:
+            found = importlib.util.find_spec("raindrop") is not None
+        except ImportError:  # a finder may refuse the module outright rather than report it missing
+            found = False
+        if not found:
+            raise CliError("--raindrop needs the telemetry extra: pip install 'probity-ratchet[telemetry]'")
 
         key = resolve_write_key(use_keyring=True)
         if key is None:
@@ -590,7 +626,8 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ratchet",
         description="An agent harness that turns each failure into a proven guard, with every version and "
-        f"proof in MongoDB Atlas. Set {URI_ENV} (and {DB_ENV}) to point at the store.",
+        f"proof in its store. Set {STORE_DIR_ENV} (and {STORE_KEY_ENV}) for the signed file store, or "
+        f"{URI_ENV} (and {DB_ENV}) for MongoDB Atlas.",
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="command")
 

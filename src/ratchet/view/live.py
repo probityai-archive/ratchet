@@ -12,8 +12,7 @@ from typing import Any
 from rich.console import Console
 from rich.text import Text
 
-from ratchet.store import ChangeEvent
-from ratchet.store.atlas import WATCHABLE
+from ratchet.store import WATCHABLE, ChangeEvent
 from ratchet.view.data import ViewStore, decision_info, eval_mode
 from ratchet.view.show import clip
 

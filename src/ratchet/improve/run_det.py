@@ -26,7 +26,7 @@ from ratchet_cases.cases import all_cases
 from ratchet_cases.types import Trace, sha256_hex
 
 from ratchet.agent.guards import GuardRuntime
-from ratchet.agent.model import ModelClient, ModelConfig
+from ratchet.agent.model import ModelClient, ModelConfig, SeededTransport
 from ratchet.agent.seed import seed_harness
 from ratchet.agent.worker import run_case
 from ratchet.canonical import canonical_json
@@ -38,11 +38,10 @@ from ratchet.improve.loop import frozen_suite_digest
 from ratchet.improve.overfit import training_literals
 from ratchet.improve.receipt import Signer, receipt
 from ratchet.improve.replay import WalkCache, replay
-from ratchet.improve.run import SeededTransport
 from ratchet.improve.run_v3 import rebuild
 from ratchet.improve.sandbox import SandboxRunner
 from ratchet.improve.worldsim import WorldSimulator
-from ratchet.store import Store
+from ratchet.store.atlas import Store
 
 RULING_2 = {"name": "ruling-2", "evaluator": "deterministic"}
 
