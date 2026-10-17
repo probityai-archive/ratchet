@@ -48,11 +48,11 @@ wheels = [
 
 [[package]]
 name = "agent-evidence-vectors"
-version = "0.17.9"
+version = "0.19.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0e/5d/3496e0e87a05f83f6bc869f138011504647c901dd6085fef10acd676acb1/agent_evidence_vectors-0.17.9.tar.gz", hash = "sha256:47d39ceb64352cafab6307b491fa02d0f73ee86d0c3b1d268c523bd0970c086d", size = 1541505, upload-time = "2026-10-12T02:38:33.029Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ce/5c/05f746a62b698277e0b67f1c2985739629a196add08be7e6544cf4f538a0/agent_evidence_vectors-0.19.0.tar.gz", hash = "sha256:092fc2020fce0d484b0a8a4bf62274b69c7faf36d30a479d746814ae8a41ebd3", size = 1945075, upload-time = "2026-10-17T01:18:55.951Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/53/e6/9825a959cf7accdceb0889313f88afc331bcb99b293312480e2ca9efad01/agent_evidence_vectors-0.17.9-py3-none-any.whl", hash = "sha256:5daef9fd1bcc7547eb8e991845edded75e2d22aeba256ac7cfe69ee9763ca150", size = 2952393, upload-time = "2026-10-12T02:38:31.36Z" },
+    { url = "https://files.pythonhosted.org/packages/10/49/258a703bd178d7d3d3a4ec117e274667c50bc30cb5235a9dc75f32926e6b/agent_evidence_vectors-0.19.0-py3-none-any.whl", hash = "sha256:244983c959490f54ab2bfd09f30e7b98ac69ab9def770c264b4ef7b0fc911d48", size = 3960872, upload-time = "2026-10-17T01:18:53.951Z" },
 ]
 
 [[package]]
@@ -4047,7 +4047,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agent-evidence-vectors", specifier = "==0.17.9" },
+    { name = "agent-evidence-vectors", specifier = "==0.19.0" },
     { name = "agentdojo", marker = "extra == 'bench'", specifier = "==0.1.35" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13' and extra == 'bench'", specifier = "==0.2.2" },
     { name = "cryptography", specifier = ">=44" },
@@ -4055,7 +4055,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "litellm", marker = "extra == 'bench'", specifier = "==1.102.1" },
     { name = "probity-ratchet-cases", editable = "probity-ratchet-cases" },
-    { name = "probity-verify", specifier = "==0.1.0" },
+    { name = "probity-verify", specifier = "==0.1.1" },
     { name = "probityai", git = "https://github.com/probityai/jcs-admit?subdirectory=python&rev=58a48b2f33b55cafb72de9f187f0fa53eed74d95" },
     { name = "pymongo", marker = "extra == 'atlas'", specifier = ">=4.10" },
     { name = "pymongo", marker = "extra == 'bench'", specifier = ">=4.10" },
@@ -4092,14 +4092,14 @@ provides-extras = ["agentdojo"]
 
 [[package]]
 name = "probity-verify"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7f/af/a4744e15f2af100f8b349257399898d2c1326ae6fa36273a73813c69f75a/probity_verify-0.1.0.tar.gz", hash = "sha256:1c54e5b6bff07c5df1cf5b129000d49d1fbe549e324fc08bf84772df35749b5b", size = 75309, upload-time = "2026-10-11T23:34:10.971Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/58/53dc019ccfbbca461de6b6c090a2414eb429e64c188059cef09c02972c64/probity_verify-0.1.1.tar.gz", hash = "sha256:ed745e2d5b07beaae5993399b1d551062c209efa5df8ae5961b39bf2d6ed3d16", size = 256932, upload-time = "2026-10-15T22:38:21.267Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/67/ab81b8b47723385c5d464fb582db56dd18aa7164ea45a2f69a21e5c4811c/probity_verify-0.1.0-py3-none-any.whl", hash = "sha256:18e0f99fb21701cd2d5eb312d99700d7cf800e8cdf9dc8e5d3608bc315cf1453", size = 55085, upload-time = "2026-10-11T23:34:09.03Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/57/159e958d57a093d3aa99e363cd470d10cc614b4ffbdf694eb52cb200d3fe/probity_verify-0.1.1-py3-none-any.whl", hash = "sha256:e5788644f64d4faf73d999f9b8371f761141493403f642659ba0ad36a15ef6cf", size = 59833, upload-time = "2026-10-15T22:37:15.112Z" },
 ]
 
 [[package]]

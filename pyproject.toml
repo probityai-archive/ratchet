@@ -10,8 +10,8 @@ dependencies = [
     "cryptography>=44",
     "probityai==0.1.0",
     "rich>=15.0.0",
-    "probity-verify==0.1.0",
-    "agent-evidence-vectors==0.17.9",
+    "probity-verify==0.1.1",
+    "agent-evidence-vectors==0.19.0",
     "probity-ratchet-cases==0.2.0",
 ]
 
