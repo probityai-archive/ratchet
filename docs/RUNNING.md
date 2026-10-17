@@ -21,7 +21,7 @@ guard rather than run one unconfined.
 To read what the demo stored, keep one container running and run each command in it:
 
 ```sh
-docker run -d --rm --name ratchet-demo ratchet-demo:dev        # starts the store (about 20 s)
+docker run -d --rm --name ratchet-demo ratchet-demo:dev        # starts the store (10 s on a CI runner)
 docker exec ratchet-demo ratchet demo double-refund                     # one admission end to end; prints the ids below
 docker exec ratchet-demo ratchet show decision 13881cee67fe     # the bad fix (block refunds of 50.00 or more): REJECTED
 docker exec ratchet-demo ratchet show decision ea3bd812059a     # the good fix (check for an existing refund): ADMITTED
