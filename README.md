@@ -51,6 +51,7 @@ Version 0.1.2, built on 2026-10-11 at the MongoDB harness hackathon. The suite, 
 |---|---|
 | [Running](docs/RUNNING.md) | Local Atlas, environment and every command |
 | [Admission rule](docs/ADMISSION.md) | The gates in plain words |
+| [k-session rule](docs/SESSIONS.md) | The replicated rule, runner and offline check |
 | [Architecture](docs/ARCHITECTURE.md) | Packages, guard sandbox, storage |
 | [Verifying a decision](docs/VERIFY.md) | Check a receipt offline |
 | [Results](docs/RESULTS.md) | Every measured result and its records |
