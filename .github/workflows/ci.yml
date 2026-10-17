@@ -42,7 +42,8 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: uv sync
       - run: uv run python examples/refusal-v3-cell/verify.py | tee refusal.out
-      - run: grep -qx 'decision verified, candidate refused, reason: identity controls breached' refusal.out
+      - run: |
+          grep -qx 'decision verified, candidate refused, reason: identity controls breached' refusal.out
 
   # The case suite on its own: built as a wheel and tested from a clean environment on the oldest and a
   # current supported Python, so nothing in the harness's workspace can hide a missing file or dependency.
