@@ -11,9 +11,11 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from ratchet.canonical import canonical_json
 from ratchet.improve.receipt import Signer
 from ratchet.verify import DEFAULT_GATES
+from ratchet.verify.adapter import AUTHENTICATED_ONLY
 from ratchet.verify.cli import main
 
-from .helpers import HARNESSES, RECOMPUTED, REPORTS, payload, sign
+from . import runs_scenario
+from .helpers import HARNESSES, RECOMPUTED, REPORTS, RUN_RECORD_ITEMS, payload, sign
 
 
 def pem(signer: Signer) -> bytes:
@@ -50,16 +52,47 @@ def run(files: dict[str, Path], *extra: str) -> int:
     return main([str(files["receipt"]), "--key", str(files["key"]), *extra])
 
 
-def test_fully_supplied_receipt_exits_zero_and_lists_both_kinds(
+def test_gate_evidence_without_run_records_exits_zero_and_lists_both_kinds(
     files: dict[str, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code = run(files, *evidence_args(files), "--require-reports", "--require-complete", "--require-admitted")
+    code = run(files, *evidence_args(files), "--require-reports", "--require-admitted")
     out = capsys.readouterr().out
     assert code == 0
     assert "admitted; 5 of 5 named reports checked" in out
-    assert "every recomputable item recomputed" in out
-    assert "RECOMPUTED (10 of 10)" in out and "AUTHENTICATED ONLY (not re-derived)" in out
-    assert "NOT SUPPLIED" not in out
+    assert f"RECOMPUTED (10 of {10 + len(RUN_RECORD_ITEMS)})" in out
+    assert f"NOT SUPPLIED: {', '.join(RUN_RECORD_ITEMS)}" in out
+    assert "AUTHENTICATED ONLY (not re-derived)" in out
+    assert run(files, *evidence_args(files), "--require-complete") == 1
+
+
+def scenario_args(d: Path, signer: Signer) -> list[str]:
+    """A receipt over real runs, with every report, harness and trace file it names."""
+    s = runs_scenario.scenario()
+    receipt = d / "scenario.json"
+    receipt.write_bytes(sign(runs_scenario.body_for(s), signer))
+    key = d / "k.pub"
+    key.write_bytes(pem(signer))
+    args = [str(receipt), "--key", str(key)]
+    for name, doc in s.reports.items():
+        args += ["--report", f"{name}={dump(d / f'{name}.json', doc)}"]
+        lines = d / f"{name}.jsonl"
+        lines.write_text("".join(json.dumps(t) + "\n" for t in s.traces[name]))
+        args += ["--traces", f"{name}={lines}"]
+    for role, doc in s.harnesses.items():
+        args += ["--harness", f"{role}={dump(d / f'{role}.json', doc)}"]
+    for name, doc in runs_scenario.RECOMPUTED.items():
+        args += ["--recomputed", f"{name}={dump(d / f'{name}.json', doc)}"]
+    return args
+
+
+def test_a_receipt_over_real_runs_with_its_traces_recomputes_every_item(
+    tmp_path: Path, signer: Signer, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main([*scenario_args(tmp_path, signer), "--require-reports", "--require-complete"])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "every recomputable item recomputed" in out and "NOT SUPPLIED" not in out
+    assert "AUTHENTICATED ONLY (not re-derived): model_turns_as_recorded" in out
 
 
 def test_missing_evidence_is_never_printed_as_recomputed(
@@ -79,8 +112,14 @@ def test_require_complete_fails_when_evidence_is_missing(files: dict[str, Path])
 def test_json_output(files: dict[str, Path], capsys: pytest.CaptureFixture[str]) -> None:
     assert run(files, *evidence_args(files), "--json") == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["ok"] is True and out["admission_verified"] is True and out["recomputation_complete"] is True
-    assert out["authenticated_only"][0] == "fresh_model_execution"
+    assert out["ok"] is True and out["admission_verified"] is True and out["recomputation_complete"] is False
+    assert out["authenticated_only"] == list(AUTHENTICATED_ONLY)
+
+
+def test_traces_flag_needs_name_and_file(files: dict[str, Path], capsys: pytest.CaptureFixture[str]) -> None:
+    assert run(files, "--traces", "no-equals-sign") == 2
+    assert run(files, "--traces", f"x={files['dir'] / 'absent.jsonl'}") == 2
+    assert capsys.readouterr().err.count("ratchet-verify:") == 2
 
 
 def test_unverifiable_receipt_exits_one(files: dict[str, Path], capsys: pytest.CaptureFixture[str]) -> None:

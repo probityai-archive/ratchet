@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ratchet.verify import dsse, recompute
+from ratchet.verify import dsse, recompute, runs
 
 HUMAN_APPROVAL_TYPE = "application/vnd.ratchet.human-approval+json"
 EXCEPTION_PREFIX = "authority grew under"
@@ -43,6 +43,7 @@ class Ctx:
     human_keys: dict[str, Any]
     require_reports: bool
     sessions: dict[str, bytes] = field(default_factory=dict)  # a k-session bundle's files, by file name
+    traces: dict[str, bytes] = field(default_factory=dict)  # JSON lines of trace documents, by report name
     items: list[dict[str, Any]] = field(default_factory=list)
     scope: dict[str, Any] = field(default_factory=dict)
 
@@ -255,3 +256,70 @@ def recompute_overfit(ctx: Ctx) -> None:
     if not isinstance(hits, list):
         raise Refuse("contradicted", "evidence_not_json:recomputed:overfit_lint", "gate:overfit_lint")
     _agree(ctx, "overfit_lint", recompute.Gate(not hits, {"hits": len(hits)}))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Run records: the claims that used to rest on the evaluator's signature alone
+# ---------------------------------------------------------------------------------------------------------
+
+
+def _traces(ctx: Ctx, name: str) -> dict[str, dict[str, Any]] | None:
+    """The trace documents supplied for one report, by run id; None when none were supplied."""
+    raw = ctx.traces.get(name)
+    if raw is None:
+        return None
+    label = f"traces:{name}"
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise Refuse("contradicted", f"evidence_not_json:{label}", label) from exc
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            doc = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise Refuse("contradicted", f"evidence_not_json:{label}", label) from exc
+        if not isinstance(doc, dict) or not isinstance(doc.get("run_id"), str) or doc["run_id"] in out:
+            raise Refuse("contradicted", f"evidence_not_json:{label}", label)
+        out[doc["run_id"]] = doc
+    return out
+
+
+def _run_reports(ctx: Ctx, item: str) -> list[runs.Report] | None:
+    """The evaluation reports with their traces, or None after recording `item` as not supplied: a report
+    is missing, or it was written before reports carried run records."""
+    names = _eval_report_names(ctx)
+    missing = [n for n in names if n not in ctx.reports]
+    if missing:
+        ctx.item(item, "not_supplied", needs=[f"report:{n}" for n in missing])
+        return None
+    reports = [runs.Report(n, _load(ctx.reports[n], f"report:{n}"), _traces(ctx, n)) for n in names]
+    legacy = [r.name for r in reports if not runs.has_runs(r)]
+    if legacy:
+        ctx.item(item, "not_supplied", needs=[f"run records in report:{n}" for n in legacy])
+        return None
+    return reports
+
+
+def _records(item: str, check: Any, *args: Any) -> dict[str, Any]:
+    try:
+        result: dict[str, Any] = check(*args)
+    except runs.RecordError as exc:
+        raise Refuse(exc.decision, exc.reason, item) from exc
+    return result
+
+
+MODEL_CALLS = "model_call_records"
+
+
+def recompute_model_calls(ctx: Ctx) -> None:
+    """Fresh model execution, as far as records show it: every counted call committed once, in its own run,
+    uncached, and equal to the supplied trace. `partial` while a run's trace is not supplied."""
+    reports = _run_reports(ctx, MODEL_CALLS)
+    if reports is None:
+        return
+    counts = _records(MODEL_CALLS, runs.check_model_calls, reports)
+    status = "recomputed" if counts["traces_checked"] == counts["runs"] else "partial"
+    ctx.item(MODEL_CALLS, status, **counts)

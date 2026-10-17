@@ -32,6 +32,13 @@ def _parser() -> argparse.ArgumentParser:
         metavar="NAME=FILE",
         help="replay:<guard> or overfit_lint",
     )
+    add(
+        "--traces",
+        action="append",
+        default=[],
+        metavar="NAME=FILE",
+        help="JSON lines of the trace documents of the evaluation report NAME",
+    )
     add("--approval", type=Path, help="human approval envelope for an authority exception")
     add(
         "--sessions",
@@ -56,6 +63,16 @@ def _load(specs: list[str], flag: str) -> dict[str, Any]:
     return docs
 
 
+def _files(specs: list[str], flag: str) -> dict[str, bytes]:
+    out: dict[str, bytes] = {}
+    for spec in specs:
+        name, sep, file = spec.partition("=")
+        if not sep or not name or not file:
+            raise ValueError(f"{flag} expects NAME=FILE, got {spec!r}")
+        out[name] = Path(file).read_bytes()
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -64,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         reports = _load(args.report, "--report")
         harnesses = _load(args.harness, "--harness")
         recomputed = _load(args.recomputed, "--recomputed")
+        traces = _files(args.traces, "--traces")
         approval = args.approval.read_bytes() if args.approval else None
         envelope = args.receipt.read_bytes()
     except (TrustedKeyError, OSError, ValueError) as exc:
@@ -83,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         approval=approval,
         options=options,
         sessions=args.sessions,
+        traces=traces,
     )
     if args.json:
         print(json.dumps(result.to_dict(), sort_keys=True, indent=2))

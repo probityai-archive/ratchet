@@ -1,13 +1,14 @@
 """Gather, from the store, the evidence an admission receipt names, so the verifier can recompute from it.
 
-Three kinds, each loaded only when the store holds exactly what the receipt describes:
+Four kinds, each loaded only when the store holds exactly what the receipt describes:
 
 - stored reports, found by the digest the receipt names for them (a stored document carries bookkeeping
   fields beside the report, so each document is reduced to the report's own fields and hashed);
 - the parent and candidate harness documents (a candidate that was never stored is rebuilt from its decision
   and used only when the rebuilt digest equals the one the receipt signed);
 - results recomputed here from recorded inputs: every added guard replayed over the recorded traces of its
-  generation, and the overfitting screen over that generation's training traces.
+  generation, and the overfitting screen over that generation's training traces;
+- the trace of every run an evaluation report commits (its `runs`), for the run-record checks.
 
 Anything that cannot be loaded is simply absent. The verifier prints absent evidence as not supplied.
 """
@@ -39,6 +40,7 @@ class Evidence:
     reports: dict[str, Doc] = field(default_factory=dict)
     harnesses: dict[str, Doc] = field(default_factory=dict)
     recomputed: dict[str, Doc] = field(default_factory=dict)
+    traces: dict[str, list[Doc]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
 
@@ -65,6 +67,20 @@ def stored_reports(store: ViewStore, canonicalization: str | None = CANONICALIZA
             continue
         found[_digest(report, canonicalization)] = report
     return found
+
+
+def report_traces(store: ViewStore, reports: Mapping[str, Mapping[str, Any]]) -> dict[str, list[Doc]]:
+    """By report name, the stored trace of every run the report commits; a run the store lacks is left out,
+    and the verifier then reads that report's run records as partial."""
+    out: dict[str, list[Doc]] = {}
+    for name, report in reports.items():
+        runs = report.get("runs")
+        if not isinstance(runs, list):
+            continue
+        keys = [(str(r.get("run_id")), str(r.get("case_id"))) for r in runs if isinstance(r, dict)]
+        found = (store.get_trace(run_id, case_id) for run_id, case_id in keys)
+        out[name] = [asdict(t) for t in found if t is not None]
+    return out
 
 
 def harness_doc(h: Harness) -> Doc:
@@ -181,6 +197,7 @@ def collect(
     for name, digest in (doc.get("report_digests") or {}).items():
         if digest in by_digest:
             out.reports[name] = by_digest[digest]
+    out.traces = report_traces(store, out.reports)
     parent = store.get_harness(str(doc.get("parent")))
     if parent is None:
         out.notes.append("the parent harness is not in the store")

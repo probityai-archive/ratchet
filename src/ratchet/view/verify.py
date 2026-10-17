@@ -113,6 +113,7 @@ def verify_decision(
         harnesses=evidence.harnesses,
         recomputed=evidence.recomputed,
         options=options,
+        traces=evidence.traces,
     )
     detail = [*res.detail, f"recomputation verdict: {report.decision} {report.reason}"]
     if not report.ok:

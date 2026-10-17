@@ -13,6 +13,7 @@ from ratchet.improve.receipt import HUMAN_APPROVAL_TYPE, Signer
 from ratchet.types import Guard, Harness
 from ratchet.verify import DEFAULT_GATES, Options, report_digest, verify_decision
 from ratchet.verify import recompute as rc
+from ratchet.verify.adapter import AUTHENTICATED_ONLY
 
 from .helpers import (
     ALWAYS,
@@ -24,6 +25,7 @@ from .helpers import (
     RECOMPUTED,
     REPLAY_REPORT,
     REPORTS,
+    RUN_RECORD_ITEMS,
     SNAPSHOT,
     eval_report,
     payload,
@@ -31,7 +33,8 @@ from .helpers import (
     sign,
 )
 
-AUTHENTICATED = ("fresh_model_execution", "capture_fidelity", "sandbox_enforcement", "hidden_grades")
+AUTHENTICATED = AUTHENTICATED_ONLY
+GATE_ITEMS = 10  # signature, payload, admission flag, report digests and the six gates
 
 
 def run(
@@ -69,6 +72,16 @@ def status(report: Any) -> dict[str, str]:
     return {i["id"]: i["status"] for i in report.recomputed}
 
 
+def gates_complete(report: Any) -> bool:
+    """Every item but the run records recomputed. These reports carry no run records, so those items are
+    not supplied and the recomputation as a whole is incomplete."""
+    st = status(report)
+    rest = {k: v for k, v in st.items() if k not in RUN_RECORD_ITEMS}
+    runs = {st.get(k) for k in RUN_RECORD_ITEMS}
+    complete = bool(report.recomputation_complete)
+    return set(rest.values()) == {"recomputed"} and runs == {"not_supplied"} and not complete
+
+
 def failing(check_name: str, evidence: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = payload()["checks"]
     for c in checks:
@@ -81,14 +94,14 @@ def failing(check_name: str, evidence: dict[str, Any] | None = None) -> list[dic
 # --- what is recomputed, what is not -----------------------------------------------------------------
 
 
-def test_everything_supplied_recomputes_every_item_and_lists_what_is_only_authenticated(
+def test_everything_supplied_recomputes_every_gate_and_lists_what_is_only_authenticated(
     signer: Signer,
 ) -> None:
     r = run(signer)
-    assert (r.ok, r.recomputation_complete) == (True, True)
-    assert set(status(r).values()) == {"recomputed"} and len(r.recomputed) == 10
+    assert r.ok and gates_complete(r)
+    assert len(r.recomputed) == GATE_ITEMS + len(RUN_RECORD_ITEMS)
     assert r.authenticated_only == AUTHENTICATED
-    assert "NOT SUPPLIED" not in r.summary and "AUTHENTICATED ONLY" in r.summary
+    assert f"NOT SUPPLIED: {', '.join(RUN_RECORD_ITEMS)}" in r.summary and "AUTHENTICATED ONLY" in r.summary
 
 
 def test_no_evidence_prints_as_incomplete_never_as_recomputed(signer: Signer) -> None:
@@ -105,6 +118,7 @@ def test_no_evidence_prints_as_incomplete_never_as_recomputed(signer: Signer) ->
         "gate:authority": "not_supplied",
         "gate:replay": "not_supplied",
         "gate:overfit_lint": "not_supplied",
+        **dict.fromkeys(RUN_RECORD_ITEMS, "not_supplied"),
     }
     assert "recomputation INCOMPLETE" in r.summary
     assert "every recomputable item recomputed" not in r.summary
@@ -137,7 +151,8 @@ def test_require_complete_demands_every_recomputable_item(signer: Signer) -> Non
         "recomputation_incomplete:report_digests",
     )
     assert not r.recomputation_complete
-    assert run(signer, options=Options(require_complete=True)).ok
+    reports_without_run_records = run(signer, options=Options(require_complete=True))
+    assert reports_without_run_records.reason == f"recomputation_incomplete:{RUN_RECORD_ITEMS[0]}"
 
 
 # --- held-out gate -------------------------------------------------------------------------------------
@@ -178,7 +193,7 @@ def test_a_verified_rejection_agrees_with_failing_evidence(signer: Signer) -> No
     weak = eval_report("c", ALWAYS)
     reports = with_reports(candidate_run=weak, candidate_confirm_run=weak)
     r = run(signer, reports=reports, admitted=False, checks=failing("heldout"))
-    assert (r.ok, r.admitted, r.admission_verified, r.recomputation_complete) == (True, False, False, True)
+    assert (r.ok, r.admitted, r.admission_verified, gates_complete(r)) == (True, False, False, True)
 
 
 # --- a refusal made after the first candidate run (no confirming run C2) ------------------------------
@@ -207,10 +222,10 @@ def test_a_refusal_without_a_confirming_run_recomputes_every_gate_from_the_runs_
         admitted=False,
         checks=refused_after_c1("heldout", "no_regression", "benign_twins"),
     )
-    assert (r.ok, r.reason, r.recomputation_complete) == (True, "rejection_receipt_verified", True)
+    assert (r.ok, r.reason, gates_complete(r)) == (True, "rejection_receipt_verified", True)
     st = status(r)
     assert {st[f"gate:{g}"] for g in ("heldout", "no_regression", "benign_twins")} == {"recomputed"}
-    assert len(r.recomputed) == 10 and "NOT SUPPLIED" not in r.summary
+    assert len(r.recomputed) == GATE_ITEMS + len(RUN_RECORD_ITEMS)
     held = next(i for i in r.recomputed if i["id"] == "gate:heldout")["evidence"]
     assert held["confirm_run"] == "not run" and held["stable_recoveries"] == []
     assert held["stable_recoveries_c1"] == ["h1", "h2"] and held["protected_broken"] == ["b1", "b2", "h3"]
@@ -229,7 +244,7 @@ def test_without_a_confirming_run_the_held_out_gate_cannot_pass(signer: Signer) 
         checks=other_fail,
         recomputed={**RECOMPUTED, "overfit_lint": {"hits": [{"literal": "x"}]}},
     )
-    assert (r.ok, r.recomputation_complete) == (True, True)
+    assert (r.ok, gates_complete(r)) == (True, True)
 
 
 def test_a_refusal_after_c1_that_claims_a_failure_c1_does_not_show_is_contradicted(signer: Signer) -> None:
@@ -372,7 +387,7 @@ def test_authority_growth_covered_by_a_verified_human_approval(signer: Signer, o
         exceptions=["authority grew under approval by ana"],
         **decided(candidate),
     )
-    assert r.ok and r.recomputation_complete
+    assert r.ok and gates_complete(r)
     item = next(i for i in r.recomputed if i["id"] == "gate:authority")
     assert item["covered_by"] == "verified human approval"
 
@@ -543,7 +558,7 @@ def test_a_candidate_with_no_new_guard_has_nothing_to_replay(signer: Signer) -> 
         corpus_digests={},
         **decided(candidate),
     )
-    assert r.ok and r.recomputation_complete
+    assert r.ok and gates_complete(r)
     assert next(i for i in r.recomputed if i["id"] == "gate:replay")["guards"] == 0
 
 
@@ -598,6 +613,7 @@ def test_a_gate_the_consumer_does_not_require_is_not_recomputed(signer: Signer) 
         "admission_flag",
         "report_digests",
         "gate:heldout",
+        *RUN_RECORD_ITEMS,
     }
     assert DEFAULT_GATES[0] == "replay"
 

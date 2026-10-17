@@ -16,12 +16,13 @@ import time
 import uuid
 from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Literal, Protocol
 
 from ratchet_cases.types import Cost, Split, Trace
 
 from ratchet.types import Harness
+from ratchet.verify.runs import run_record
 
 Mode = Literal["FRESH", "RECORDED", "CACHED"]
 CaseKind = str  # "trap", "benign_twin" or "must_succeed", as the case suite labels them
@@ -128,6 +129,10 @@ class EvalReport:
             wall_s=round(sum(c.wall_s for c in rs), 3),
         )
 
+    def run_records(self) -> list[dict[str, Any]]:
+        """What the report commits about every run it holds a trace for (`ratchet.verify.runs`)."""
+        return sorted((run_record(asdict(t)) for t in self.traces), key=lambda r: str(r["run_id"]))
+
     def to_payload(self) -> dict[str, Any]:
         c = self.cost()
         return {
@@ -169,6 +174,7 @@ class EvalReport:
                 }
                 for r in self.results
             ],
+            "runs": self.run_records(),
         }
 
 
