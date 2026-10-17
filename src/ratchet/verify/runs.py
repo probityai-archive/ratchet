@@ -52,7 +52,9 @@ def model_call_digests(trace: Mapping[str, Any]) -> list[str]:
 
 
 def cached_calls(trace: Mapping[str, Any]) -> int:
-    return sum(1 for e in _events(trace) if e.get("kind") == MODEL and (e.get("payload") or {}).get("cached"))
+    return sum(
+        1 for e in _events(trace) if e.get("kind") == MODEL and (e.get("payload") or {}).get("cached") is True
+    )
 
 
 def run_record(trace: Mapping[str, Any]) -> dict[str, Any]:
@@ -165,3 +167,89 @@ def check_model_calls(reports: Sequence[Report]) -> dict[str, Any]:
                 raise RecordError("contradicted", f"cached_calls_not_the_trace:{report.name}:{run_id}")
             traced += 1
     return {"runs": runs_total, "model_calls": len(seen_calls), "traces_checked": traced}
+
+
+def _payload(event: Mapping[str, Any]) -> Mapping[str, Any]:
+    payload = event.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _requested(events: Sequence[Mapping[str, Any]]) -> bool:
+    """Every call the run acted on (a tool call, or a procedure the model selected) was asked for by the
+    model turn before it."""
+    asked: set[str] = set()
+    for e in events:
+        p = _payload(e)
+        if e.get("kind") == MODEL:
+            asked = {str(c.get("call_id")) for c in p.get("tool_calls") or [] if isinstance(c, dict)}
+        elif e.get("kind") == "tool_call":
+            if str((p.get("call") or {}).get("call_id")) not in asked:
+                return False
+        elif (
+            e.get("kind") == "procedure" and p.get("how") == "selected" and str(p.get("call_id")) not in asked
+        ):
+            return False
+    return True
+
+
+def _chain_problem(trace: Mapping[str, Any], entry: Mapping[str, Any], harness_version: Any) -> str | None:
+    """The first way the committed trace is not one well-formed run of this report, or None."""
+    events = _events(trace)
+    if trace.get("case_id") != entry["case_id"]:
+        return "case_id"
+    if trace.get("harness_version") != harness_version:
+        return "harness_version"
+    finals = [i for i, e in enumerate(events) if e.get("kind") == "final"]
+    if any(e.get("seq") != i for i, e in enumerate(events)) or finals != [len(events) - 1]:
+        return "events"
+    if not _requested(events):
+        return "unrequested_call"
+    return None
+
+
+def _row_problem(row: Mapping[str, Any], trace: Mapping[str, Any]) -> str | None:
+    """The first field of a result row that its trace does not yield, or None."""
+    events = _events(trace)
+    raw = trace.get("outcome")
+    outcome: Mapping[str, Any] = raw if isinstance(raw, dict) else {}
+    hits = sum(
+        1 for e in events if e.get("kind") == "guard_block" and _payload(e).get("source") != "arguments"
+    )
+    calls = sum(1 for e in events if e.get("kind") == MODEL)
+    derived = {
+        "passed": outcome.get("passed"),
+        "reasons": outcome.get("reasons"),
+        "interventions": hits,
+        "fresh_calls": calls - cached_calls(trace),
+        "cached_calls": cached_calls(trace),
+    }
+    return next((k for k, v in derived.items() if row.get(k, 0 if k.endswith("calls") else None) != v), None)
+
+
+def check_record_chain(reports: Sequence[Report]) -> dict[str, Any]:
+    """The traces are the committed records of the runs, and the reports are derived from them.
+
+    Each supplied trace digests to the trace its report commits; it is a run of the report's harness on the
+    committed case; its events are numbered in order and end with one final event; every tool call and
+    selected procedure answers a call the model turn before it asked for; and the result row of that run
+    is what the trace yields: outcome, reasons, harness interventions, fresh and cached calls. A trace for an
+    uncommitted run is a contradiction. Returns the counts it checked."""
+    total = checked = 0
+    for report in reports:
+        runs = runs_of(report)
+        total += len(runs)
+        rows = {r.get("run_id"): r for r in rows_of(report) if r.get("run_id") is not None}
+        for run_id, trace in (report.traces or {}).items():
+            entry = runs.get(run_id)
+            if entry is None:
+                raise RecordError("contradicted", f"trace_not_committed:{report.name}:{run_id}")
+            if digest(trace) != entry["trace_digest"]:
+                raise RecordError("contradicted", f"trace_digest_mismatch:{report.name}:{run_id}")
+            case_id = entry["case_id"]
+            problem = _chain_problem(trace, entry, report.doc.get("harness_version"))
+            if problem is None and run_id in rows:
+                problem = _row_problem(rows[run_id], trace)
+            if problem is not None:
+                raise RecordError("contradicted", f"record_chain_mismatch:{report.name}:{case_id}:{problem}")
+            checked += 1
+    return {"runs": total, "traces_checked": checked}

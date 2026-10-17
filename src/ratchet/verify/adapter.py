@@ -75,7 +75,6 @@ AUTHENTICATED_ONLY_LIMITS = {
         "chat-completions response carries no signature of its provider, so only the referee's key says a "
         "model, not the referee, wrote the turns its traces record"
     ),
-    "capture_fidelity": "that the traces and reports capture the runs faithfully",
     "sandbox_enforcement": "that the harness's tool allowlist and guards were enforced",
     "hidden_grades": "that the held-out grades are the grader's verdicts",
 }
@@ -310,6 +309,7 @@ def _pipeline(ctx: evidence.Ctx) -> None:
     evidence.recompute_replay(ctx)
     evidence.recompute_overfit(ctx)
     evidence.recompute_model_calls(ctx)
+    evidence.recompute_record_chain(ctx)
 
 
 def _run_evidence(v: _Verdict, ctx: evidence.Ctx, require_complete: bool) -> dict[str, Any]:

@@ -323,3 +323,21 @@ def recompute_model_calls(ctx: Ctx) -> None:
     counts = _records(MODEL_CALLS, runs.check_model_calls, reports)
     status = "recomputed" if counts["traces_checked"] == counts["runs"] else "partial"
     ctx.item(MODEL_CALLS, status, **counts)
+
+
+RECORD_CHAIN = "record_chain"
+
+
+def recompute_record_chain(ctx: Ctx) -> None:
+    """Capture fidelity, as far as records show it: the supplied traces are the committed ones, each a
+    well-formed run, and each report row is what its trace yields. `partial` while a committed run's trace
+    is not supplied; not supplied when no trace is."""
+    reports = _run_reports(ctx, RECORD_CHAIN)
+    if reports is None:
+        return
+    if all(r.traces is None for r in reports):
+        ctx.item(RECORD_CHAIN, "not_supplied", needs=[f"traces:{r.name}" for r in reports])
+        return
+    counts = _records(RECORD_CHAIN, runs.check_record_chain, reports)
+    status = "recomputed" if counts["traces_checked"] == counts["runs"] else "partial"
+    ctx.item(RECORD_CHAIN, status, **counts)
