@@ -2,6 +2,16 @@
 
 Three versions of the improver's instructions (the seed, the loop's own challenger and the text the instruction search returned) proposing harness changes for the same frozen failure clusters, with every candidate judged by the admission rule.
 
+> **Note, 2026-10-17.** These runs predate the referee path. `level2-run3` and the earlier runs ran the
+> parent's and every candidate's held-out runs and signed inside `ratchet.improve.instruction_search`;
+> every number below comes from those runs and stands as recorded. The comparison now holds training cases
+> only and hands each candidate's training run to the shared referee (`ratchet.improve.referee`), which
+> runs the held-out side, admits, signs and returns counts. On that path the refusal and C1-flip tables
+> below are sums of the referee's verdict counts, and which held-out cases flipped for each decision is in
+> the referee-signed results file `<out>-results/<experiment>.dsse`, checked with
+> `python -m ratchet.verify.results <out>-results/<experiment>.dsse --case-suite`. The runs on this page
+> wrote no results file, and their endpoints and databases cannot be re-run here.
+
 Run of record `level2-run3`, 2026-10-12, module `ratchet.improve.instruction_search`, wall 8,963.9 s. Its
 decisions were signed from 05:57:18 to 08:17:32 UTC. It reruns `level2-run2b` with the same settings after
 the guard-runtime fix (pull request #2, merge `0bea97e`), because `level2-run2b`'s guard comparison is void

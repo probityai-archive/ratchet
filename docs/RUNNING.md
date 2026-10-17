@@ -96,6 +96,17 @@ uv run ratchet live                                 # follow the change streams
 uv run ratchet report -o ratchet-report.html        # one static page: lineage, replay matrix, results
 ```
 
+The policy drivers run through the referee and take the worker's endpoint configuration as a JSON file
+(`ratchet.improve.endpoints`: `endpoints`, `model`, `temperature`, and `seed` for ruling 2 or `seed_base` for
+v3); the referee refuses a file whose digest is not the one the driver names:
+
+```sh
+uv run python -m ratchet.improve.run_det --endpoints-file det.json --candidate DB:VERSION --out det.json
+uv run python -m ratchet.improve.run_v3 --endpoints-file v3.json --cases A,B --candidate DB:VERSION --out v3.json
+uv run --extra gepa python -m ratchet.improve.instruction_search --endpoints-file worker.json --out l2.json
+python -m ratchet.verify.results det-results/det.dsse --case-suite   # the referee's per-case tables
+```
+
 `ratchet replay` takes candidate versions or ids, reveals its matrix row by row on a terminal, and prints
 `N traces, X s, 0 model calls` under it. `ratchet run --split all` runs train and held-out; the untouched audit
 split runs only when named.
