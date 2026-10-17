@@ -41,4 +41,4 @@ def test_the_reviewer_check_requires_every_check_recomputed_on_both_receipts() -
     ]
     lines = check.splitlines()
     assert len(verifies) == 2
-    assert all(lines[i + 1] == 'also "RECOMPUTED \\\\(10 of 10\\\\)"' for i in verifies)
+    assert all(lines[i + 1] == 'also "RECOMPUTED \\\\(14 of 14\\\\)"' for i in verifies)

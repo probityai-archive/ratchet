@@ -57,9 +57,9 @@ step 0 "REJECTED +dfdfffeeb388 -> $BAD" docker exec "$NAME" ratchet show decisio
 step 0 "ADMITTED +dfdfffeeb388 -> $GOOD" docker exec "$NAME" ratchet show decision "$GOOD"
 step 0 "VERDICT +REJECTED +ADMITTED" docker exec "$NAME" ratchet replay "$BAD" "$GOOD"
 step 0 "VERIFIED +dfdfffeeb388->$GOOD" docker exec "$NAME" ratchet verify "$GOOD" --pubkey-file "$PEM"
-also "RECOMPUTED \\(10 of 10\\)"
+also "RECOMPUTED \\(14 of 14\\)"
 step 0 "VERIFIED +dfdfffeeb388->$BAD" docker exec "$NAME" ratchet verify "$BAD" --pubkey-file "$PEM"
-also "RECOMPUTED \\(10 of 10\\)"
+also "RECOMPUTED \\(14 of 14\\)"
 step 1 "INVALID +dfdfffeeb388->$GOOD" docker exec "$NAME" ratchet verify "$GOOD"
 
 if [ "$failures" -ne 0 ]; then
