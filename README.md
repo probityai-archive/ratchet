@@ -1,3 +1,6 @@
+<!-- moved-to-monorepo -->
+> **Moved to [github.com/probityai/probity/packages/ratchet](https://github.com/probityai/probity/tree/main/packages/ratchet).** This repository is archived. Its tags, releases, Actions and Pages keep working.
+
 # Ratchet
 
 Ratchet turns observed agent failures into tested, signed guard changes.
