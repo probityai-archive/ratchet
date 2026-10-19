@@ -1,5 +1,5 @@
 <!-- moved-to-monorepo -->
-> **Moved to [github.com/probityai/probity/packages/ratchet](https://github.com/probityai/probity/tree/main/packages/ratchet).** This repository is archived. Its tags, releases, Actions and Pages keep working.
+> **Moved to [probityai/probity/packages/ratchet](https://github.com/probityai/probity/tree/main/packages/ratchet). Star and follow it there.** This repository is archived; its tags and releases keep working.
 
 # Ratchet
 
